@@ -27,17 +27,18 @@ That save goes through ``save_env_off_loop`` as well; only the window itself is
 registered on the loop.
 ``/experiments/hparams/update`` is the matching write path for an existing pane
 — replace its selection or re-run the stored one — since the generic
-``/update`` endpoint only understands plot-shaped windows.
+``/update`` endpoint only understands plot-shaped windows. It reads and saves
+off the loop the same way.
 
 That update path is also how a pane refreshes itself: :func:`make_live_queue`
 builds the queue that logging a run feeds, and drains it back into this module's
 own update handler, so a live refresh and a hand-written one are the same code.
+A drain is a coroutine on the server's loop that awaits each rebuild in turn.
 """
 
 import logging
 
 import tornado.escape
-import tornado.ioloop
 import tornado.web
 
 from visdom.experiments import (
@@ -53,6 +54,7 @@ from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.utils.server_utils import (
     LazyEnvData,
     check_auth,
+    ensure_env_loaded,
     ensure_env_present,
     env_is_deleting,
     extract_eid,
@@ -60,6 +62,7 @@ from visdom.utils.server_utils import (
     check_readonly_message,
     run_on_storage_executor,
     save_env_off_loop,
+    watch_env_deletes,
     window,
 )
 
@@ -171,6 +174,16 @@ class ExperimentHparamsHandler(BaseHandler):
     are flattened (:func:`~visdom.experiments.flatten_experiments`) into the
     window content and registered as a window (env state + broadcast); the reply
     is the created window id.
+
+    The selection is read on the storage worker, so the loop keeps serving
+    while it runs; the env the pane lands in is read before that and
+    materialised once it is back. A destination that changed in the meantime
+    -- deleted, deleted and recreated, or with a delete still on its way to
+    disk -- answers 400 rather than coming back as a new env holding the pane:
+    registering a window files its env under ``state`` and the save behind it
+    writes the file. An env that was never there to begin with is still
+    created, exactly as registering a window in an unknown env has always
+    done.
 
     Creating the pane writes a window into the env, so the endpoint is rejected
     with 403 while the server runs in readonly mode.
@@ -296,19 +309,13 @@ class ExperimentHparamsHandler(BaseHandler):
         return experiments
 
     @staticmethod
-    def _build_content(handler, spec):
-        """Select the runs ``spec`` names and flatten them into pane content."""
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
-        experiments = ExperimentHparamsHandler._select(store, spec)
-        return flatten_experiments([experiment.to_dict() for experiment in experiments])
-
-    @staticmethod
     async def _build_content_off_loop(handler, spec):
-        """:meth:`_build_content`, with its reads on the storage worker.
+        """Select the runs ``spec`` names and flatten them into pane content.
 
-        A query selection reads the metadata of every environment the store
-        knows, and an ``env_ids`` one a file per id; on the loop, either would
-        stall every other request for the whole of it.
+        The reads run on the storage worker: a query selection reads the
+        metadata of every environment the store knows, and an ``env_ids`` one a
+        file per id; on the loop, either would stall every other request for
+        the whole of it.
         """
         wanted = spec["env_ids"] if spec.get("mode") == "env_ids" else None
         return await run_on_storage_executor(
@@ -334,49 +341,58 @@ class ExperimentHparamsHandler(BaseHandler):
         # and saves it there. ``None`` means ``state`` held nothing under the
         # id, which is not the same as there being nothing to go stale: the
         # env may exist as a file the server has never materialised, and the
-        # delete of one of those is caught by ``env_is_deleting`` below rather
-        # than by this.
+        # delete of one of those is caught by the watch rather than by this.
         destination = handler.state.get(eid)
 
-        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
-
-        # the pane lands in an env the server may know only by its file, and
-        # registering a window reads that env; bringing it in first keeps the
-        # read on the worker -- ``ensure_env_present`` rather than
-        # ``ensure_env_loaded`` because an env the server has never
-        # materialised is exactly that case, and priming only what ``state``
-        # already tracks would leave ``register_window`` to file an empty env
-        # over a file full of windows. Nothing awaits between here and the
-        # snapshot the save takes, so the window saved is the window
-        # registered.
-        await ensure_env_present(handler, eid)
-        # a delete of this env on its way to disk is as much a changed
-        # destination as a replaced entry, and it is the only form the change
-        # takes when ``state`` held nothing to compare: the env is gone from
-        # ``state`` already and ``ensure_env_present`` refuses to file what it
-        # read back, so without this the window would be registered into a
-        # fresh env and saved -- queued behind the delete on the one storage
-        # worker, so landing after it and bringing the deleted env back.
-        if env_is_deleting(handler, eid) or (
-            destination is not None and handler.state.get(eid) is not destination
-        ):
-            # the eid stays out of the reason: it is echoed on the status line,
-            # which is latin-1 only, and eids are free-form unicode.
-            raise tornado.web.HTTPError(
-                400, reason="env the pane targets changed while it was built"
+        # the watch covers the delete this would otherwise miss: the one that
+        # is over before the check runs. ``env_is_deleting`` answers only while
+        # the worker still has it, so a selection that takes longer is told
+        # nothing when it resumes -- and with the env known only by its file
+        # there is no ``state`` entry to have changed identity either, so the
+        # window would be registered into a fresh env and saved, which is the
+        # deleted env back on disk carrying a pane. The two are asked together
+        # below: one for a delete that has landed, one for a delete still on
+        # its way.
+        with watch_env_deletes(handler, eid) as deleted_meanwhile:
+            content = await ExperimentHparamsHandler._build_content_off_loop(
+                handler, spec
             )
-        opts = dict(args.get("opts") or {})
-        opts.setdefault("title", "Hyperparameters")
-        p = window(
-            {
-                "data": [{"content": content, "type": "hparams"}],
-                "win": args.get("win"),
-                "opts": opts,
-            }
-        )
-        p["hparams"] = spec
-        register_window(handler, p, eid)
-        await save_env_off_loop(handler, eid)
+
+            # the pane lands in an env the server may know only by its file,
+            # and registering a window reads that env; bringing it in first
+            # keeps the read on the worker -- ``ensure_env_present`` rather
+            # than ``ensure_env_loaded`` because an env the server has never
+            # materialised is exactly that case, and priming only what
+            # ``state`` already tracks would leave ``register_window`` to file
+            # an empty env over a file full of windows. Nothing awaits between
+            # here and the snapshot the save takes, so the window saved is the
+            # window registered.
+            await ensure_env_present(handler, eid)
+            if (
+                deleted_meanwhile.deleted
+                or env_is_deleting(handler, eid)
+                or (
+                    destination is not None
+                    and handler.state.get(eid) is not destination
+                )
+            ):
+                # the eid stays out of the reason: it is echoed on the status
+                # line, which is latin-1 only, and eids are free-form unicode.
+                raise tornado.web.HTTPError(
+                    400, reason="env the pane targets changed while it was built"
+                )
+            opts = dict(args.get("opts") or {})
+            opts.setdefault("title", "Hyperparameters")
+            p = window(
+                {
+                    "data": [{"content": content, "type": "hparams"}],
+                    "win": args.get("win"),
+                    "opts": opts,
+                }
+            )
+            p["hparams"] = spec
+            register_window(handler, p, eid)
+            await save_env_off_loop(handler, eid)
 
     @check_auth
     @check_readonly_message(READONLY_MESSAGE)
@@ -411,20 +427,34 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     The refresh case is what a live update is, so :func:`make_live_queue` drives
     :meth:`wrap_func` directly rather than growing a second rebuild path.
 
+    The selection is read on the storage worker, exactly as on create, and the
+    env is saved through ``save_env_off_loop``. The window is checked again once
+    that read is back, because the loop kept serving requests while it ran: an
+    env deleted or a window closed or retyped in the meantime answers as it
+    would have up front, and a rebuild that would undo a newer one is dropped
+    rather than written: the pane has since been rebuilt when its ``contentID``
+    has moved, which editing the window in place does not do. A refresh is held
+    to that the same way an explicit update is -- it replays the selection the
+    pane stores, so a newer rebuild of the same selection leaves nothing but
+    the ``contentID`` to tell them apart. Either way the reply is still the
+    window id: the pane the caller asked about is there, carrying content at
+    least as new as the content this request built.
+
     That write reaches disk, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
     """
 
     @staticmethod
-    def wrap_func(handler, args):
-        win = args.get("win")
-        if not isinstance(win, str) or not win:
-            raise tornado.web.HTTPError(400, reason="'win' is required")
+    def _hparams_window(handler, eid, win):
+        """Return the hparams window ``win`` in env ``eid``, or raise.
 
-        eid = extract_eid(args)
-        if eid not in handler.state:
+        404 when the env or the window is unknown, 400 when the window is some
+        other type.
+        """
+        env = handler.state.get(eid)
+        if env is None:
             raise tornado.web.HTTPError(404, reason="unknown env {0!r}".format(eid))
-        existing = handler.state[eid]["jsons"].get(win)
+        existing = env["jsons"].get(win)
         if existing is None:
             raise tornado.web.HTTPError(
                 404, reason="no window {0!r} in env {1!r}".format(win, eid)
@@ -433,6 +463,19 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="window {0!r} is not an hparams window".format(win)
             )
+        return existing
+
+    @staticmethod
+    async def wrap_func(handler, args):
+        win = args.get("win")
+        if not isinstance(win, str) or not win:
+            raise tornado.web.HTTPError(400, reason="'win' is required")
+
+        eid = extract_eid(args)
+        # the pane's env may be known only by its file; reading its windows
+        # would load that file on the loop.
+        await ensure_env_loaded(handler, eid)
+        existing = ExperimentHparamsUpdateHandler._hparams_window(handler, eid, win)
 
         has_selection = any(
             args.get(key) is not None for key in ("query", "env_ids", "mode")
@@ -450,7 +493,27 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
                     "pass a query and/or env_ids".format(win),
                 )
 
-        content = ExperimentHparamsHandler._build_content(handler, spec)
+        rebuilt_from = existing.get("contentID")
+        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
+
+        # the loop kept serving while the selection was read, so the pane may be
+        # gone, retyped, or rebuilt by another update since it was looked up.
+        existing = ExperimentHparamsUpdateHandler._hparams_window(handler, eid, win)
+        if existing.get("contentID") != rebuilt_from:
+            # another rebuild landed while this one was reading, so the content
+            # on the pane is newer than the content this holds -- every rebuild
+            # carries a fresh contentID, which an edit to the window in place
+            # does not. Writing this one would put the older content back and
+            # queue its snapshot behind the newer save.
+            #
+            # A refresh is held to this as firmly as an explicit update. It
+            # replays the selection stored on the pane, so a newer rebuild that
+            # only changed the content leaves the two specs equal and a check
+            # on the spec alone waves the stale content through; one that
+            # changed the selection too is caught either way. The contentID
+            # moves for both.
+            handler.write(win)
+            return
 
         opts = {
             "title": existing.get("title", ""),
@@ -469,16 +532,18 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
             }
         )
         p["hparams"] = spec
+        # nothing awaits between registering and the snapshot the save takes,
+        # so the window saved is the window registered.
         register_window(handler, p, eid)
-        handler.storage.save_env(eid, handler.state[eid])
+        await save_env_off_loop(handler, eid)
 
     @check_auth
     @check_readonly_message(READONLY_MESSAGE)
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class LivePaneWriter:
@@ -505,19 +570,6 @@ class LivePaneWriter:
         """Swallow the window id ``register_window`` writes to the response."""
 
 
-def _schedule_on_ioloop(delay, callback):
-    """Run ``callback`` on the event loop after ``delay`` seconds.
-
-    Without a running loop — an application built outside a server, as tests
-    and embedders do — there is nothing to defer onto, so the drain runs inline
-    rather than being lost.
-    """
-    try:
-        tornado.ioloop.IOLoop.current().call_later(delay, callback)
-    except RuntimeError:
-        callback()
-
-
 def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
     """Build the queue that keeps ``server_state``'s hparams panes in step with
     its runs.
@@ -541,9 +593,9 @@ def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
     """
     writer = LivePaneWriter(server_state)
 
-    def rebuild(eid, win_id):
+    async def rebuild(eid, win_id):
         try:
-            ExperimentHparamsUpdateHandler.wrap_func(
+            await ExperimentHparamsUpdateHandler.wrap_func(
                 writer, {"win": win_id, "eid": eid}
             )
         except tornado.web.HTTPError as e:
@@ -558,5 +610,4 @@ def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
         resolve=lambda changed: resolve_targets(server_state.state, changed),
         rebuild=rebuild,
         delay=delay,
-        schedule=_schedule_on_ioloop,
     )
