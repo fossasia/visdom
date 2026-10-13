@@ -51,6 +51,54 @@ class TestImplicitCreation(VisdomHTTPTestCase):
 
 
 class TestForkEnv(VisdomHTTPTestCase):
+    def test_fork_missing_prev_eid_is_bad_request(self):
+        for invalid in (
+            {"eid": "new_fork"},
+            {"prev_eid": None, "eid": "new_fork"},
+            {"prev_eid": 123, "eid": "new_fork"},
+        ):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be strings", resp.reason)
+
+    def test_fork_missing_eid_is_bad_request(self):
+        for invalid in (
+            {"prev_eid": "main"},
+            {"prev_eid": "main", "eid": None},
+            {"prev_eid": "main", "eid": 123},
+        ):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be strings", resp.reason)
+
+    def test_fork_non_object_body_is_bad_request(self):
+        for invalid in ("not_a_dict", [1, 2, 3], None):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be an object", resp.reason)
+
+    def test_fork_invalid_json_is_bad_request(self):
+        for invalid_body in ("{invalid_json", "", "   "):
+            resp = self.fetch(
+                "/fork_env",
+                method="POST",
+                body=invalid_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be valid JSON", resp.reason)
+
+    def test_fork_empty_eid_is_bad_request(self):
+        for empty in ("", "   "):
+            resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": empty})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must not be empty", resp.reason)
+
+        for empty in ("", "   "):
+            resp = self.post_json("/fork_env", {"prev_eid": empty, "eid": "valid"})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must not be empty", resp.reason)
+
     def test_fork_copies_the_panes_across(self):
         self.create_text_window(eid="main", content="original", win="w1")
         resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": "fork1"})

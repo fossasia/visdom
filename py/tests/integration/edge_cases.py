@@ -21,6 +21,7 @@ import unittest
 
 import pytest
 
+from testutils.fakes import FakeSocket
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -204,6 +205,85 @@ class TestRenderedPages(VisdomHTTPTestCase):
 
     def test_compare_page_renders(self):
         self.assertEqual(self.fetch("/compare/main+main").code, 200)
+
+    def test_compare_page_escapes_environment_ids(self):
+        """Compare page sanitizes environment IDs containing surrounding whitespace."""
+        self.assertEqual(self.fetch("/compare/%20main%20+main").code, 200)
+
+
+class TestCompareEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/compare/<eids>`` payload validation."""
+
+    def test_missing_sid_returns_400(self):
+        """A compare request without the required 'sid' returns HTTP 400."""
+        resp = self.post_json("/compare/main+main", {"show_all": False})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'sid'", resp.reason)
+
+    def test_empty_string_or_whitespace_sid_returns_400(self):
+        """A compare request with empty or whitespace-only 'sid' returns HTTP 400."""
+        for invalid_sid in ("", "   "):
+            resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid required field: 'sid'", resp.reason)
+            self.assertNotIn("missing", resp.reason)
+
+    def test_non_string_sid_returns_400(self):
+        """A compare request with non-string 'sid' (number, list, boolean) returns HTTP 400."""
+        for invalid_sid in (123, [], True):
+            resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid required field: 'sid'", resp.reason)
+            self.assertNotIn("missing", resp.reason)
+
+    def test_null_sid_uninitialized_socket_returns_200(self):
+        """A compare request with null 'sid' (pre-socket client handshake) safely returns HTTP 200."""
+        resp = self.post_json("/compare/main+main", {"sid": None, "show_all": False})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
+
+    def test_malformed_json_body_returns_400(self):
+        """A compare request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/compare/main+main",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A compare request where body is a list or non-object returns HTTP 400."""
+        resp = self.fetch(
+            "/compare/main+main",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_valid_sid_unknown_subscriber_returns_200(self):
+        """A compare request with a valid string 'sid' unknown in self.subs returns HTTP 200."""
+        resp = self.post_json(
+            "/compare/main+main", {"sid": "valid-session-id", "show_all": False}
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
+
+    def test_compare_endpoint_escapes_environment_ids(self):
+        """A compare request normalizes environment IDs through escape_eid."""
+        subscriber = FakeSocket(sid="valid-session-id")
+        self._app.subs[subscriber.sid] = subscriber
+        resp = self.post_json(
+            "/compare/%20main%20+main",
+            {"sid": "valid-session-id", "show_all": False},
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
+        self.assertEqual(subscriber.eid, ["main", "main"])
+        self.assertEqual(subscriber.commands(), ["reload", "window", "layout"])
 
 
 if __name__ == "__main__":
