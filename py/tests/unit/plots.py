@@ -253,10 +253,11 @@ def test_scatter_name_with_multiple_labels_raises(offline_client):
 
 
 def test_scatter_legend_none_uses_default_name(capture_send):
-    """legend=None does not raise TypeError and falls back to default name."""
+    """legend=None does not raise TypeError, falls back to default name and hides legend."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
     sent = capture_send(lambda v: v.scatter(X, opts={"legend": None}))
     assert sent["payload"]["data"][0]["name"] == "1"
+    assert sent["payload"]["layout"]["showlegend"] is False
 
 
 def test_scatter_legend_empty_sequence_raises(offline_client):
@@ -271,15 +272,16 @@ def test_scatter_legend_empty_sequence_raises(offline_client):
 def test_scatter_legend_invalid_type_raises(offline_client):
     """legend with a non-sequence type raises AssertionError."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
-    with pytest.raises(AssertionError, match="opts.legend must be a list or tuple"):
+    with pytest.raises(AssertionError, match=r"opts\.legend must be a list or tuple"):
         offline_client.scatter(X, opts={"legend": "not-a-list"})
 
 
 def test_line_legend_none_uses_default_name(capture_send):
-    """line with legend=None does not raise TypeError and uses default name."""
+    """line with legend=None does not raise TypeError and does not enable legend."""
     Y = np.array([1.0, 2.0, 3.0])
     sent = capture_send(lambda v: v.line(Y, opts={"legend": None}))
     assert sent["payload"]["data"][0]["name"] == "1"
+    assert sent["payload"]["layout"]["showlegend"] is False
 
 
 def test_line_legend_empty_sequence_raises(offline_client):
