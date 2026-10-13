@@ -40,23 +40,34 @@ class BroadcastTestCase(VisdomHTTPTestCase):
         return sub
 
     def update_versions(self, sub, win):
-        """Versions of the ``window_update`` packets broadcast for ``win``."""
-        return [
-            msg["version"]
-            for msg in sent(sub)
-            if isinstance(msg, dict)
-            and msg.get("command") == "window_update"
-            and msg.get("win") == win
-        ]
+        """Versions ``win`` was announced at, in the order they were sent.
+
+        An update reaches the browser as whichever of the patch and the whole
+        pane is smaller, so both encodings count. ``main.js`` takes the
+        version from either -- a ``window`` packet replaces the pane it names
+        and carries its version forward -- and it is the sequence across the
+        two that has to have no gaps, not the sequence within one of them.
+        """
+        versions = []
+        for msg in sent(sub):
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("command") == "window_update" and msg.get("win") == win:
+                versions.append(msg["version"])
+            elif msg.get("command") == "window" and msg.get("id") == win:
+                versions.append(msg["version"])
+        return versions
 
     def assert_updates_are_consecutive(self, sub, win, count=3):
-        """The client starts at 1, so the run has to be 2, 3, ... with no gaps.
+        """The run has to be 1, 2, ... with no gaps.
 
-        A repeated or stalled version is the failure this guards: it makes the
+        The subscriber is attached before the pane is created, so the packet
+        that creates it opens the run at 1 and the updates continue it. A
+        repeated or stalled version is the failure this guards: it makes the
         frontend drop the patch and reload the whole environment instead.
         """
         self.assertEqual(
-            self.update_versions(sub, win), list(range(2, 2 + count)), self.panes()
+            self.update_versions(sub, win), list(range(1, 2 + count)), self.panes()
         )
 
 
@@ -227,7 +238,7 @@ class TestRejectedUpdates(BroadcastTestCase):
         self.update(win, {"update_type": "Nonsense"})
         self.update(win, {"update_type": "RegionSelected", "points": [[5, 6]]})
 
-        self.assertEqual(self.update_versions(sub, win), [2, 3], self.panes())
+        self.assertEqual(self.update_versions(sub, win), [1, 2, 3], self.panes())
 
 
 if __name__ == "__main__":
