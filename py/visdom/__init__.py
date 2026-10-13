@@ -652,7 +652,7 @@ def _resolve_torch_types():
 
 
 def _to_numpy(a):
-    if isinstance(a, list):
+    if isinstance(a, (list, tuple)):
         return np.array(a)
     # one isinstance against the whole tuple rather than a Python loop: this
     # runs per argument of every plot call, and with no torch imported and

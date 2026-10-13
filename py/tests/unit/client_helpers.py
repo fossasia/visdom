@@ -1091,3 +1091,19 @@ def test_torch_types_is_still_an_extension_point(monkeypatch):
     monkeypatch.setattr(visdom, "torch_types", [_FakeTensor])
     array = np.arange(3)
     assert _to_numpy(_FakeTensor(array)) is array
+
+
+def test_to_numpy_converts_tuples_and_lists():
+    """_to_numpy converts both lists and tuples to numpy arrays."""
+    arr_from_tuple = _to_numpy((1, 2, 3))
+    assert isinstance(arr_from_tuple, np.ndarray)
+    assert np.array_equal(arr_from_tuple, np.array([1, 2, 3]))
+
+    arr_from_nested_tuple = _to_numpy(((1, 2), (3, 4)))
+    assert isinstance(arr_from_nested_tuple, np.ndarray)
+    assert arr_from_nested_tuple.shape == (2, 2)
+    assert np.array_equal(arr_from_nested_tuple, np.array([[1, 2], [3, 4]]))
+
+    arr_from_list = _to_numpy([1, 2, 3])
+    assert isinstance(arr_from_list, np.ndarray)
+    assert np.array_equal(arr_from_list, np.array([1, 2, 3]))
