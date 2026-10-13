@@ -19,8 +19,8 @@ red.
 So these tests read the prose and then check the code against it: the paths and
 symbols it names resolve, ``max_workers`` really is 1, the off-loop helpers
 really snapshot first, ``shutdown_storage`` really orders its three steps that
-way, and the handlers hold the no-disk-on-the-loop line except at the one site
-the doc records as follow-up 4j. The cross-document claims -- the benchmark
+way, and the handlers hold the no-disk-on-the-loop line with no exception left
+since follow-up 4j closed. The cross-document claims -- the benchmark
 table, the proxied-name count, the invariants restated in
 ``.agents/context/architecture.md`` -- are compared against their sources
 rather than trusted.
@@ -328,13 +328,10 @@ def test_shutdown_storage_orders_its_three_steps():
 
 BLOCKING_STORE_CALLS = ("save_env", "save_envs", "save_all", "load_env")
 
-# Recorded, not condoned: follow-up 4j in REFACTORING.md. The update endpoint
-# predates the async series -- it arrived with the hparams track, and the live
-# refresh drives it from a timer -- so converting it is a change to a live write
-# path and gets its own PR. Anything not on this list is a new violation.
-KNOWN_ON_LOOP_WRITES = {
-    ("experiments_handler.py", "ExperimentHparamsUpdateHandler.wrap_func", "save_env"),
-}
+# Recorded, not condoned: a site that has to stay on the loop for now is listed
+# here with a follow-up in REFACTORING.md. Follow-up 4j emptied it, and anything
+# not on this list is a new violation.
+KNOWN_ON_LOOP_WRITES = set()
 
 
 def direct_storage_calls():
@@ -377,16 +374,21 @@ def test_handlers_do_not_write_to_disk_on_the_loop():
 
 
 def test_the_recorded_on_loop_writes_are_still_there():
-    """When 4j is done, delete the entry rather than letting it go stale."""
+    """A recorded site that has been fixed is deleted, not left to go stale."""
     stale = KNOWN_ON_LOOP_WRITES - direct_storage_calls()
     assert not stale, (
         f"{sorted(stale)} no longer blocks the loop -- drop it from "
-        "KNOWN_ON_LOOP_WRITES and close follow-up 4j in REFACTORING.md"
+        "KNOWN_ON_LOOP_WRITES and close its follow-up in REFACTORING.md"
     )
 
 
-def test_followup_4j_is_documented():
-    assert "| 4j |" in PHASE_4
+def test_followup_4j_is_recorded_as_delivered():
+    """4j closed with the list above emptied; the roadmap has to say so too."""
+    assert not KNOWN_ON_LOOP_WRITES
+    delivered = section(REFACTORING, "### Follow-ups delivered", level="### ")
+    assert "| 4j |" in delivered
+    not_taken = section(REFACTORING, "### Follow-ups not taken", level="### ")
+    assert "| 4j |" not in not_taken
 
 
 # --- cross-document claims -------------------------------------------------

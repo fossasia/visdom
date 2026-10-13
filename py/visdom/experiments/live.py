@@ -20,15 +20,21 @@ dependency so they can be exercised on their own:
 * :func:`resolve_targets` — *what* to rebuild. Given the server's env state and
   the environments that just changed, it names the explicit-id panes affected.
 
-The queue is handed a resolver and a rebuild callback rather than reaching for
+The queue is handed a resolver and a rebuild coroutine rather than reaching for
 either itself, which is what lets the server point it at the existing
 ``experiments/hparams/update`` write path without this module knowing about
-Tornado, handlers or windows.
+Tornado, handlers or windows. A rebuild reads and writes disk, so it is awaited
+rather than called: on the server that work runs on the storage worker, and the
+event loop stays free while it does.
 """
 
+import asyncio
 import logging
 
 DEFAULT_DEBOUNCE_SECONDS = 0.25
+
+#: Drains started by :func:`_call_later_on_running_loop` that have not finished.
+_DRAINS = set()
 
 
 def _named_env_ids(spec):
@@ -90,17 +96,39 @@ def resolve_targets(state, changed):
     return targets
 
 
+def _call_later_on_running_loop(delay, drain):
+    """Run the coroutine function ``drain`` on the running loop after ``delay``.
+
+    The loop keeps only a weak reference to a task, so a drain parked on the
+    storage worker could be collected half way through; each one is held in
+    ``_DRAINS`` until it finishes. Called without a running loop this raises
+    ``RuntimeError``, which :class:`LiveUpdateQueue` logs and recovers from.
+    """
+    loop = asyncio.get_running_loop()
+
+    def start():
+        task = loop.create_task(drain())
+        _DRAINS.add(task)
+        task.add_done_callback(_DRAINS.discard)
+
+    loop.call_later(delay, start)
+
+
 class LiveUpdateQueue:
     """Coalesce "this env changed" notices and rebuild the panes showing it.
 
     ``resolve`` maps the set of changed env ids to the panes to rebuild (see
-    :func:`resolve_targets`); ``rebuild`` is called once per pane as
-    ``rebuild(eid, win_id)``.
+    :func:`resolve_targets`); ``rebuild`` is a coroutine function awaited once
+    per pane as ``await rebuild(eid, win_id)``.
 
     ``schedule`` is how a drain is deferred: it is called as
-    ``schedule(delay, callback)`` and is the event loop's timer on a running
-    server. Left as ``None`` a mark drains inline, which keeps the queue usable
-    where there is no loop to defer onto.
+    ``schedule(delay, drain)`` with the coroutine function :meth:`drain`, and
+    owns running it. Left as ``None`` the drain becomes a task on the running
+    event loop, which is the server's loop, since only a request marks.
+
+    Drains never overlap. A mark arriving while one runs is recorded, and the
+    next drain is armed when the current one finishes, so a pane is never
+    rebuilt by two drains at once however long its selection takes to read.
 
     A rebuild that raises is logged and skipped. The queue runs detached from
     the request that triggered it, so one unbuildable pane must cost neither the
@@ -111,19 +139,19 @@ class LiveUpdateQueue:
         self._resolve = resolve
         self._rebuild = rebuild
         self._delay = delay
-        self._schedule = schedule
+        self._schedule = schedule or _call_later_on_running_loop
         self._pending = set()
         self._scheduled = False
+        self._draining = False
 
     def mark(self, eid):
         """Record that ``eid`` changed and arrange for a drain."""
         self._pending.add(eid)
-        if self._schedule is None:
-            self.drain()
+        if self._scheduled or self._draining:
             return
-        if self._scheduled:
-            return
+        self._arm()
 
+    def _arm(self):
         self._scheduled = True
         try:
             self._schedule(self._delay, self.drain)
@@ -131,12 +159,12 @@ class LiveUpdateQueue:
             self._scheduled = False
             logging.exception("could not schedule an hparams live update")
 
-    def drain(self):
+    async def drain(self):
         """Rebuild the panes affected by the marks collected so far.
 
         The pending marks are taken before anything is rebuilt, so a mark
         arriving while a rebuild runs opens the next round instead of being
-        swallowed by this one.
+        swallowed by this one; that round is armed once this one is done.
 
         Resolving is guarded as well as rebuilding: the marks it was handed
         have already left ``_pending``, so letting it raise would lose that
@@ -147,6 +175,15 @@ class LiveUpdateQueue:
         if not changed:
             return
 
+        self._draining = True
+        try:
+            await self._rebuild_targets(changed)
+        finally:
+            self._draining = False
+            if self._pending and not self._scheduled:
+                self._arm()
+
+    async def _rebuild_targets(self, changed):
         try:
             targets = self._resolve(changed)
         except Exception:
@@ -155,7 +192,7 @@ class LiveUpdateQueue:
 
         for eid, win_id in targets:
             try:
-                self._rebuild(eid, win_id)
+                await self._rebuild(eid, win_id)
             except Exception:
                 logging.exception(
                     "could not live-update hparams window %r in env %r", win_id, eid
