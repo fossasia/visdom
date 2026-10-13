@@ -1037,3 +1037,14 @@ def test_replay_log_ignores_a_non_scalar_metric_on_the_server(logging_client):
         logging_client, _stored([("acc", [0.7], 1), ("acc", 0.7, 1)])
     )
     assert sent == []
+
+
+def test_replay_log_keeps_a_bool_metric_apart_from_one(logging_client):
+    """True == 1 in Python, but they are different observations."""
+    logging_client.experiment(name="r")
+    _append_log(
+        logging_client,
+        {"eid": "main", "action": "metrics", "metrics": {"ok": True}, "step": 1},
+    )
+    sent, _ = _replayed_metrics(logging_client, _stored([("ok", 1, 1)]))
+    assert sent == [("ok", True, 1)]

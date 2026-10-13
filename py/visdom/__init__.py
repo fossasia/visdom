@@ -787,6 +787,15 @@ def _is_log_scalar(value):
     return value is None or isinstance(value, (bool, int, float, str))
 
 
+def _replay_key(key, value, step):
+    """Match key for a metric; keeps ``True`` apart from ``1`` (equal in Python)."""
+
+    def tag(v):
+        return (bool, v) if isinstance(v, bool) else v
+
+    return key, tag(value), tag(step)
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1817,7 +1826,9 @@ class Visdom(object):
         Experiment metrics are appended rather than replaced, so a metric the
         server already holds is skipped instead of being recorded twice.
         Replaying a log kept next to an online run, or the same log again,
-        leaves the metric history as it was.
+        leaves the metric history as it was. Metrics are matched by key, value
+        and step, so a stored observation identical to a logged one is taken
+        to be that logged write.
         """
         with open(log_filename) as f:
             log_entries = f.readlines()
@@ -1863,7 +1874,7 @@ class Visdom(object):
                     value,
                 )
                 continue
-            logged = (key, value, step)
+            logged = _replay_key(key, value, step)
             if metrics[logged] > 0:
                 metrics[logged] -= 1
             else:
@@ -1891,7 +1902,7 @@ class Visdom(object):
             return Counter(), False
         experiment = found[0]
         metrics = Counter(
-            (m["key"], m["value"], m["step"])
+            _replay_key(m["key"], m["value"], m["step"])
             for m in experiment.get("metrics", [])
             if _is_log_scalar(m["value"]) and _is_log_scalar(m["step"])
         )
