@@ -989,3 +989,51 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+def _append_log(client, msg):
+    with open(client.log_to_filename, "a") as f:
+        f.write(json.dumps(["experiments/log", msg]) + "\n")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"metrics": {"acc": [0.1, 0.2]}, "step": 1},
+        {"metrics": {"acc": {"v": 0.1}}, "step": 1},
+        {"metrics": {"acc": 0.1}, "step": [1]},
+        {"metrics": [["acc", 0.1]], "step": 1},
+        {"metrics": "acc", "step": 1},
+    ],
+    ids=["list-value", "dict-value", "list-step", "list-metrics", "str-metrics"],
+)
+def test_replay_log_skips_a_malformed_metric_and_keeps_going(logging_client, bad):
+    """A bad entry is skipped with a warning instead of stopping the replay."""
+    logging_client.experiment(name="r")
+    _append_log(logging_client, dict(bad, eid="main", action="metrics"))
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    with patch("visdom.logger.warning") as warning:
+        sent, _ = _replayed_metrics(logging_client, _stored())
+    assert sent == [("acc", 0.8, 2)]
+    assert warning.called
+
+
+def test_replay_log_sends_the_valid_keys_next_to_a_bad_one(logging_client):
+    logging_client.experiment(name="r")
+    _append_log(
+        logging_client,
+        {"eid": "main", "action": "metrics", "metrics": {"acc": [1], "loss": 0.3}},
+    )
+    with patch("visdom.logger.warning"):
+        sent, _ = _replayed_metrics(logging_client, _stored())
+    assert sent == [("loss", 0.3, None)]
+
+
+def test_replay_log_ignores_a_non_scalar_metric_on_the_server(logging_client):
+    """A list stored server side cannot match anything, but must not crash."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    sent, _ = _replayed_metrics(
+        logging_client, _stored([("acc", [0.7], 1), ("acc", 0.7, 1)])
+    )
+    assert sent == []

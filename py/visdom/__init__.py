@@ -782,6 +782,11 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _is_log_scalar(value):
+    """Whether a JSON value from a replay log is a single value, not a list or object."""
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1844,9 +1849,21 @@ class Visdom(object):
             return None
         if msg.get("action") != "metrics":
             return msg
+        logged_metrics, step = msg.get("metrics"), msg.get("step")
+        if not isinstance(logged_metrics, dict) or not _is_log_scalar(step):
+            logger.warning("replay_log: skipping a malformed metrics call for %r", eid)
+            return None
         missing = {}
-        for key, value in msg.get("metrics", {}).items():
-            logged = (key, value, msg.get("step"))
+        for key, value in logged_metrics.items():
+            if not _is_log_scalar(value):
+                logger.warning(
+                    "replay_log: skipping metric %r for %r, %r is not a single value",
+                    key,
+                    eid,
+                    value,
+                )
+                continue
+            logged = (key, value, step)
             if metrics[logged] > 0:
                 metrics[logged] -= 1
             else:
@@ -1874,7 +1891,9 @@ class Visdom(object):
             return Counter(), False
         experiment = found[0]
         metrics = Counter(
-            (m["key"], m["value"], m["step"]) for m in experiment.get("metrics", [])
+            (m["key"], m["value"], m["step"])
+            for m in experiment.get("metrics", [])
+            if _is_log_scalar(m["value"]) and _is_log_scalar(m["step"])
         )
         return metrics, experiment.get("status", "running") != "running"
 
