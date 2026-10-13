@@ -15,14 +15,18 @@ model schemas (validation and round-trip (de)serialisation) and the
 persists to disk and coexists with ordinary environment window data.
 """
 
+import math
+
 import pytest
 
 from visdom.data_model import JSONStore
 from visdom.utils.server_utils import LazyEnvData
 from visdom.experiments import (
+    build_record,
     Experiment,
     ExperimentFinishedError,
     ExperimentStore,
+    LazyMetricList,
     Metric,
     normalize_tags,
     Param,
@@ -526,3 +530,237 @@ def test_equal_values_keep_their_scan_order_in_both_directions(experiments):
 
     assert _ranked(experiments, descending=True) == ["first", "second", "third"]
     assert _ranked(experiments, descending=False) == ["first", "second", "third"]
+
+
+# -- Metric history: read lazily, appended copy-on-write ----------------------
+
+
+@pytest.fixture
+def metric_builds(monkeypatch):
+    """Count every ``Metric`` built, however it was built."""
+    built = []
+    original = Metric.__init__
+
+    def counting(self, *args, **kwargs):
+        built.append(1)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Metric, "__init__", counting)
+    return built
+
+
+def _series(count, key="acc"):
+    """``count`` stored observations, in the form the server writes them."""
+    return [
+        {"key": key, "value": float(i), "step": i, "timestamp": 1000.0 + i}
+        for i in range(count)
+    ]
+
+
+def _seed_history(store, env_id, count):
+    """Persist an env whose experiment already holds ``count`` observations."""
+    ExperimentStore(store).log_experiment(env_id, name=env_id)
+    env = store.load_env(env_id)
+    env["experiment"]["metrics"] = _series(count)
+    store.save_env(env_id, env)
+
+
+@pytest.mark.parametrize("count", [500, 4000])
+def test_logging_one_observation_costs_one_metric(store, count, metric_builds):
+    """Appending to a 4,000-observation history builds what 500 does: one.
+
+    The shape assertion the PR rests on, rather than a timing one. Logging
+    used to rebuild the series as objects on the way in and as dicts on the
+    way out, so this count was ``count + 1`` and the run it belonged to got
+    slower with every step it logged.
+    """
+    _seed_history(store, "run", count)
+    metric_builds.clear()
+
+    ExperimentStore(store).log_metric("run", "acc", 1.0, step=count)
+
+    assert len(metric_builds) == 1
+    assert len(store.load_experiment("run")["metrics"]) == count + 1
+
+
+@pytest.mark.parametrize("count", [500, 4000])
+def test_scanning_experiments_builds_no_metric_objects(store, count, metric_builds):
+    """A search reads the newest value per key without materialising a series.
+
+    Every environment on disk is read to answer one search, so a ``Metric``
+    per observation per environment was the dominant cost of the endpoint.
+    """
+    _seed_history(store, "run", count)
+    metric_builds.clear()
+
+    page, total = ExperimentStore(store).search_page(limit=10)
+
+    assert total == 1
+    assert metric_builds == []
+    assert page[0].latest_metric_values()["acc"] == float(count - 1)
+
+
+def test_a_metric_batch_shares_one_read_and_one_write(store, monkeypatch):
+    """Observations logged together are read and persisted once, not once each."""
+    reads, writes = [], []
+    read, write = ExperimentStore._read, ExperimentStore._write
+
+    def counting_read(self, env_id):
+        reads.append(env_id)
+        return read(self, env_id)
+
+    def counting_write(self, env_id, env, experiment):
+        writes.append(env_id)
+        return write(self, env_id, env, experiment)
+
+    monkeypatch.setattr(ExperimentStore, "_read", counting_read)
+    monkeypatch.setattr(ExperimentStore, "_write", counting_write)
+
+    ExperimentStore(store).log_metrics(
+        "run", {"acc": 0.9, "loss": 0.1, "f1": 0.5}, step=7
+    )
+
+    assert reads == ["run"]
+    assert writes == ["run"]
+    stored = store.load_experiment("run")["metrics"]
+    assert [observation["key"] for observation in stored] == ["acc", "loss", "f1"]
+    assert {observation["step"] for observation in stored} == {7}
+
+
+def test_a_published_series_never_grows_under_its_reader():
+    """``to_dict`` hands back the stored list, so appending copies it first.
+
+    ``_resident_experiments`` hands a stored blob to the storage worker
+    without copying it, and the dict a write rebinds is shallow, so the list
+    inside it can be one a worker is already iterating. Growing that list in
+    place is what this must never do.
+    """
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(3)
+    exp = Experiment.from_dict(blob)
+
+    published = exp.to_dict()["metrics"]
+    assert published is blob["metrics"]
+
+    exp.add_metric("acc", 9.0, step=3)
+
+    assert len(published) == 3
+    assert len(exp.metrics) == 4
+    assert exp.to_dict()["metrics"] is not published
+
+
+def test_appending_rebinds_the_series_the_server_is_holding(
+    live_experiments, live_state
+):
+    """Each logged observation leaves the previous blob's series untouched."""
+    live_state["run"] = {"jsons": {}, "reload": {}}
+    live_experiments.log_metric("run", "acc", 0.1)
+    first = live_state["run"]["experiment"]["metrics"]
+
+    live_experiments.log_metric("run", "acc", 0.2)
+    second = live_state["run"]["experiment"]["metrics"]
+
+    assert len(first) == 1
+    assert second is not first
+    assert [observation["value"] for observation in second] == [0.1, 0.2]
+
+
+def test_a_tag_write_reuses_the_series_it_does_not_touch(live_experiments, live_state):
+    """Writing tags stops rebuilding the metric series it never reads."""
+    live_state["run"] = {"jsons": {}, "reload": {}}
+    live_experiments.log_metric("run", "acc", 0.1)
+    series = live_state["run"]["experiment"]["metrics"]
+
+    live_experiments.update_tags("run", {"owner": "bob"})
+
+    assert live_state["run"]["experiment"]["metrics"] is series
+
+
+def test_stored_observations_are_returned_as_they_were_written(store):
+    """A stored observation is echoed verbatim; only a new one is normalised.
+
+    Rebuilding the series used to launder it on every read -- stamping a
+    missing ``timestamp`` with the time of the read, and dropping anything it
+    did not recognise. Handing the stored form back instead means what a
+    reader sees is what is on disk.
+    """
+    _seed_history(store, "run", 0)
+    env = store.load_env("run")
+    env["experiment"]["metrics"] = [{"key": "acc", "value": 1.0, "unit": "%"}]
+    store.save_env("run", env)
+
+    ExperimentStore(store).log_metric("run", "loss", 2.0)
+
+    stored = store.load_experiment("run")["metrics"]
+    assert stored[0] == {"key": "acc", "value": 1.0, "unit": "%"}
+    assert set(stored[1]) == {"key", "value", "step", "timestamp"}
+
+
+def test_an_observation_with_no_key_is_skipped_rather_than_fatal():
+    """Reading an experiment no longer parses observations nothing asks for.
+
+    One hand-edited env file used to make every scan that walked past it
+    fail, because the series was rebuilt whether or not it was read. The
+    readers that summarise a series now skip the entry, as the flatten path
+    always has, and asking for that observation itself still raises.
+    """
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = [{"value": 1.0}]
+    exp = Experiment.from_dict(blob)
+
+    assert exp.latest_metric_values() == {}
+    assert exp.latest_metric("acc") is None
+    assert build_record(exp)["env_id"] == "run"
+    with pytest.raises(KeyError):
+        exp.metrics[0]
+
+
+def test_a_series_that_is_not_a_list_parses_as_it_always_did():
+    """Only a list can be held in its stored form; anything else still raises."""
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = "acc"
+
+    with pytest.raises(TypeError):
+        Experiment.from_dict(blob)
+
+
+def test_latest_metric_values_matches_a_reverse_walk():
+    """The accessor answers exactly what walking the series in reverse did."""
+    exp = Experiment(env_id="run")
+    for key, value in (
+        ("acc", 1.0),
+        ("loss", 9.0),
+        ("acc", 2.0),
+        ("f1", float("nan")),
+        ("loss", 8.0),
+    ):
+        exp.add_metric(key, value)
+    walked = {}
+    for metric in reversed(exp.metrics):
+        walked.setdefault(metric.key, metric.value)
+
+    latest = Experiment.from_dict(exp.to_dict()).latest_metric_values()
+
+    assert list(latest) == list(walked)
+    assert latest["acc"] == walked["acc"] == 2.0
+    assert latest["loss"] == walked["loss"] == 8.0
+    assert math.isnan(latest["f1"])
+
+
+def test_a_stored_series_reads_like_the_list_it_replaced():
+    """Every way the series was read as a list reads the same, and caches."""
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(3)
+    series = Experiment.from_dict(blob).metrics
+
+    assert isinstance(series, LazyMetricList)
+    assert len(series) == 3
+    assert series[0].value == 0.0
+    assert series[-1].step == 2
+    assert [observation.value for observation in series] == [0.0, 1.0, 2.0]
+    assert [observation.step for observation in reversed(series)] == [2, 1, 0]
+    assert [observation.value for observation in series[1:]] == [1.0, 2.0]
+    assert series[0] is series[0]
+    assert series == [Metric.from_dict(data) for data in _series(3)]
+    with pytest.raises(IndexError):
+        series[3]
