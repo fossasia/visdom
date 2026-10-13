@@ -169,6 +169,18 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
         # Bumped before the patch is computed so the diff carries the new
         # version to the client, keeping its copy in step for the next update.
         UpdateHandler.bump_version(p)
@@ -567,14 +579,23 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-        handler.mark_dirty(eid)
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # send the smaller of the patch and the updated pane
+            if len(stringify(p)) <= len(stringify(diff_packet)):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            else:
+                UpdateHandler.broadcast_window_update(
+                    handler, args, eid, p, diff_packet
+                )
+            handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -594,6 +615,8 @@ class CloseHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+        if eid not in handler.state:
+            return
         win = args.get("win")
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
@@ -918,6 +941,14 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                if "win" in args and args["win"] is None:
+                    handler.write(json.dumps({}, cls=NanSafeEncoder))
+                    return
+                raise tornado.web.HTTPError(
+                    404, reason=f"environment '{eid}' not found"
+                )
+
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
