@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import numpy as np
 import time
 from visdom import Visdom
@@ -121,12 +122,15 @@ from components.plot_table import html_table, table
 def wait_seconds(value):
     """Parse a -testing_wait value, rejecting the ones time.sleep cannot take.
 
-    argparse's own ``type=float`` accepts a negative, which only fails much
-    later, as a ``ValueError`` out of ``time.sleep`` after the whole demo has
-    already been plotted. Rejecting it here turns that into the usage error it
-    is, before the run starts.
+    argparse's own ``type=float`` accepts a negative or a non-finite value,
+    none of which time.sleep takes, and each only fails much later, after the
+    whole demo has already been plotted: a negative and ``nan`` as a
+    ``ValueError``, ``inf`` as an ``OverflowError``. Rejecting them here turns
+    that into the usage error it is, before the run starts.
     """
     seconds = float(value)
+    if not math.isfinite(seconds):
+        raise argparse.ArgumentTypeError("must be finite, got {0}".format(value))
     if seconds < 0:
         raise argparse.ArgumentTypeError("must not be negative, got {0}".format(value))
     return seconds
