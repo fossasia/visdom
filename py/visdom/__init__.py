@@ -343,7 +343,7 @@ def _axisformat3d(xyz, opts):
 def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
-        "showlegend": opts.get("showlegend", "legend" in opts),
+        "showlegend": opts.get("showlegend", opts.get("legend") is not None),
         "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
@@ -3209,6 +3209,8 @@ class Visdom(object):
             assert K <= len(
                 opts["legend"]
             ), "largest label should not be greater than size of the legends table"
+        else:
+            opts.pop("legend", None)
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
