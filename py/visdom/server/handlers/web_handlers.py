@@ -333,90 +333,91 @@ class UpdateHandler(BaseHandler):
 
         # add new heatmap data if plot has been deleted previously
         if len(idxs) == 0 and new_data[0]["type"] == "heatmap":
-            pdata.append(new_data[0])
+            pdata.extend(new_data)
             return p
 
-        # update heatmap
-        if len(idxs) == 1 and pdata[idxs[0]]["type"] == "heatmap":
-            plot = pdata[idxs[0]]
-            new_data = new_data[0]
-            dz = new_data["z"]
+        # update heatmap. opts.nancolor adds a background trace ahead of the
+        # data, so pair the traces from the end, where the data trace is.
+        if len(idxs) > 0 and all(pdata[i]["type"] == "heatmap" for i in idxs):
             updateDir = args["updateDir"]
+            for idx, new_trace in zip(reversed(idxs), reversed(new_data)):
+                plot = pdata[idx]
+                dz = new_trace["z"]
 
-            # first check if operation is valid
-            if updateDir != "replace":
-                del new_data["z"]
+                # first check if operation is valid
+                if updateDir != "replace":
+                    del new_trace["z"]
 
-                if updateDir in ["appendRow", "prependRow"]:
-                    checkdir = "y"
-                    if len(plot["z"][0]) != len(dz[0]):
+                    if updateDir in ["appendRow", "prependRow"]:
+                        checkdir = "y"
+                        if len(plot["z"][0]) != len(dz[0]):
+                            logging.error(
+                                "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
+                                % (len(plot["z"][0]), len(dz[0]))
+                            )
+                            return p
+                    else:
+                        checkdir = "x"
+                        if len(plot["z"]) != len(dz):
+                            logging.error(
+                                "ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')."
+                                % (len(plot["z"]), len(dz))
+                            )
+                            return p
+                    updateNames = False
+                    if plot[checkdir] is not None and new_trace[checkdir] is not None:
+                        updateNames = True
+                        if plot[checkdir] is not None and any(
+                            label in plot[checkdir] for label in new_trace[checkdir]
+                        ):
+                            logging.error(
+                                "ERROR: The new column names appear already in the plot. Please make sure to specify unique column names."
+                            )
+                            return p
+                    elif plot[checkdir] is not None:
                         logging.error(
-                            "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"][0]), len(dz[0]))
+                            "ERROR: The column names have been specified in plot, however the requested update does not specify column names."
                         )
                         return p
-                else:
-                    checkdir = "x"
-                    if len(plot["z"]) != len(dz):
+                    elif new_trace[checkdir] is not None:
                         logging.error(
-                            "ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"]), len(dz))
+                            "ERROR: The column names have been specified for update, however the plot to update does not specify column names."
                         )
                         return p
-                updateNames = False
-                if plot[checkdir] is not None and new_data[checkdir] is not None:
-                    updateNames = True
-                    if plot[checkdir] is not None and any(
-                        label in plot[checkdir] for label in new_data[checkdir]
-                    ):
-                        logging.error(
-                            "ERROR: The new column names appear already in the plot. Please make sure to specify unique column names."
-                        )
-                        return p
-                elif plot[checkdir] is not None:
-                    logging.error(
-                        "ERROR: The column names have been specified in plot, however the requested update does not specify column names."
-                    )
-                    return p
-                elif new_data[checkdir] is not None:
-                    logging.error(
-                        "ERROR: The column names have been specified for update, however the plot to update does not specify column names."
-                    )
-                    return p
 
-            # append according to direction
-            if updateDir == "appendRow":
-                plot["z"] += dz
-                if updateNames:
-                    plot["y"] += new_data["y"]
+                # append according to direction
+                if updateDir == "appendRow":
+                    plot["z"] += dz
+                    if updateNames:
+                        plot["y"] += new_trace["y"]
 
-            elif updateDir == "prependRow":
-                plot["z"] = dz + plot["z"]
-                if updateNames:
-                    plot["y"] = new_data["y"] + plot["y"]
+                elif updateDir == "prependRow":
+                    plot["z"] = dz + plot["z"]
+                    if updateNames:
+                        plot["y"] = new_trace["y"] + plot["y"]
 
-            elif updateDir == "appendColumn":
-                for i, dzi in enumerate(dz):
-                    plot["z"][i] += dzi
-                if updateNames:
-                    plot["x"] += new_data["x"]
+                elif updateDir == "appendColumn":
+                    for i, dzi in enumerate(dz):
+                        plot["z"][i] += dzi
+                    if updateNames:
+                        plot["x"] += new_trace["x"]
 
-            elif updateDir == "prependColumn":
-                for i, dzi in enumerate(dz):
-                    plot["z"][i] = dzi + plot["z"][i]
-                if updateNames:
-                    plot["x"] = new_data["x"] + plot["x"]
+                elif updateDir == "prependColumn":
+                    for i, dzi in enumerate(dz):
+                        plot["z"][i] = dzi + plot["z"][i]
+                    if updateNames:
+                        plot["x"] = new_trace["x"] + plot["x"]
 
-            # update opts
-            # note: if we are appending, we do not want to modify the labels, as they have already been altered above
-            if append:
-                if "x" in new_data:
-                    del new_data["x"]
-                if "y" in new_data:
-                    del new_data["y"]
-            for k in new_data:
-                if new_data[k] is not None or not append:
-                    plot[k] = new_data[k]
+                # update opts
+                # note: if we are appending, we do not want to modify the labels, as they have already been altered above
+                if append:
+                    if "x" in new_trace:
+                        del new_trace["x"]
+                    if "y" in new_trace:
+                        del new_trace["y"]
+                for k in new_trace:
+                    if new_trace[k] is not None or not append:
+                        plot[k] = new_trace[k]
 
             return p
 
