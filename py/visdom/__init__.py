@@ -2244,24 +2244,51 @@ class Visdom(object):
             opts["width"] = opts.get("width", img.shape[2])
             opts["height"] = opts.get("height", img.shape[1])
 
-            if nchannels == 1:
+
+        if nchannels == 1:
                 im = Image.fromarray(img[0, :, :], mode="L")
-            elif nchannels == 3:
+        elif nchannels == 3:
                 img = np.transpose(img, (1, 2, 0))
                 im = Image.fromarray(img, mode="RGB")
-            elif nchannels == 4:  # RGBA (4,H,W)
+        elif nchannels == 4:  # RGBA (4,H,W)
                 img = np.transpose(img, (1, 2, 0))
                 im = Image.fromarray(img, mode="RGBA")
-            else:
+        else:
+                # <-- FIX STARTS HERE -->
+                # Check if the last dimension looks like channels-last (HxWxC)
+                if img.shape[2] in (1, 3, 4):
+                    raise ValueError(
+                        f"Shape {img.shape} looks like HxWxC (channels last), "
+                        "but vis.image expects CxHxW: use img.transpose(2, 0, 1) (numpy) "
+                        "or img.permute(2, 0, 1) (torch) first."
+                    )
+                # Fallback for other invalid channel counts
                 raise ValueError(
                     f"Unsupported number of image channels: {nchannels}. "
                     "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
                 )
-        else:
-            raise ValueError(
-                f"Unsupported image dimensions: {img.ndim}. "
-                "Image tensor must be 2D (HxW) or 3D (CxHxW)."
-            )
+            
+
+        #     if nchannels == 1:
+        #         im = Image.fromarray(img[0, :, :], mode="L")
+        #     elif nchannels == 3:
+        #         img = np.transpose(img, (1, 2, 0))
+        #         im = Image.fromarray(img, mode="RGB")
+        #     elif nchannels == 4:  # RGBA (4,H,W)
+        #         img = np.transpose(img, (1, 2, 0))
+        #         im = Image.fromarray(img, mode="RGBA")
+        #     else:
+        #         raise ValueError(
+        #             f"Unsupported number of image channels: {nchannels}. "
+        #             "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+        #         )
+        # else:
+        #     raise ValueError(
+        #         f"Unsupported image dimensions: {img.ndim}. "
+        #         "Image tensor must be 2D (HxW) or 3D (CxHxW)."
+        #     )
+
+
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
