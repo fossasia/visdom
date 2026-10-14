@@ -303,10 +303,24 @@ def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client):
     ids=["array", "list"],
 )
 def test_images_points_a_channels_last_batch_to_transpose(offline_client, batch):
-    with pytest.raises(
-        ValueError, match=r"looks like NxHxWxC.*transpose\(0, 3, 1, 2\)"
-    ):
+    """The hint covers both an array and a list, since a list has no transpose."""
+    with pytest.raises(ValueError) as error:
         offline_client.images(batch)
+    message = str(error.value)
+    assert "looks like NxHxWxC" in message
+    assert "batch.transpose(0, 3, 1, 2)" in message
+    assert "[img.transpose(2, 0, 1) for img in images]" in message
+
+
+def test_images_suggested_fixes_render(capture_send):
+    batch = np.zeros((2, 8, 8, 3))
+    images = list(batch)
+    for fixed in (
+        batch.transpose(0, 3, 1, 2),
+        [img.transpose(2, 0, 1) for img in images],
+    ):
+        sent = capture_send(lambda v, fixed=fixed: v.images(fixed))
+        assert sent["payload"]["data"][0]["type"] == "image"
 
 
 def test_images_still_tiles_a_chw_batch_whose_width_is_three(capture_send):

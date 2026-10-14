@@ -2520,8 +2520,9 @@ class Visdom(object):
             raise ValueError(
                 f"Unsupported number of image channels: {tensor.shape[1]}."
                 f" Shape {tensor.shape} looks like NxHxWxC (channels last), but"
-                " vis.images expects NxCxHxW: use tensor.transpose(0, 3, 1, 2)"
-                " (numpy) or tensor.permute(0, 3, 1, 2) (torch) first."
+                " vis.images expects NxCxHxW: use batch.transpose(0, 3, 1, 2)"
+                " (numpy) or batch.permute(0, 3, 1, 2) (torch) first, or for a"
+                " list pass [img.transpose(2, 0, 1) for img in images]."
             )
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
