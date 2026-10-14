@@ -163,6 +163,20 @@ def loadfile(filename):
     return str
 
 
+# Anything not 'append' replaces the data, so a typo such as 'apend' would
+# silently wipe the plot. 'insert' and 'new' are kept because the examples
+# use them to add a trace.
+LINE_UPDATES = (None, "append", "replace", "remove", "insert", "new")
+
+
+def _check_line_update(update):
+    """Raise for an ``update`` that line/scatter/learning_curve don't know."""
+    if update not in LINE_UPDATES:
+        raise ValueError(
+            "update must be one of {}, got {!r}".format(LINE_UPDATES, update)
+        )
+
+
 def _title2str(opts):
     if opts.get("title") is not None:
         if isnum(opts.get("title")):
@@ -2739,6 +2753,7 @@ class Visdom(object):
         `update='append'`, `step` must be specified to avoid repeatedly appending
         points at the same x-coordinate.
         """
+        _check_line_update(update)
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
         assert len(metric_items) > 0, "must provide at least one metric"
@@ -2839,6 +2854,9 @@ class Visdom(object):
         Update data that is all NaN is ignored (can be used for masking update).
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
+        'insert' and 'new' are older names kept for compatibility: they act
+        like 'replace' on the trace in `name`, adding it if it is missing.
+        Any other value raises ValueError.
 
         The following `opts` are supported:
 
@@ -2854,6 +2872,7 @@ class Visdom(object):
         - `opts.aspectratio`      : `{'x', 'y', 'z'}` scale dict, applied when
                                     `aspectmode` is `'manual'`
         """
+        _check_line_update(update)
         if opts and opts.get("store_history") and update is not None:
             raise ValueError(
                 "Cannot use store_history=True together with the update parameter"
@@ -3112,6 +3131,9 @@ class Visdom(object):
         Update data that is all NaN is ignored (can be used for masking update).
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
+        'insert' and 'new' are older names kept for compatibility: they act
+        like 'replace' on the trace in `name`, adding it if it is missing.
+        Any other value raises ValueError.
 
         The following `opts` are supported:
 
@@ -3129,6 +3151,7 @@ class Visdom(object):
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
         """
+        _check_line_update(update)
         if update is not None:
             if update == "remove":
                 return self.scatter(

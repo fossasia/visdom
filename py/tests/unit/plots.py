@@ -412,6 +412,51 @@ def test_heatmap_invalid_update_raises(offline_client):
         offline_client.heatmap(np.ones((3, 3)), update="badvalue")
 
 
+_UPDATE_CALLS = {
+    "line": lambda v, u: v.line(X=np.array([1]), Y=np.array([1.0]), win="w", update=u),
+    "scatter": lambda v, u: v.scatter(X=np.ones((1, 2)), win="w", update=u),
+    "learning_curve": lambda v, u: v.learning_curve(
+        {"loss": [0.5]}, step=[1], win="w", update=u
+    ),
+}
+
+
+@pytest.mark.parametrize("update", ["apend", "Append", "APPEND", True])
+@pytest.mark.parametrize("method", sorted(_UPDATE_CALLS))
+def test_misspelled_update_raises_instead_of_replacing(offline_client, method, update):
+    """Anything that isn't 'append' replaces the data, so a typo used to
+    silently wipe the plot. It must raise before anything is sent."""
+    with patch.object(offline_client, "_send") as send:
+        with pytest.raises(ValueError, match="update must be one of"):
+            _UPDATE_CALLS[method](offline_client, update)
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize("update", ["append", "replace", "insert", "new"])
+@pytest.mark.parametrize("method", sorted(_UPDATE_CALLS))
+def test_known_update_values_are_still_accepted(offline_client, method, update):
+    """'insert' and 'new' stay valid: the examples use them to add a trace."""
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        _UPDATE_CALLS[method](offline_client, update)
+    send.assert_called()
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.line(X=None, Y=np.array([1.0]), win="w", update="apend"),
+        lambda v: v.learning_curve({"loss": [0.5]}, step=[1, 2], update="apend"),
+        lambda v: v.learning_curve([0.5], update="apend"),
+    ],
+    ids=["line_without_X", "learning_curve_bad_step", "learning_curve_bad_metrics"],
+)
+def test_update_is_checked_before_the_other_arguments(offline_client, call):
+    """A typo in update is reported as such, not as whatever argument check
+    happens to run first."""
+    with pytest.raises(ValueError, match="update must be one of"):
+        call(offline_client)
+
+
 def test_heatmap_colormap_defaults_to_viridis(capture_send):
     """colormap defaults to Viridis when not specified."""
     sent = capture_send(lambda v: v.heatmap(np.ones((2, 2))))
