@@ -835,6 +835,17 @@ def test_log_metrics_accepts_numpy_values(offline_client):
     json.dumps(msg)
 
 
+def test_log_metrics_sends_a_longdouble_as_a_float(offline_client):
+    """np.longdouble(...).item() is still a numpy scalar."""
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"loss": np.longdouble(0.5), "acc": np.array([0.25], dtype=np.longdouble)}
+        )
+    assert msg["metrics"] == {"loss": 0.5, "acc": 0.25}
+    assert all(type(v) is float for v in msg["metrics"].values())
+    json.dumps(msg)
+
+
 def test_experiment_accepts_tensor_params(offline_client):
     torch = pytest.importorskip("torch")
     with echoes(offline_client):
