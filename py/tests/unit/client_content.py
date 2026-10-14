@@ -1048,3 +1048,54 @@ def test_replay_log_keeps_a_bool_metric_apart_from_one(logging_client):
     )
     sent, _ = _replayed_metrics(logging_client, _stored([("ok", 1, 1)]))
     assert sent == [("ok", True, 1)]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"experiments": None},
+        {"experiments": [{"status": "running"}, {"status": "running"}]},
+        {"experiments": [{"status": "running"}]},
+        {"experiments": [{"metrics": []}]},
+        {"experiments": [{"status": "running", "metrics": [{"key": "acc"}]}]},
+        {"experiments": [{"env_id": "other", "status": "running", "metrics": []}]},
+    ],
+    ids=["not-a-list", "two", "no-metrics", "no-status", "bad-metric", "other-env"],
+)
+def test_replay_log_stops_when_the_reply_cannot_be_trusted(logging_client, reply):
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.offline = False
+    with patch.object(logging_client, "search_experiments", return_value=reply):
+        with echoes(logging_client) as send:
+            with pytest.raises(RuntimeError, match="replay stopped"):
+                logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+
+
+def test_replay_log_checks_every_env_before_sending_anything(logging_client):
+    """A failed lookup for a later env must not leave earlier lines sent."""
+    logging_client.text("hello", win="w1")
+    logging_client.log_metrics({"acc": 0.9}, step=1, env="first")
+    logging_client.log_metrics({"acc": 0.8}, step=1, env="second")
+    logging_client.offline = False
+
+    def search(query):
+        return {"experiments": []} if '"first"' in query else "<html>error</html>"
+
+    with patch.object(logging_client, "search_experiments", side_effect=search):
+        with echoes(logging_client) as send:
+            with pytest.raises(RuntimeError, match="'second'"):
+                logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+
+
+def test_replay_log_stops_when_the_server_cannot_be_reached(logging_client):
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.offline = False
+    with patch.object(
+        logging_client, "search_experiments", side_effect=ConnectionError("down")
+    ):
+        with echoes(logging_client) as send:
+            with pytest.raises(ConnectionError):
+                logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []

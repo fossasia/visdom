@@ -787,6 +787,13 @@ def _is_log_scalar(value):
     return value is None or isinstance(value, (bool, int, float, str))
 
 
+def _unverified(eid):
+    return RuntimeError(
+        "could not read the stored experiment for {!r}; replay stopped before "
+        "sending anything so no metric is recorded twice".format(eid)
+    )
+
+
 def _replay_key(key, value, step):
     """Match key for a metric; keeps ``True`` apart from ``1`` (equal in Python)."""
 
@@ -1830,11 +1837,19 @@ class Visdom(object):
         and step, so a stored observation identical to a logged one is taken
         to be that logged write.
         """
+        from visdom.utils.server_utils import extract_eid
+
         with open(log_filename) as f:
-            log_entries = f.readlines()
+            entries = [json.loads(line) for line in f]
+        # Check every experiment before sending anything, so a lookup that
+        # fails stops the replay with nothing half sent.
         stored = {}
-        for entry in log_entries:
-            endpoint, msg = json.loads(entry)
+        for endpoint, msg in entries:
+            if endpoint == "experiments/log":
+                eid = extract_eid(msg)
+                if eid not in stored:
+                    stored[eid] = self._stored_experiment(eid)
+        for endpoint, msg in entries:
             if endpoint == "experiments/log":
                 msg = self._unreplayed(msg, stored)
                 if msg is None:
@@ -1844,7 +1859,7 @@ class Visdom(object):
     def _unreplayed(self, msg, stored):
         """The part of a logged experiment call the server does not hold yet.
 
-        ``stored`` caches, per env, what the server held before the replay
+        ``stored`` holds, per env, what the server held before the replay
         began. Each logged metric uses up one matching stored entry, so a value
         that really was logged twice is still sent the second time.
         """
@@ -1852,8 +1867,6 @@ class Visdom(object):
         from visdom.utils.server_utils import extract_eid
 
         eid = extract_eid(msg)
-        if eid not in stored:
-            stored[eid] = self._stored_experiment(eid)
         metrics, finished = stored[eid]
         if finished:
             # The server refuses any further log, metric or finish for it.
@@ -1891,22 +1904,31 @@ class Visdom(object):
         reply = self.search_experiments(
             query="env_id = " + json.dumps(eid, ensure_ascii=False)
         )
-        if not isinstance(reply, dict) or "experiments" not in reply:
-            # Guessing "nothing stored" would resend, and so duplicate, metrics.
-            raise RuntimeError(
-                "could not read the stored experiment for {!r}; replay "
-                "stopped so no metric is recorded twice".format(eid)
-            )
-        found = reply["experiments"]
+        # Anything short of a clear answer is refused: guessing "nothing
+        # stored" would resend, and so duplicate, every metric.
+        found = reply.get("experiments") if isinstance(reply, dict) else None
+        if not isinstance(found, list) or len(found) > 1:
+            raise _unverified(eid)
         if not found:
             return Counter(), False
         experiment = found[0]
+        stored = experiment.get("metrics") if isinstance(experiment, dict) else None
+        if (
+            not isinstance(stored, list)
+            or not isinstance(experiment.get("status"), str)
+            or experiment.get("env_id", eid) != eid
+            or not all(
+                isinstance(m, dict) and {"key", "value", "step"} <= m.keys()
+                for m in stored
+            )
+        ):
+            raise _unverified(eid)
         metrics = Counter(
             _replay_key(m["key"], m["value"], m["step"])
-            for m in experiment.get("metrics", [])
+            for m in stored
             if _is_log_scalar(m["value"]) and _is_log_scalar(m["step"])
         )
-        return metrics, experiment.get("status", "running") != "running"
+        return metrics, experiment["status"] != "running"
 
     # Content
 
