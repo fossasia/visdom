@@ -16,9 +16,10 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 RUN python -c "from visdom.server.build import download_scripts; download_scripts()"
+RUN ln -s /data /root/.visdom
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8097
 VOLUME /data
-ENTRYPOINT ["python", "-m", "visdom.server"]
-CMD ["-port", "8097", "-env_path", "/data"]
+ENTRYPOINT ["python", "-m", "visdom.server", "-env_path", "/data"]
+CMD ["-port", "8097"]
