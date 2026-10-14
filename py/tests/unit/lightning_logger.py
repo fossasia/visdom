@@ -22,7 +22,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from visdom.loggers.lightning import VisdomLightningLogger
+try:
+    from visdom.loggers.lightning import VisdomLightningLogger
+except ImportError:
+    pytest.skip("lightning is not installed", allow_module_level=True)
 
 pytestmark = pytest.mark.unit
 

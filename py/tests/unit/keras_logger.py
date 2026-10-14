@@ -20,7 +20,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from visdom.loggers.keras import VisdomKerasLogger
+try:
+    from visdom.loggers.keras import VisdomKerasLogger
+except ImportError:
+    pytest.skip("tensorflow or keras is not installed", allow_module_level=True)
 
 pytestmark = pytest.mark.unit
 
