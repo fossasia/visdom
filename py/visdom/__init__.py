@@ -4046,6 +4046,7 @@ class Visdom(object):
                 else:
                     with np.errstate(over="ignore", under="ignore"):
                         scale = max_mag / opts["normalize"]
+                    nonzero_vectors = finite_mask & ((X != 0) | (Y != 0))
                     X = np.where(np.isfinite(X), X, np.nan)
                     Y = np.where(np.isfinite(Y), Y, np.nan)
                     if scale >= np.finfo(magnitude.dtype).tiny and np.isfinite(scale):
@@ -4055,6 +4056,11 @@ class Visdom(object):
                     else:
                         X = (X / max_mag) * opts["normalize"]
                         Y = (Y / max_mag) * opts["normalize"]
+                    if np.any(nonzero_vectors & (X == 0) & (Y == 0)):
+                        warnings.warn(
+                            "Quiver normalization underflow: nonzero vectors became zero",
+                            RuntimeWarning,
+                        )
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
