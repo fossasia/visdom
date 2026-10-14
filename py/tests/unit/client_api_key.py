@@ -6,11 +6,15 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 import threading
+from types import SimpleNamespace
 
 import pytest
+import requests
 
 from visdom import Visdom
+from visdom.async_client import _AsyncTransport
 
 pytestmark = pytest.mark.unit
 
@@ -57,3 +61,72 @@ def test_a_key_and_a_workspace_are_kept_on_the_client(tmp_path):
 
     assert client.api_key == "visdom_live_abc"
     assert client.workspace == "lab"
+
+
+def _redirect(client, from_url, to_url):
+    original = requests.Request("POST", from_url).prepare()
+    original.headers.update(client.session.headers)
+    following = original.copy()
+    following.url = to_url
+    client.session.rebuild_auth(following, SimpleNamespace(request=original))
+    return following.headers
+
+
+def test_a_redirect_to_another_host_drops_the_key():
+    headers = _redirect(
+        _client("visdom_live_abc", "lab"),
+        "https://visdom.example/events",
+        "https://elsewhere.example/events",
+    )
+
+    assert "X-API-KEY" not in headers
+    assert "X-Visdom-Workspace" not in headers
+
+
+def test_a_redirect_on_the_same_host_keeps_the_key():
+    headers = _redirect(
+        _client("visdom_live_abc", "lab"),
+        "https://visdom.example/events",
+        "https://visdom.example/vis/events",
+    )
+
+    assert headers["X-API-KEY"] == "visdom_live_abc"
+    assert headers["X-Visdom-Workspace"] == "lab"
+
+
+@pytest.mark.parametrize(
+    "server, warned",
+    [
+        ("http://visdom.example", True),
+        ("https://visdom.example", False),
+        ("http://localhost", False),
+        ("http://127.0.0.1", False),
+    ],
+)
+def test_a_key_sent_in_the_clear_is_warned_about(tmp_path, caplog, server, warned):
+    with caplog.at_level(logging.WARNING, logger="visdom"):
+        Visdom(
+            server=server,
+            api_key="visdom_live_abc",
+            workspace="lab",
+            offline=True,
+            log_to_filename=str(tmp_path / "log"),
+        )
+
+    assert ("unencrypted connection" in caplog.text) is warned
+
+
+def test_the_async_client_does_not_follow_redirects_with_a_key():
+    keyed = _AsyncTransport(
+        "https://visdom.example", 443, api_key="visdom_live_abc", workspace="lab"
+    )
+    plain = _AsyncTransport("https://visdom.example", 443)
+
+    assert (
+        keyed._request("https://visdom.example:443/events", "{}").follow_redirects
+        is False
+    )
+    assert (
+        plain._request("https://visdom.example:443/events", "{}").follow_redirects
+        is True
+    )

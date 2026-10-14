@@ -21,6 +21,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
+import ipaddress
 
 import math
 import re
@@ -130,6 +131,28 @@ logger = logging.getLogger(__name__)
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
+
+KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
+
+
+def _is_loopback(host):
+    """Whether ``host`` names this machine, and so never reaches a network."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class _KeySession(requests.Session):
+    def rebuild_auth(self, prepared_request, response):
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            for name in KEY_HEADERS:
+                prepared_request.headers.pop(name, None)
+        super().rebuild_auth(prepared_request, response)
 
 
 def get_rand_id():
@@ -867,6 +890,16 @@ class Visdom(object):
         self.workspace = workspace
         if self.api_key:
             assert self.workspace, "workspace is required when api_key is given"
+            parsed_server = urlparse(self.server)
+            if parsed_server.scheme != "https" and not _is_loopback(
+                parsed_server.hostname
+            ):
+                logger.warning(
+                    "Sending an API key to %s over an unencrypted connection: "
+                    "it can be read in transit. Use an https:// server url to "
+                    "protect it.",
+                    self.server,
+                )
 
         self.win_data = {}
         if self.offline:
@@ -934,7 +967,7 @@ class Visdom(object):
                     pass
             self._pid = current_pid
             logger.warning("Setting up a new session...")
-            sess = requests.Session()
+            sess = _KeySession()
             if self.proxies:
                 sess.proxies.update(self.proxies)
             if isinstance(self.ssl_verify, str):

@@ -55,7 +55,6 @@ import asyncio
 import contextvars
 import functools
 import inspect
-import ipaddress
 import json
 import logging
 import ssl
@@ -69,7 +68,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.websocket import websocket_connect
 
-from visdom import Visdom
+from visdom import Visdom, _is_loopback
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +192,7 @@ class _AsyncTransport(object):
             "headers": request_headers,
             "connect_timeout": CONNECT_TIMEOUT,
             "request_timeout": REQUEST_TIMEOUT,
+            "follow_redirects": not self.api_key,
         }
         if isinstance(self.ssl_verify, str):
             kwargs["ca_certs"] = self.ssl_verify
@@ -337,18 +337,6 @@ class _AsyncTransport(object):
         if self._client is not None:
             self._client.close()
             self._client = None
-
-
-def _is_loopback(host):
-    """Whether ``host`` names this machine, and so never reaches a network."""
-    if not host:
-        return False
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
 
 
 def _extract_cookie(response, name):
