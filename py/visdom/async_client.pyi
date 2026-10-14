@@ -97,6 +97,8 @@ class _AsyncTransport:
     password: _OptStr
     ssl_verify: Union[bool, Text]
     max_clients: int
+    api_key: _OptStr
+    workspace: _OptStr
     cookie: _OptStr
     def __init__(
         self,
@@ -107,6 +109,8 @@ class _AsyncTransport:
         password: _OptStr = ...,
         ssl_verify: Union[bool, Text] = ...,
         max_clients: int = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
     ) -> None: ...
     @property
     def client(self) -> AsyncHTTPClient: ...
@@ -194,6 +198,8 @@ class AsyncVisdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         offline: bool = ...,
         use_polling: bool = ...,
         session_idle_timeout: Union[int, float] = ...,

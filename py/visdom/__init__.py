@@ -784,6 +784,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
+        api_key=None,
+        workspace=None,
         proxies=None,
         offline=False,
         use_polling=False,
@@ -861,6 +863,11 @@ class Visdom(object):
             assert password, "no password given for authentication"
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+        self.api_key = api_key
+        self.workspace = workspace
+        if self.api_key:
+            assert self.workspace, "workspace is required when api_key is given"
+
         self.win_data = {}
         if self.offline:
             self.use_socket = False
@@ -934,6 +941,10 @@ class Visdom(object):
                 sess.verify = self.ssl_verify
             elif not self.ssl_verify:
                 sess.verify = False
+            if self.api_key:
+                sess.headers.update(
+                    {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
+                )
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -1099,15 +1110,19 @@ class Visdom(object):
                 sock_addr = "{}://{}:{}{}/vis_socket".format(
                     ws_scheme, self.server_base_name, self.port, self.base_url
                 )
+                ws_header = {
+                    "Cookie": "user_password="
+                    + self.session.cookies.get("user_password", "")
+                }
+                if self.api_key:
+                    ws_header["X-API-KEY"] = self.api_key
+                    ws_header["X-Visdom-Workspace"] = self.workspace
                 ws = websocket.WebSocketApp(
                     sock_addr,
                     on_message=on_message,
                     on_error=on_error,
                     on_close=on_close,
-                    header={
-                        "Cookie": "user_password="
-                        + self.session.cookies.get("user_password", "")
-                    },
+                    header=ws_header,
                 )
                 run_forever_kwargs = {
                     "http_proxy_host": self.http_proxy_host,

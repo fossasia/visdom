@@ -139,6 +139,8 @@ class _AsyncTransport(object):
         password=None,
         ssl_verify=True,
         max_clients=DEFAULT_MAX_CONCURRENCY,
+        api_key=None,
+        workspace=None,
     ):
         self.server = server
         self.port = port
@@ -149,6 +151,8 @@ class _AsyncTransport(object):
         self.password = password
         self.ssl_verify = ssl_verify
         self.max_clients = max_clients
+        self.api_key = api_key
+        self.workspace = workspace
         self.cookie = None
         self._connected = False
         self._client = None
@@ -166,8 +170,19 @@ class _AsyncTransport(object):
             )
         return self._client
 
+    def _key_headers(self):
+        """The headers a hosted deployment reads a key and its workspace from.
+
+        The blocking client puts these on its ``requests`` session. This
+        transport builds every request itself, so they are added here, on the
+        POSTs and on the socket handshake alike.
+        """
+        if not self.api_key:
+            return {}
+        return {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
+
     def _request(self, url, body, headers=None):
-        request_headers = {}
+        request_headers = self._key_headers()
         if self.cookie:
             request_headers["Cookie"] = self.cookie
         if headers:
@@ -203,7 +218,7 @@ class _AsyncTransport(object):
         life of the client, so tornado would tear a healthy socket down once
         the deadline passed.
         """
-        headers = {}
+        headers = self._key_headers()
         if self.cookie:
             headers["Cookie"] = self.cookie
         kwargs = {
@@ -836,6 +851,8 @@ class _BridgedVisdom(Visdom):
                 password=getattr(self, "password", None),
                 ssl_verify=self.ssl_verify,
                 max_clients=self._max_clients,
+                api_key=getattr(self, "api_key", None),
+                workspace=getattr(self, "workspace", None),
             )
         return self._transport
 
