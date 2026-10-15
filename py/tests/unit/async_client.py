@@ -37,7 +37,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.testing import gen_test
 
-from visdom import async_client, Visdom
+from visdom import async_client, ServerError, Visdom
 from visdom.async_client import (
     AsyncVisdom,
     DEFAULT_MAX_CONCURRENCY,
@@ -774,6 +774,60 @@ class TestAsyncVisdomErrors(tornado.testing.AsyncTestCase):
         client, _ = await make_client(SSLFailingTransport(), raise_exceptions=True)
         with pytest.raises(ConnectionError, match="ssl_verify=False"):
             await client.text("hello")
+
+    @staticmethod
+    def _refusing_transport():
+        class RefusingTransport(RecordingTransport):
+            def __init__(self):
+                super().__init__()
+                self.first = True
+
+            async def post(self, url, data=None):
+                if self.first:  # construction has to succeed
+                    self.first = False
+                    return ""
+                raise ServerError(409, "experiment 'a' is finished", "<html>")
+
+        return RefusingTransport()
+
+    @gen_test
+    async def test_server_errors_raise_when_asked_to(self):
+        client, _ = await make_client(self._refusing_transport(), raise_exceptions=True)
+        with pytest.raises(ServerError, match="409 experiment 'a' is finished"):
+            await client.log_metrics({"acc": 0.1}, step=2)
+
+    @gen_test
+    async def test_server_errors_keep_returning_the_page_otherwise(self):
+        client, _ = await make_client(
+            self._refusing_transport(), raise_exceptions=False
+        )
+        assert await client.log_metrics({"acc": 0.1}, step=2) == "<html>"
+
+    @gen_test
+    async def test_the_transport_raises_for_an_error_status(self):
+        transport = _AsyncTransport("http://localhost", 8097)
+
+        async def _fetch(request):
+            return _FakeResponse(code=409, body=b"<html>")
+
+        transport._fetch = _fetch
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/experiments/log", "{}")
+        assert caught.value.status == 409
+        assert caught.value.body == "<html>"
+
+    @gen_test
+    async def test_an_undecodable_error_page_still_raises_server_error(self):
+        """Decoded with replacement, as ``requests`` does for ``r.text``."""
+        transport = _AsyncTransport("http://localhost", 8097)
+
+        async def _fetch(request):
+            return _FakeResponse(code=409, body=b"<html>\xff</html>")
+
+        transport._fetch = _fetch
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/experiments/log", "{}")
+        assert caught.value.body == "<html>�</html>"
 
 
 class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):

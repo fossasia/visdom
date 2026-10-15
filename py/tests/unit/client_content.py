@@ -33,11 +33,14 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import os
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+
+import visdom
 
 pytestmark = pytest.mark.unit
 
@@ -787,6 +790,49 @@ def test_finish_experiment_defaults_to_finished(offline_client):
     with echoes(offline_client):
         msg, _ = offline_client.finish_experiment()
     assert msg["status"] == "finished"
+
+
+def _answering(client, status, reason="", text=""):
+    """Give the real ``_handle_post`` a session that answers with ``status``."""
+    response = Mock(status_code=status, reason=reason, text=text)
+    client._session = Mock(post=Mock(return_value=response))
+    client._pid = os.getpid()
+
+
+def test_handle_post_raises_for_an_error_status(offline_client):
+    _answering(offline_client, 409, "experiment 'a' is finished", "<html>")
+    with pytest.raises(visdom.ServerError) as caught:
+        visdom.Visdom._handle_post(offline_client, "http://localhost:8097/x")
+    assert caught.value.status == 409
+    assert caught.value.reason == "experiment 'a' is finished"
+    assert caught.value.body == "<html>"
+
+
+def test_handle_post_returns_the_body_for_a_success_status(offline_client):
+    _answering(offline_client, 200, "OK", '{"env_id": "a"}')
+    body = visdom.Visdom._handle_post(offline_client, "http://localhost:8097/x")
+    assert body == '{"env_id": "a"}'
+
+
+def test_a_server_error_raises_with_raise_exceptions(offline_client):
+    """Not as a ConnectionError: the server was reached, it said no."""
+    offline_client.raise_exceptions = True
+    offline_client._handle_post = Mock(
+        side_effect=visdom.ServerError(409, "experiment 'a' is finished", "<html>")
+    )
+    with pytest.raises(visdom.ServerError, match="409 experiment 'a' is finished"):
+        offline_client.log_metrics({"acc": 0.1}, step=2)
+
+
+@pytest.mark.parametrize("raise_exceptions", [False, None])
+def test_a_server_error_still_returns_the_page_without_raise_exceptions(
+    offline_client, raise_exceptions
+):
+    offline_client.raise_exceptions = raise_exceptions
+    offline_client._handle_post = Mock(
+        side_effect=visdom.ServerError(409, "finished", "<html>")
+    )
+    assert offline_client.log_metrics({"acc": 0.1}, step=2) == "<html>"
 
 
 @pytest.mark.parametrize(
