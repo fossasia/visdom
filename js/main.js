@@ -1107,7 +1107,11 @@ const App = () => {
               envID={selection.envIDs[0]}
               onClose={closePane}
               onFocus={focusPane}
-              onExpand={openDetail}
+              onExpand={
+                pane.type === 'plot' || pane.type === 'plot_history'
+                  ? openDetail
+                  : undefined
+              }
               isFocused={pane.id === focusedPaneID}
               defaultWidth={_width}
               defaultHeight={_height}
