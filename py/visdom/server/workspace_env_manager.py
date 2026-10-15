@@ -12,7 +12,10 @@ deployment keeps each workspace's environments, disk storage, and realtime
 subscribers separate.
 
 Each workspace gets its own ``ServerState``, the same facade a single-tenant
-server has, differing only in which containers and storage it points at.
+server has, differing only in which containers and storage it points at. Once a
+request's workspace is resolved, ``bind_workspace`` swaps the handler's
+``server_state`` for that workspace's one, so every accessor the handler already
+reads through resolves inside that workspace without the handler knowing.
 
 Workspace ``None`` maps to the server's own state, so plain single-tenant or
 local visdom behaves exactly as before.
@@ -171,5 +174,9 @@ class WorkspaceEnvManager:
         # the queue carries the environments it was asked about, not a slice of
         # any one workspace's data.
         state.live_updates = self.default_state.live_updates
+        # A handler bound to this workspace has to be able to rebind, so the
+        # managers travel with the state rather than only with the server's.
+        state.workspace_manager = getattr(self.default_state, "workspace_manager", None)
+        state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
