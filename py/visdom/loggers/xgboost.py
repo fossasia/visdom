@@ -77,6 +77,10 @@ class VisdomXGBLogger(TrainingCallback):
         )
         self._wins = {}
         self._depth = 0
+        # Round after the last one plotted, and whether the current run starts
+        # a new curve (None until before_training has seen a run).
+        self._next_round = 0
+        self._fresh = None
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -266,12 +270,26 @@ class VisdomXGBLogger(TrainingCallback):
         patched._visdom_patched = True
         setattr(module, name, patched)
 
+    @staticmethod
+    def _rounds(model):
+        """Rounds already in ``model``, or None if it can't say (xgboost < 1.4)."""
+        rounds = getattr(model, "num_boosted_rounds", None)
+        return rounds() if callable(rounds) else None
+
+    def before_training(self, model):
+        # Only a model that picks up exactly where the plotted curve stopped
+        # continues it; any other run, pretrained or not, starts a new curve.
+        start = self._rounds(model)
+        self._fresh = not start or start != self._next_round
+        return model
+
     def after_iteration(self, model, epoch, evals_log):
+        # xgboost restarts epoch at 0 when training continues from xgb_model,
+        # so take the round from the model itself.
+        rounds = self._rounds(model)
+        step = rounds - 1 if rounds is not None else epoch
+        fresh = self._fresh if self._fresh is not None else step == 0
         try:
-            # xgboost restarts epoch at 0 when training continues from
-            # xgb_model, so take the round from the model itself.
-            rounds = getattr(model, "num_boosted_rounds", None)
-            step = rounds() - 1 if callable(rounds) else epoch
             for data_name, metrics in evals_log.items():
                 for metric_name, log in metrics.items():
                     value = log[-1]
@@ -292,7 +310,7 @@ class VisdomXGBLogger(TrainingCallback):
                                 "showlegend": True,
                             },
                         )
-                    elif step == 0:
+                    elif fresh:
                         # New run reusing an old window (nested fit, or a
                         # manually reused callback) — replace, don't append.
                         self.viz.line(
@@ -313,7 +331,10 @@ class VisdomXGBLogger(TrainingCallback):
                             update="append",
                         )
         except Exception as e:
-            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(epoch, e))
+            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(step, e))
+        if self._fresh is not None:
+            self._fresh = False
+        self._next_round = step + 1
         return False
 
     def after_training(self, model):

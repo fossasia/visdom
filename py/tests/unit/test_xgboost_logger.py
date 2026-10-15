@@ -245,6 +245,35 @@ class TestContinuedTraining(unittest.TestCase):
         self.assertEqual([x for x, _ in rounds], [0, 1, 2, 3, 4, 5])
         self.assertNotIn("replace", [u for _, u in rounds])
 
+    def test_a_separate_pretrained_model_starts_a_new_curve(self):
+        """xgb_model= from another training is not a continuation of this curve."""
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        other = xgb.train(params, dtrain, 7)
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            xgb.train(params, dtrain, 3, evals=[(dtrain, "eval")], callbacks=[logger])
+            xgb.train(
+                params,
+                dtrain,
+                2,
+                evals=[(dtrain, "eval")],
+                callbacks=[logger],
+                xgb_model=other,
+            )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual(rounds[3:], [(7, "replace"), (8, "append")])
+
+    def test_a_failure_warns_with_the_plotted_round(self):
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        model = Mock(num_boosted_rounds=Mock(return_value=6))
+        with patch.object(viz, "line", side_effect=RuntimeError("boom")):
+            with self.assertWarnsRegex(UserWarning, "round 5"):
+                logger.after_iteration(model, 0, {"train": {"rmse": [0.5]}})
+
     def test_a_fresh_model_still_replaces_the_old_run(self):
         rng = np.random.RandomState(0)
         dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
