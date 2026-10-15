@@ -2738,6 +2738,11 @@ class Visdom(object):
         `step` can be a scalar or a 1D series matching the metric length. When
         `update='append'`, `step` must be specified to avoid repeatedly appending
         points at the same x-coordinate.
+
+        `opts.legend` can map metric names to display labels. Reuse this mapping
+        on updates to keep labels attached to their metrics when the order changes
+        or only a subset is updated. Missing keys use the metric name. List/tuple
+        legends remain positional for compatibility.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -2785,6 +2790,13 @@ class Visdom(object):
         opts.setdefault("ylabel", "metric")
         if opts.get("legend") is None:
             legend = names
+            opts["legend"] = legend
+        elif isinstance(opts["legend"], Mapping):
+            legend = [opts["legend"].get(name, name) for name in names]
+            assert all(
+                isinstance(label, str) for label in legend
+            ), "legend mapping values should be strings"
+            assert len(set(legend)) == len(legend), "legend labels should be unique"
             opts["legend"] = legend
         else:
             legend = opts["legend"]
