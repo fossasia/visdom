@@ -2399,7 +2399,6 @@ class Visdom(object):
         finite = np.isfinite(heatmap)
         h_min = float(np.min(heatmap, where=finite, initial=np.inf))
         h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
-        del finite
         if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)

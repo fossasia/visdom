@@ -3,6 +3,7 @@
 """Rescaling finite activations must preserve non-finite overlay semantics."""
 
 import base64
+from contextlib import nullcontext
 from io import BytesIO
 import sys
 from unittest.mock import patch
@@ -26,8 +27,9 @@ pytestmark = pytest.mark.unit
     ],
 )
 @pytest.mark.parametrize("strided", [False, True])
+@pytest.mark.parametrize("matplotlib", [False, True])
 def test_overlay_rescaling_preserves_missing_and_infinite_values(
-    capture_send, raw, normalized, strided
+    capture_send, raw, normalized, strided, matplotlib
 ):
     image = np.full((1, len(raw)), 100, dtype=np.uint8)
     heatmap = np.array([raw], dtype=np.float32)
@@ -42,7 +44,9 @@ def test_overlay_rescaling_preserves_missing_and_infinite_values(
         with Image.open(BytesIO(base64.b64decode(encoded))) as png:
             return np.asarray(png).copy()
 
-    with patch.dict(sys.modules, {"matplotlib": None}):
+    if matplotlib:
+        pytest.importorskip("matplotlib.cm")
+    with nullcontext() if matplotlib else patch.dict(sys.modules, {"matplotlib": None}):
         actual = render(heatmap)
         expected = render(np.array([normalized], dtype=np.float32))
     np.testing.assert_array_equal(actual, expected)
