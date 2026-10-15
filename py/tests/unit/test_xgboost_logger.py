@@ -91,6 +91,17 @@ class TestAfterIteration(unittest.TestCase):
         self.assertEqual(sent["endpoint"], "update")
         self.assertFalse(sent["payload"]["append"])
 
+    def test_continued_training_appends_at_the_models_round(self):
+        # xgb_model= restarts epoch at 0, but the model already has 5 rounds.
+        self.logger._wins["rmse"] = "existing_win"
+        model = Mock(num_boosted_rounds=Mock(return_value=6))
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(model, 0, {"train": {"rmse": [0.3]}}),
+        )
+        self.assertTrue(sent["payload"]["append"])
+        self.assertEqual(sent["payload"]["data"][0]["x"], [5])
+
     def test_tuple_valued_metric_unwraps_to_its_first_element(self):
         sent = _capture(
             self.viz,
@@ -200,3 +211,52 @@ class TestAutolog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestContinuedTraining(unittest.TestCase):
+    """Training on from xgb_model extends the curve instead of wiping it."""
+
+    def _rounds(self, line, name):
+        return [
+            (c.kwargs["X"][0], c.kwargs.get("update"))
+            for c in line.call_args_list
+            if c.kwargs["name"] == name
+        ]
+
+    def test_curve_continues_across_xgb_model(self):
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            first = xgb.train(
+                params, dtrain, 3, evals=[(dtrain, "eval")], callbacks=[logger]
+            )
+            xgb.train(
+                params,
+                dtrain,
+                3,
+                evals=[(dtrain, "eval")],
+                callbacks=[logger],
+                xgb_model=first,
+            )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual([x for x, _ in rounds], [0, 1, 2, 3, 4, 5])
+        self.assertNotIn("replace", [u for _, u in rounds])
+
+    def test_a_fresh_model_still_replaces_the_old_run(self):
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            for _ in range(2):
+                xgb.train(
+                    params, dtrain, 2, evals=[(dtrain, "eval")], callbacks=[logger]
+                )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual(
+            rounds, [(0, None), (1, "append"), (0, "replace"), (1, "append")]
+        )

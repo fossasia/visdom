@@ -268,6 +268,10 @@ class VisdomXGBLogger(TrainingCallback):
 
     def after_iteration(self, model, epoch, evals_log):
         try:
+            # xgboost restarts epoch at 0 when training continues from
+            # xgb_model, so take the round from the model itself.
+            rounds = getattr(model, "num_boosted_rounds", None)
+            step = rounds() - 1 if callable(rounds) else epoch
             for data_name, metrics in evals_log.items():
                 for metric_name, log in metrics.items():
                     value = log[-1]
@@ -277,7 +281,7 @@ class VisdomXGBLogger(TrainingCallback):
                     trace_name = data_name
                     if win_name not in self._wins:
                         self._wins[win_name] = self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             env=self.env,
                             name=trace_name,
@@ -288,11 +292,11 @@ class VisdomXGBLogger(TrainingCallback):
                                 "showlegend": True,
                             },
                         )
-                    elif epoch == 0:
+                    elif step == 0:
                         # New run reusing an old window (nested fit, or a
                         # manually reused callback) — replace, don't append.
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
@@ -301,7 +305,7 @@ class VisdomXGBLogger(TrainingCallback):
                         )
                     else:
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
