@@ -764,3 +764,100 @@ def test_a_stored_series_reads_like_the_list_it_replaced():
     assert series == [Metric.from_dict(data) for data in _series(3)]
     with pytest.raises(IndexError):
         series[3]
+
+
+def test_an_edited_metric_is_published_as_edited(store):
+    """Editing an indexed observation still persists, as it did when it was a list.
+
+    Indexing hands out a live ``Metric``; the eager serialiser called
+    ``to_dict`` on every one of them, so changing a value and writing was a
+    workflow that worked. Publishing the stored dicts untouched would have
+    dropped the edit silently.
+    """
+    _seed_history(store, "run", 3)
+    experiments = ExperimentStore(store)
+    exp = experiments.get_experiment("run")
+
+    exp.metrics[1].value = 99.0
+    experiments._write("run", store.load_env("run"), exp)
+
+    assert store.load_experiment("run")["metrics"][1]["value"] == 99.0
+
+
+def test_an_edit_does_not_reach_the_list_already_handed_out():
+    """A write-back copies first, for the reason an append does."""
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(3)
+    exp = Experiment.from_dict(blob)
+
+    published = exp.to_dict()["metrics"]
+    exp.metrics[0].value = 42.0
+    republished = exp.to_dict()["metrics"]
+
+    assert published is blob["metrics"]
+    assert published[0]["value"] == 0.0
+    assert republished is not published
+    assert republished[0]["value"] == 42.0
+
+
+def test_reading_an_observation_does_not_count_as_editing_it(store):
+    """An observation that was only read is still echoed as it was stored.
+
+    ``Metric.from_dict`` stamps a missing ``timestamp`` with the time of the
+    read, so comparing the rebuilt object against the stored dict would call
+    every such observation edited and launder it on the next write. The
+    comparison is against what the object held when it was built instead.
+    """
+    _seed_history(store, "run", 0)
+    env = store.load_env("run")
+    env["experiment"]["metrics"] = [{"key": "acc", "value": 1.0, "unit": "%"}]
+    store.save_env("run", env)
+    experiments = ExperimentStore(store)
+    exp = experiments.get_experiment("run")
+
+    assert exp.metrics[0].value == 1.0
+    experiments._write("run", store.load_env("run"), exp)
+
+    assert store.load_experiment("run")["metrics"][0] == {
+        "key": "acc",
+        "value": 1.0,
+        "unit": "%",
+    }
+
+
+def test_an_empty_batch_creates_no_experiment(store):
+    """A batch recording nothing brings no run into being.
+
+    An experiment is created by an observation; a request carrying none would
+    otherwise persist a run with an empty series, which then shows up in every
+    search as a run nobody logged to.
+    """
+    assert ExperimentStore(store).log_metrics("run", {}) is None
+    assert store.load_experiment("run") is None
+
+
+def test_an_empty_batch_writes_nothing_to_an_existing_experiment(store, monkeypatch):
+    """It is a no-op on a run that does exist, too -- not a rewrite of it."""
+    experiments = ExperimentStore(store)
+    experiments.log_metric("run", "acc", 0.9)
+    writes = []
+    monkeypatch.setattr(
+        ExperimentStore,
+        "_write",
+        lambda self, env_id, env, experiment: writes.append(env_id),
+    )
+
+    returned = experiments.log_metrics("run", {})
+
+    assert writes == []
+    assert returned.latest_metric("acc").value == 0.9
+
+
+def test_an_empty_batch_is_still_refused_by_a_terminal_experiment(store):
+    """What a finished run refuses is the attempt, not what it carried."""
+    experiments = ExperimentStore(store)
+    experiments.log_metric("run", "acc", 0.9)
+    experiments.finish_experiment("run")
+
+    with pytest.raises(ExperimentFinishedError):
+        experiments.log_metrics("run", {})

@@ -321,13 +321,23 @@ class ExperimentStore:
         is what lets ``/experiments/log`` go on reporting a rejection only
         after what applied has been persisted; there is no "what applied" left
         to lose.
+
+        A batch with nothing in it records nothing, so it creates nothing and
+        writes nothing: an experiment is brought into being by an observation,
+        and a run that was never logged to has no business appearing in a
+        search. A terminal experiment still refuses the call, because what is
+        being refused is the attempt, not the observations it carried.
         """
+        items = list(
+            observations.items() if hasattr(observations, "items") else observations
+        )
         env, experiment = self._read(env_id)
+        if experiment is not None:
+            self._reject_if_terminal(env_id, experiment)
+        if not items:
+            return experiment
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
-        else:
-            self._reject_if_terminal(env_id, experiment)
-        items = observations.items() if hasattr(observations, "items") else observations
         for key, value in items:
             experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)

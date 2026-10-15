@@ -104,6 +104,17 @@ class Metric:
         )
 
 
+def _metric_fields(metric: "Metric") -> tuple:
+    """The values :meth:`Metric.to_dict` would write, as a comparable tuple.
+
+    Kept for every observation this list has handed out as an object, so
+    :meth:`LazyMetricList.publish` can tell an edited one from an untouched
+    one without re-serialising either. A tuple rather than the dict itself
+    because this is only ever compared, never read field by field.
+    """
+    return (metric.key, metric.value, metric.step, metric.timestamp)
+
+
 class LazyMetricList(Sequence):
     """A metric series held as the dicts it is stored as, built on demand.
 
@@ -126,15 +137,25 @@ class LazyMetricList(Sequence):
     storage worker without copying it
     (``server.handlers.experiments_handler._resident_experiments``), so
     appending to it in place would mutate what another thread is reading.
-    :meth:`append_data` therefore copies it first and appends to the copy it
-    then owns; :meth:`publish` marks the list as handed out again.
+    :meth:`append` therefore copies it first and appends to the copy it then
+    owns; :meth:`publish` marks the list as handed out again.
+
+    A ``Metric`` handed out by indexing is a live object, and editing one is
+    how the series was edited when this field held a list. :meth:`publish`
+    therefore writes an edited observation back before serialising, so that
+    workflow still persists. Only observations that were actually indexed are
+    considered, and only those whose fields have changed since they were
+    built are rewritten -- an observation that was merely read is left in the
+    stored form it arrived in, which is what keeps an unrecognised field, or
+    a missing ``timestamp``, from being laundered by the act of reading it.
     """
 
-    __slots__ = ("_data", "_objects", "_shared")
+    __slots__ = ("_data", "_objects", "_pristine", "_shared")
 
     def __init__(self, data: list, shared: bool = True):
         self._data = data
         self._objects: dict[int, Metric] = {}
+        self._pristine: dict[int, tuple] = {}
         self._shared = shared
 
     def __len__(self) -> int:
@@ -151,6 +172,7 @@ class LazyMetricList(Sequence):
         if metric is None:
             metric = Metric.from_dict(self._data[index])
             self._objects[index] = metric
+            self._pristine[index] = _metric_fields(metric)
         return metric
 
     def __eq__(self, other) -> bool:
@@ -169,9 +191,26 @@ class LazyMetricList(Sequence):
         """Return the stored list, marking it as handed out to a caller.
 
         Whoever receives it may keep it — :meth:`Experiment.to_dict` puts it
-        straight into the env blob — so the next :meth:`append_data` must copy
+        straight into the env blob — so the next :meth:`append` must copy
         rather than touch it.
+
+        An observation that was handed out as a ``Metric`` and then edited is
+        written back first, since that edit is what the caller means to
+        persist. The comparison is against what the object held when it was
+        built, not against the stored dict, so reading an observation never
+        counts as changing it. A write-back copies the list for the same
+        reason an append does: the one being replaced may be the list another
+        thread is reading.
         """
+        for index, metric in self._objects.items():
+            fields = _metric_fields(metric)
+            if fields == self._pristine.get(index):
+                continue
+            if self._shared:
+                self._data = list(self._data)
+                self._shared = False
+            self._data[index] = metric.to_dict()
+            self._pristine[index] = fields
         self._shared = True
         return self._data
 
@@ -189,6 +228,7 @@ class LazyMetricList(Sequence):
             self._data = list(self._data)
             self._shared = False
         self._objects[len(self._data)] = metric
+        self._pristine[len(self._data)] = _metric_fields(metric)
         self._data.append(metric.to_dict())
 
     def latest_values(self) -> dict:
