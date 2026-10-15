@@ -564,7 +564,14 @@ def test_register_embeddings_entity_selected_without_a_getter(offline_client):
 def test_register_embeddings_region_selected_reruns_tsne_on_the_subset(offline_client):
     offline_client.use_socket = True
     offline_client._register_embeddings(
-        FEATURES, LABELS, [], None, None, "w1", None, {}
+        FEATURES,
+        LABELS,
+        [{"group": group} for group in [0, 1, 0]],
+        None,
+        None,
+        "w1",
+        None,
+        {},
     )
     handler = offline_client.event_handlers[(None, "w1")][0]
 
@@ -818,9 +825,17 @@ def test_experiment_passes_through_a_non_json_reply(offline_client):
 
 
 @pytest.mark.parametrize(
-    "labels", [[1, 3, 1], [2.5, -1.5, 2.5], ["zebra", "ant", "zebra"]]
+    "labels, groups",
+    [
+        ([1, 3, 1], [0, 1, 0]),
+        ([10**9, 1, 10**9], [1, 0, 1]),
+        ([2.5, -1.5, 2.5], [1, 0, 1]),
+        (["zebra", "ant", "zebra"], [1, 0, 1]),
+        ([1, 2, 1], [0, 1, 0]),
+        ([0, 0, 0], [0, 0, 0]),
+    ],
 )
-def test_embedding_lasso_preserves_original_groups(offline_client, labels):
+def test_embedding_lasso_preserves_original_groups(offline_client, labels, groups):
     offline_client.use_socket = True
     calls = []
     with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
@@ -830,11 +845,15 @@ def test_embedding_lasso_preserves_original_groups(offline_client, labels):
     ):
         offline_client.embeddings(FEATURES, labels, env="e")
     original = calls[1]["data"][0]["content"]["data"]
+    assert [point["group"] for point in original] == groups
+    assert offline_client.win_data["w"]["points"] == original
     handler = offline_client.event_handlers[("e", "w")][0]
     for selection in ([2, 1], [1, 0]):
         with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
             offline_client, "_send"
-        ) as send:
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
             handler(
                 {
                     "target": "w",
