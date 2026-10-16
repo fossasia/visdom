@@ -545,6 +545,23 @@ def _to_numpy(a):
     return a
 
 
+def _plain_scalar(value, what):
+    """Turn a one-element tensor or numpy value into a plain Python number.
+
+    Anything else is returned as it is.
+    """
+    item = getattr(value, "item", None)
+    if not callable(item):
+        return value
+    numel = getattr(value, "numel", None)
+    count = numel() if callable(numel) else getattr(value, "size", 1)
+    if count != 1:
+        raise TypeError("{} must be a single value, got {} values".format(what, count))
+    value = item()
+    # np.longdouble.item() stays a numpy scalar, which json can't encode.
+    return float(value) if isinstance(value, np.floating) else value
+
+
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
@@ -1350,6 +1367,10 @@ class Visdom(object):
             raise TypeError("params must be a dict of {name: value}")
         if tags is not None and not isinstance(tags, dict):
             raise TypeError("tags must be a dict of {name: value}")
+        if params is not None:
+            params = {
+                k: _plain_scalar(v, "param {!r}".format(k)) for k, v in params.items()
+            }
         return self._experiment_send(
             {
                 "action": "log",
@@ -1366,10 +1387,15 @@ class Visdom(object):
 
         `metrics` is a dict of `{name: value}` recorded at an optional training
         `step`; the experiment is created automatically if it does not exist yet.
+        Values and `step` may be one-element torch tensors or numpy values.
         Returns the updated experiment as a dict.
         """
         if not isinstance(metrics, dict) or not metrics:
             raise TypeError("metrics must be a non-empty dict of {name: value}")
+        metrics = {
+            k: _plain_scalar(v, "metric {!r}".format(k)) for k, v in metrics.items()
+        }
+        step = _plain_scalar(step, "step")
         return self._experiment_send(
             {"action": "metrics", "metrics": metrics, "step": step}, env
         )
