@@ -175,14 +175,23 @@ def _title2str(opts):
 
 
 def _scrub_dict(d):
-    if isinstance(d, dict):
-        return {
-            k: _scrub_dict(v)
-            for k, v in list(d.items())
-            if v is not None and _scrub_dict(v) is not None
-        }
-    else:
+    """Drop ``None`` values from ``d``, recursively.
+
+    Each value is scrubbed once and the result reused for both the emptiness
+    test and the output. Testing and building separately walked every subtree
+    twice per level, which costs 2**depth for a nested ``layoutopts``.
+    """
+    if not isinstance(d, dict):
         return d
+    scrubbed = {}
+    for k, v in list(d.items()):
+        if v is None:
+            continue
+        value = _scrub_dict(v)
+        if value is None:
+            continue
+        scrubbed[k] = value
+    return scrubbed
 
 
 TICK_FIELD_SUFFIXES = (
