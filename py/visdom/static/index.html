@@ -68,6 +68,9 @@ LICENSE file in the root directory of this source tree.
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     </script>
+    {% if cloud_context %}
+    <script>window.VISDOM_CLOUD = {% raw cloud_context %};</script>
+    {% end %}
     <script src={{ static_url("js/main.js") }}></script>
     <link rel="stylesheet" href={{ static_url("css/style.css") }}>
     <link rel="stylesheet" href={{ static_url("css/rc-tree-select-overrides.css") }}>
