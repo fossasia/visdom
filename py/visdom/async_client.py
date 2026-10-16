@@ -152,6 +152,7 @@ class _AsyncTransport(object):
         self.max_clients = max_clients
         self.api_key = api_key
         self.workspace = workspace
+        self.on_refusal = None
         self.cookie = None
         self._connected = False
         self._client = None
@@ -331,7 +332,10 @@ class _AsyncTransport(object):
             except (OSError, HTTPClientError) as retry_error:
                 raise _as_requests_error(retry_error) from e
         self._connected = True
-        return response.body.decode("utf-8") if response.body else ""
+        text = response.body.decode("utf-8") if response.body else ""
+        if self.on_refusal is not None:
+            self.on_refusal(response.code, text)
+        return text
 
     def close(self):
         if self._client is not None:
@@ -842,6 +846,8 @@ class _BridgedVisdom(Visdom):
                 api_key=getattr(self, "api_key", None),
                 workspace=getattr(self, "workspace", None),
             )
+        if getattr(self._transport, "on_refusal", self) is None:
+            self._transport.on_refusal = self._note_refusal
         return self._transport
 
     def run_call(self, call, bound, args, kwargs):
