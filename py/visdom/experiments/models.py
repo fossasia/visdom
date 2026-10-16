@@ -231,6 +231,25 @@ class LazyMetricList(Sequence):
         self._pristine[len(self._data)] = _metric_fields(metric)
         self._data.append(metric.to_dict())
 
+    def _edits(self) -> dict:
+        """The handed-out ``Metric`` objects that no longer match the store.
+
+        Editing an indexed observation is how the series is edited, and the
+        edit does not reach the stored dicts until the next :meth:`publish`,
+        so a reader that summarises has to prefer the object. Only an object
+        that actually differs counts, by the same comparison
+        :meth:`publish` makes -- merely reading one leaves its stored dict
+        authoritative, and an untouched series answers an empty mapping,
+        which is what keeps the usual walk off the objects entirely.
+        """
+        if not self._objects:
+            return {}
+        return {
+            index: metric
+            for index, metric in self._objects.items()
+            if _metric_fields(metric) != self._pristine.get(index)
+        }
+
     def latest_values(self) -> dict:
         """Return ``{key: latest value}`` without building a single ``Metric``.
 
@@ -239,19 +258,40 @@ class LazyMetricList(Sequence):
         :func:`~visdom.experiments.query.build_record` has always applied. An
         entry with no usable ``key`` is skipped rather than raising, as the
         flatten path in :mod:`~visdom.experiments.records` already does.
+
+        An edit counts from the moment it is made, not from the next
+        :meth:`publish`: a comparison and a query record both read this, and
+        reporting the pre-edit number would contradict what :meth:`latest`
+        hands back for the same key. The edits are folded into a copy rather
+        than branched on per entry, so a series carrying none -- every series
+        a summarising reader sees -- is walked exactly as it was before.
         """
+        data = self._data
+        edits = self._edits()
+        if edits:
+            data = list(data)
+            for index, metric in edits.items():
+                data[index] = metric.to_dict()
         latest: dict = {}
-        for data in reversed(self._data):
-            key = data.get("key")
+        for entry in reversed(data):
+            key = entry.get("key")
             if key is None:
                 continue
-            latest.setdefault(key, data.get("value"))
+            latest.setdefault(key, entry.get("value"))
         return latest
 
     def latest(self, key: str) -> Optional["Metric"]:
-        """Return the most recently stored metric named ``key``, or ``None``."""
+        """Return the most recently stored metric named ``key``, or ``None``.
+
+        Matched on the key an observation currently carries, so an indexed
+        one that was renamed answers to its new name and no longer to the one
+        it was stored under.
+        """
+        edits = self._edits()
         for index in range(len(self._data) - 1, -1, -1):
-            if self._data[index].get("key") == key:
+            metric = edits.get(index)
+            stored = metric.key if metric is not None else self._data[index].get("key")
+            if stored == key:
                 return self[index]
         return None
 

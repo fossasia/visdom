@@ -861,3 +861,72 @@ def test_an_empty_batch_is_still_refused_by_a_terminal_experiment(store):
 
     with pytest.raises(ExperimentFinishedError):
         experiments.log_metrics("run", {})
+
+
+def test_an_edit_to_an_indexed_metric_is_the_latest_value():
+    """A summarising read sees the edit, not the number it replaced.
+
+    Indexing hands out a live ``Metric`` and editing one is how the series is
+    edited, but the edit only reaches the stored dicts on the next publish.
+    A comparison or a query record built in between would otherwise report
+    the pre-edit number while :meth:`latest_metric` reported the new one.
+    """
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(3)
+    exp = Experiment.from_dict(blob)
+
+    exp.metrics[-1].value = 42.0
+
+    assert exp.latest_metric_values() == {"acc": 42.0}
+    assert exp.latest_metric("acc").value == 42.0
+    assert build_record(exp)["metric.acc"] == 42.0
+
+
+def test_a_renamed_metric_is_found_under_the_name_it_now_carries():
+    """Renaming an indexed observation moves it, rather than duplicating it."""
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(2)
+    exp = Experiment.from_dict(blob)
+
+    exp.metrics[1].key = "loss"
+
+    assert exp.latest_metric_values() == {"loss": 1.0, "acc": 0.0}
+    assert exp.latest_metric("loss").value == 1.0
+    assert exp.latest_metric("acc").value == 0.0
+
+
+def test_an_edit_seen_by_a_summarising_read_is_still_published():
+    """Reading the edit neither persists it nor disturbs the stored list.
+
+    The read folds the edit into a copy, so the list a caller is already
+    holding keeps the value it was published with and the write that follows
+    still has the edit to make.
+    """
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = _series(2)
+    exp = Experiment.from_dict(blob)
+
+    exp.metrics[0].value = 7.0
+    assert exp.latest_metric_values() == {"acc": 1.0}
+    assert blob["metrics"][0]["value"] == 0.0
+
+    assert exp.to_dict()["metrics"][0]["value"] == 7.0
+
+
+def test_an_observation_that_was_only_read_is_not_treated_as_an_edit():
+    """Indexing alone leaves the stored dicts authoritative for a summary.
+
+    ``Metric.from_dict`` stamps a missing ``timestamp`` with the time of the
+    read, so an observation that was merely indexed must not count as edited
+    -- the same rule publishing applies, and what keeps the summarising walk
+    off the objects on every series a reader has looked at.
+    """
+    blob = Experiment(env_id="run").to_dict()
+    blob["metrics"] = [{"key": "acc", "value": 1.0, "unit": "%"}]
+    exp = Experiment.from_dict(blob)
+
+    assert exp.metrics[0].value == 1.0
+
+    assert exp.metrics._edits() == {}
+    assert exp.latest_metric_values() == {"acc": 1.0}
+    assert exp.to_dict()["metrics"] is blob["metrics"]
