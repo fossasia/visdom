@@ -11,15 +11,20 @@ Unit tests for server utility functions.
 No server needed — these test pure functions directly.
 """
 
+import os
+import stat
+
 import pytest
 
 from visdom.data_model.json_store import JSONStore
+from visdom.utils import server_utils
 from visdom.utils.server_utils import (
     LazyEnvData,
     create_args_for_append,
     escape_eid,
     extract_eid,
     hash_password,
+    set_cookie,
     snapshot_env,
     snapshot_state,
     stringify,
@@ -132,6 +137,35 @@ def test_hash_password_full_login_flow():
     stored = hash_password(client_hash)
     salt = stored.split("$")[0]
     assert hash_password(client_hash, salt=salt) == stored
+
+
+# -------------------------------------------------------------- set_cookie ----
+
+
+def test_set_cookie_creates_a_missing_env_dir(tmp_path, monkeypatch):
+    """A first ``-enable_login`` run has no ~/.visdom to write the secret into."""
+    env_dir = tmp_path / "fresh_home" / ".visdom"
+    monkeypatch.setattr(server_utils, "DEFAULT_ENV_PATH", str(env_dir) + os.sep)
+
+    set_cookie("secret")
+
+    assert (env_dir / "COOKIE_SECRET").read_text() == "secret"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("existing", [False, True])
+def test_set_cookie_keeps_the_secret_owner_only(tmp_path, monkeypatch, existing):
+    """Other local users must not be able to read the cookie signing key."""
+    secret = tmp_path / "COOKIE_SECRET"
+    if existing:
+        secret.write_text("old")
+        secret.chmod(0o644)
+    monkeypatch.setattr(server_utils, "DEFAULT_ENV_PATH", str(tmp_path) + os.sep)
+
+    set_cookie("secret")
+
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    assert secret.read_text() == "secret"
 
 
 # ------------------------------------------------- create_args_for_append ----
