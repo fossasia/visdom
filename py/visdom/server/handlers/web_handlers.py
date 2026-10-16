@@ -58,7 +58,6 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    stringify,
     env_is_readable,
     readable_panes,
     reload_is_readable,
@@ -172,6 +171,18 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
         # Bumped before the patch is computed so the diff carries the new
         # version to the client, keeping its copy in step for the next update.
         UpdateHandler.bump_version(p)
@@ -457,7 +468,13 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
-    def broadcast_window_update(handler, args, eid, p, diff_packet):
+    def window_update_message(args, eid, p, diff_packet):
+        """Encode the patch broadcast for ``p``, ready to put on the wire.
+
+        Split out from ``broadcast_window_update`` so a caller that has to know
+        how large the patch is can measure the string it is about to send
+        instead of serialising the pane a second time to estimate it.
+        """
         broadcast_packet = {
             "command": "window_update",
             "win": args["win"],
@@ -465,7 +482,46 @@ class UpdateHandler(BaseHandler):
             "content": diff_packet,
             "version": p.get("version", 1),
         }
-        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+        return json.dumps(broadcast_packet, cls=NanSafeEncoder)
+
+    @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast(
+            handler,
+            UpdateHandler.window_update_message(args, eid, p, diff_packet),
+            eid,
+        )
+
+    @staticmethod
+    def pane_min_bytes(p):
+        """A lower bound on the encoded size of ``p``, without encoding it.
+
+        In a ``json.dumps`` array every element costs at least one character
+        and every element after the first also carries the two-character ``,``
+        separator, so a trace array of ``k`` values cannot encode to fewer than
+        ``3k - 2`` characters. That bounds the pane from below in O(traces)
+        where encoding it is O(points). Every element type clears the one-char
+        floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
+        keys, layout and envelope are ignored, so the bound only ever
+        understates -- which costs an exact comparison that could have been
+        skipped, never a wrong answer.
+
+        A pane with no trace arrays to count -- text, HTML, an image, anything
+        whose ``content`` is not a dict of traces -- bounds to zero, which is
+        the same understatement and simply leaves the comparison exact.
+        """
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        if not isinstance(traces, (list, tuple)):
+            return 0
+        total = 0
+        for trace in traces:
+            if not isinstance(trace, dict):
+                continue
+            for value in trace.values():
+                if isinstance(value, (list, tuple)) and value:
+                    total += 3 * len(value) - 2
+        return total
 
     @staticmethod
     def wrap_func(handler, args):
@@ -570,14 +626,28 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-        handler.mark_dirty(eid)
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # Send the smaller of the patch and the updated pane. The pane is
+            # only encoded when it could actually win: pane_min_bytes bounds its
+            # encoded size from below, so a patch already shorter than that
+            # bound cannot be beaten and the encode -- the one whose cost grows
+            # with the data already plotted -- is skipped. Every other update
+            # compares for real.
+            msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
+            if UpdateHandler.pane_min_bytes(p) < len(msg):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
+                if len(pane_msg) <= len(msg):
+                    msg = pane_msg
+            broadcast(handler, msg, eid)
+            handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -597,6 +667,8 @@ class CloseHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+        if eid not in handler.state:
+            return
         win = args.get("win")
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
@@ -795,9 +867,12 @@ class CompareHandler(BaseHandler):
     async def post(self, args):
         """Send environment comparison data to a subscriber socket.
 
-        Expects a JSON object with a required ``sid`` string identifying the
-        target subscriber session. Returns HTTP 400 if the request body is
-        not valid JSON, is not an object, or is missing ``sid``.
+        Expects a JSON object with a ``sid`` string identifying the target
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
         """
         try:
             body = tornado.escape.json_decode(
@@ -809,16 +884,15 @@ class CompareHandler(BaseHandler):
         if not isinstance(body, Mapping):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
 
-        if (
-            "sid" not in body
-            or not isinstance(body["sid"], str)
-            or not body["sid"].strip()
-        ):
+        if "sid" not in body:
             raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
 
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
-        if sid in self.subs:
+        if sid and sid in self.subs:
             eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
@@ -919,6 +993,14 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                if "win" in args and args["win"] is None:
+                    handler.write(json.dumps({}, cls=NanSafeEncoder))
+                    return
+                raise tornado.web.HTTPError(
+                    404, reason=f"environment '{eid}' not found"
+                )
+
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
