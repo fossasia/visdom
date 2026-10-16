@@ -303,6 +303,34 @@ def test_workspace_inherits_the_server_configuration(app_factory):
     assert space.readonly == app.server_state.readonly
 
 
+def test_eager_workspace_load_keeps_extra_env_keys(app_factory, env_path):
+    """A workspace loaded eagerly keeps the keys the server's own load keeps."""
+    experiment = {"env_id": "expt", "name": "run-1", "status": "running"}
+    workspace_store = JSONStore(os.path.join(env_path, "workspaces", "ws-a"))
+    workspace_store.save_env("expt", dict(env_payload("w1"), experiment=experiment))
+
+    app = app_factory(eager_data_loading=True)
+    space = app.workspace_env_manager.space("ws-a")
+
+    assert space.state["expt"]["experiment"] == experiment
+    assert space.state["expt"]["jsons"] == env_payload("w1")["jsons"]
+
+
+@pytest.mark.parametrize(
+    "workspace_id", ["", ".", "..", "../outside", "a/b", "/tmp/outside"]
+)
+def test_a_workspace_id_cannot_leave_the_workspaces_folder(
+    app_factory, env_path, workspace_id
+):
+    manager = app_factory().workspace_env_manager
+
+    with pytest.raises(ValueError):
+        manager.space(workspace_id)
+
+    assert not os.path.exists(os.path.join(env_path, "outside"))
+    assert not os.path.exists(os.path.join(env_path, "workspaces", "a"))
+
+
 def test_default_workspace_is_the_server_state(app_factory):
     """Workspace None is not a copy of the server's state, it is that state."""
     app = app_factory()

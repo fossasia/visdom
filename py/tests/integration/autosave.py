@@ -34,7 +34,7 @@ from unittest import mock
 import pytest
 import tornado.ioloop
 
-from visdom.server.app import Application
+from visdom.server.app import Application, _combine_written
 from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
@@ -729,7 +729,7 @@ class TestFlushAcrossWorkspacesOnTheRealWorker(unittest.TestCase):
             space.mark_dirty("expt")
 
         async def flush():
-            return await asyncio.wrap_future(app.flush_dirty())
+            return await app.flush_dirty()
 
         loop = tornado.ioloop.IOLoop(make_current=True)
         try:
@@ -746,6 +746,60 @@ class TestFlushAcrossWorkspacesOnTheRealWorker(unittest.TestCase):
                     os.path.join(tmp.name, "workspaces", workspace, "expt.json")
                 )
             )
+
+    def test_the_server_state_alone_gives_back_its_own_write(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        app = Application(port=8097, env_path=tmp.name)
+        app.state["expt"] = {"jsons": {}, "reload": {}}
+        app.mark_dirty("expt")
+
+        async def flush():
+            pending = app.flush_dirty()
+            self.assertIsInstance(pending, asyncio.Future)
+            return await pending
+
+        loop = tornado.ioloop.IOLoop(make_current=True)
+        try:
+            written = loop.run_sync(flush)
+        finally:
+            loop.close()
+
+        self.assertEqual(written, ["expt"])
+
+
+class TestCombinedWrites(unittest.TestCase):
+    def test_a_cancelled_write_still_settles_the_combined_future(self):
+        written = Future()
+        cancelled = Future()
+        combined = _combine_written([written, cancelled])
+
+        written.set_result(["a"])
+        cancelled.cancel()
+
+        self.assertTrue(combined.done())
+        self.assertTrue(combined.cancelled())
+
+    def test_a_failure_wins_over_a_cancelled_write(self):
+        failed = Future()
+        cancelled = Future()
+        combined = _combine_written([failed, cancelled])
+
+        cancelled.cancel()
+        failed.set_exception(OSError("disk full"))
+
+        self.assertIsInstance(combined.exception(), OSError)
+
+    def test_every_write_is_gathered(self):
+        first = Future()
+        second = Future()
+        combined = _combine_written([first, second])
+
+        first.set_result(["a"])
+        self.assertFalse(combined.done())
+        second.set_result(["b"])
+
+        self.assertEqual(combined.result(), ["a", "b"])
 
 
 if __name__ == "__main__":

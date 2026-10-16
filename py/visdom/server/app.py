@@ -11,6 +11,7 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
+import asyncio
 import logging
 import os
 import platform
@@ -99,23 +100,32 @@ def _combine_written(futures):
     since a write that raised has already been logged and retried by the state
     that owns it.
     """
-    combined = Future()
-    written = []
+    if len(futures) == 1:
+        return futures[0]
+    first = futures[0]
+    if isinstance(first, asyncio.Future):
+        combined = first.get_loop().create_future()
+    else:
+        combined = Future()
+    settled = []
     lock = threading.Lock()
-    outstanding = len(futures)
 
     def settle(future):
-        nonlocal outstanding
         with lock:
-            try:
-                written.extend(future.result())
-            except Exception as exc:
-                if not combined.done():
-                    combined.set_exception(exc)
-            outstanding -= 1
-            finished = outstanding == 0
-        if finished and not combined.done():
-            combined.set_result(written)
+            settled.append(future)
+            if len(settled) < len(futures):
+                return
+        failures = [
+            done.exception()
+            for done in futures
+            if not done.cancelled() and done.exception() is not None
+        ]
+        if failures:
+            combined.set_exception(failures[0])
+        elif any(done.cancelled() for done in futures):
+            combined.cancel()
+        else:
+            combined.set_result([eid for done in futures for eid in done.result()])
 
     for future in futures:
         future.add_done_callback(settle)

@@ -59,10 +59,11 @@ def build_state(storage, eager=False, ensure_main=True):
     for eid in storage.list_envs():
         if eager:
             env_data = storage.load_env(eid)
-            state[eid] = {
-                "jsons": env_data.get("jsons", {}),
-                "reload": env_data.get("reload", {}),
-            }
+            if not isinstance(env_data, dict):
+                env_data = {}
+            state[eid] = dict(env_data)
+            state[eid].setdefault("jsons", {})
+            state[eid].setdefault("reload", {})
         else:
             state[eid] = LazyEnvData(storage, eid)
     if ensure_main and "main" not in state:
@@ -154,7 +155,15 @@ class WorkspaceEnvManager:
             storage = JSONStore(None)
             env_path = None
         else:
-            env_path = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
+            name = str(workspace_id)
+            root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
+            env_path = os.path.join(root, name)
+            if (
+                name in ("", ".", "..")
+                or os.path.basename(name) != name
+                or os.path.dirname(os.path.realpath(env_path)) != root
+            ):
+                raise ValueError("invalid workspace id: {!r}".format(workspace_id))
             ensure_dir_exists(env_path)
             storage = JSONStore(env_path)
 
