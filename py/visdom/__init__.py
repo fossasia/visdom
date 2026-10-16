@@ -2840,6 +2840,12 @@ class Visdom(object):
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
 
+        Appended points join the trace of their own label, and a label the
+        plot hasn't seen yet gets a new trace. String labels name their own
+        traces, so they need no legend. With integer labels 1..K and
+        `opts.legend`, pass the same legend when appending so each label maps
+        to its legend name.
+
         The following `opts` are supported:
 
         - `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
