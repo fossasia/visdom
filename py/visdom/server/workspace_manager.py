@@ -113,8 +113,13 @@ class WorkspaceManager:
             raise WorkspaceAuthError(503, f"workspace resolve unavailable: {exc}")
 
         if resp.status_code == 200:
-            data = resp.json()
-            return data["workspace_id"], data["role"]
+            try:
+                data = resp.json()
+                return data["workspace_id"], data["role"]
+            except (ValueError, KeyError, TypeError):
+                raise WorkspaceAuthError(
+                    502, "workspace resolve gave an unreadable answer"
+                )
 
         detail = "workspace resolution denied"
         try:

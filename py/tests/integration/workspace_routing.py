@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import asyncio
 import json
 import os
 import types
@@ -233,3 +234,21 @@ def test_a_socket_refused_by_an_unreachable_gateway_is_told_to_retry(gated_app):
     close.assert_called_once_with(WS_TRY_AGAIN_LATER, "unavailable")
     assert list(source.messages) == []
     assert gated_app.sources == {}
+
+
+@pytest.mark.parametrize("key, kept", [("key-v", True), ("key-a", False)])
+def test_a_viewer_socket_cannot_change_its_workspace(
+    gated_app, inline_executor, key, kept
+):
+    space = gated_app.workspace_env_manager.space("ws-a")
+    space.state["doomed"] = {"jsons": {}, "reload": {}}
+    sub = keyed_socket(
+        SocketWrapper, gated_app, {"X-Visdom-Workspace": "alpha", "X-API-KEY": key}
+    )
+    sub.open()
+
+    register = json.loads(sub.messages[0])
+    asyncio.run(sub.on_message(json.dumps({"cmd": "delete_env", "eid": "doomed"})))
+
+    assert register["readonly"] is kept
+    assert ("doomed" in space.state) is kept

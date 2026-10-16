@@ -111,3 +111,28 @@ def test_an_unreachable_gateway_is_a_503(gateway):
         manager.resolve("key-a", "alpha")
 
     assert refused.value.status_code == 503
+
+
+def unreadable():
+    raise ValueError("not json")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        types.SimpleNamespace(status_code=200, json=unreadable),
+        answer(200, {"role": "member"}),
+        answer(200, {"workspace_id": "ws-a"}),
+        answer(200, ["ws-a", "member"]),
+    ],
+)
+def test_an_unreadable_answer_is_a_remembered_502(gateway, reply):
+    gateway.return_value = reply
+    manager = WorkspaceManager(gateway_url="http://gateway:8085")
+
+    for _ in range(2):
+        with pytest.raises(WorkspaceAuthError) as refused:
+            manager.resolve("key-a", "alpha")
+
+    assert refused.value.status_code == 502
+    assert gateway.call_count == 1
