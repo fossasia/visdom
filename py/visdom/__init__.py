@@ -175,14 +175,17 @@ def _title2str(opts):
 
 
 def _scrub_dict(d):
+    """Recursively drop the keys whose value is None; Plotly rejects nulls.
+
+    A key survives on ``v is not None`` alone. The test used to also require
+    ``_scrub_dict(v) is not None``, which can never fail -- a dict comes back a
+    dict (an emptied one included) and anything else comes back itself -- so it
+    only bought a second full recursion per key, doubling the work at every
+    level of nesting.
+    """
     if isinstance(d, dict):
-        return {
-            k: _scrub_dict(v)
-            for k, v in list(d.items())
-            if v is not None and _scrub_dict(v) is not None
-        }
-    else:
-        return d
+        return {k: _scrub_dict(v) for k, v in d.items() if v is not None}
+    return d
 
 
 TICK_FIELD_SUFFIXES = (
@@ -734,6 +737,11 @@ def _normalize_title_strings(layout):
     raw figure layout untouched, so a plain string can appear at any depth
     (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
     and fixes every occurrence in place, returning a new structure.
+
+    It belongs to the layout: it descends into lists -- a title can hide in a
+    list of dicts such as layout['annotations'] -- so handing it a trace makes
+    one call per plotted coordinate, and a list of numbers can hold no title to
+    find. Normalize whatever a caller merges into a trace, not the trace.
     """
     if isinstance(layout, dict):
         fixed = {}
@@ -3018,9 +3026,14 @@ class Visdom(object):
                     _data["z"] = X.take(2, 1)[ind].tolist()
 
                 if trace_name in trace_opts:
-                    _data.update(trace_opts[trace_name])
+                    # Normalized here rather than over the finished trace below:
+                    # these options are the only part of ``_data`` that can carry
+                    # a title, and the helper walks into lists, so pointing it at
+                    # the trace cost one call per plotted point to rewrite
+                    # nothing.
+                    _data.update(_normalize_title_strings(trace_opts[trace_name]))
 
-                data.append(_scrub_dict(_normalize_title_strings(_data)))
+                data.append(_scrub_dict(_data))
 
         if opts:
             for marker_prop in ["markercolor"]:
