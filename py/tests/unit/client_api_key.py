@@ -6,7 +6,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import base64
+import hashlib
 import logging
+import socket
 import threading
 from types import SimpleNamespace
 
@@ -130,3 +133,113 @@ def test_the_async_client_does_not_follow_redirects_with_a_key():
         plain._request("https://visdom.example:443/events", "{}").follow_redirects
         is True
     )
+
+
+class _FakeSocketServer:
+    def __init__(self, reply):
+        self.reply = reply
+        self.requests = []
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen()
+        self.port = self.listener.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.listener.accept()
+            except OSError:
+                return
+            with conn:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    request += chunk
+                text = request.decode("latin-1")
+                self.requests.append(text)
+                conn.sendall(self.reply(text))
+
+    def close(self):
+        self.listener.close()
+
+
+def _upgrade(request):
+    key = next(
+        line.split(":", 1)[1].strip()
+        for line in request.split("\r\n")
+        if line.lower().startswith("sec-websocket-key:")
+    )
+    accept = base64.b64encode(
+        hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
+    ).decode()
+    payload = b'{"command": "alive", "data": "vis_alive"}'
+    return (
+        (
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n".format(accept)
+        ).encode()
+        + bytes([0x81, len(payload)])
+        + payload
+        + bytes([0x88, 0])
+    )
+
+
+def _socket_client(port):
+    client = _client("visdom_live_abc", "lab")
+    client.use_socket = True
+    client.socket_alive = False
+    client.socket_connection_achieved = False
+    client.server = "http://127.0.0.1"
+    client.server_base_name = "127.0.0.1"
+    client.port = port
+    client.base_url = ""
+    client.http_proxy_host = None
+    client.http_proxy_port = None
+    return client
+
+
+def test_a_socket_with_a_key_does_not_follow_a_redirect():
+    elsewhere = _FakeSocketServer(_upgrade)
+    redirecting = _FakeSocketServer(
+        lambda request: (
+            "HTTP/1.1 302 Found\r\nLocation: ws://127.0.0.1:{}/vis_socket\r\n"
+            "Content-Length: 0\r\n\r\n".format(elsewhere.port)
+        ).encode()
+    )
+    client = _socket_client(redirecting.port)
+    try:
+        runner = threading.Thread(target=client._run_websocket, daemon=True)
+        runner.start()
+        runner.join(5)
+
+        assert "X-API-KEY: visdom_live_abc" in redirecting.requests[0]
+        assert elsewhere.requests == []
+        assert not runner.is_alive()
+        assert client.use_socket is False
+    finally:
+        client.use_socket = False
+        redirecting.close()
+        elsewhere.close()
+
+
+def test_a_socket_with_a_key_still_receives_messages():
+    server = _FakeSocketServer(_upgrade)
+    client = _socket_client(server.port)
+    received = []
+    try:
+        client._run_keyed_websocket(
+            "ws://127.0.0.1:{}/vis_socket".format(server.port),
+            {"X-API-KEY": "visdom_live_abc", "X-Visdom-Workspace": "lab"},
+            {},
+            lambda ws, message: received.append(message),
+            lambda ws, error: received.append(error),
+            lambda ws: None,
+        )
+
+        assert received == ['{"command": "alive", "data": "vis_alive"}']
+        assert "X-Visdom-Workspace: lab" in server.requests[0]
+    finally:
+        server.close()

@@ -1147,9 +1147,32 @@ class Visdom(object):
                     "Cookie": "user_password="
                     + self.session.cookies.get("user_password", "")
                 }
+                connect_kwargs = {
+                    "http_proxy_host": self.http_proxy_host,
+                    "http_proxy_port": self.http_proxy_port,
+                }
+                if ws_scheme == "wss":
+                    if isinstance(self.ssl_verify, str):
+                        connect_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_REQUIRED,
+                            "ca_certs": self.ssl_verify,
+                        }
+                    elif not self.ssl_verify:
+                        connect_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_NONE,
+                        }
                 if self.api_key:
                     ws_header["X-API-KEY"] = self.api_key
                     ws_header["X-Visdom-Workspace"] = self.workspace
+                    self._run_keyed_websocket(
+                        sock_addr,
+                        ws_header,
+                        connect_kwargs,
+                        on_message,
+                        on_error,
+                        on_close,
+                    )
+                    continue
                 ws = websocket.WebSocketApp(
                     sock_addr,
                     on_message=on_message,
@@ -1157,27 +1180,42 @@ class Visdom(object):
                     on_close=on_close,
                     header=ws_header,
                 )
-                run_forever_kwargs = {
-                    "http_proxy_host": self.http_proxy_host,
-                    "http_proxy_port": self.http_proxy_port,
-                    "ping_timeout": 100.0,
-                }
-                if ws_scheme == "wss":
-                    if isinstance(self.ssl_verify, str):
-                        run_forever_kwargs["sslopt"] = {
-                            "cert_reqs": ssl.CERT_REQUIRED,
-                            "ca_certs": self.ssl_verify,
-                        }
-                    elif not self.ssl_verify:
-                        run_forever_kwargs["sslopt"] = {
-                            "cert_reqs": ssl.CERT_NONE,
-                        }
-                ws.run_forever(**run_forever_kwargs)
+                ws.run_forever(ping_timeout=100.0, **connect_kwargs)
                 ws.close()
             except Exception as e:
                 logger.error("Socket had error {}, attempting restart".format(e))
             if self.use_socket:
                 time.sleep(3)
+
+    def _run_keyed_websocket(
+        self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
+    ):
+        ws = None
+        try:
+            ws = websocket.create_connection(
+                sock_addr, header=header, redirect_limit=0, **connect_kwargs
+            )
+            if ws.getstatus() != 101:
+                location = (ws.getheaders() or {}).get("location")
+                raise websocket.WebSocketException(
+                    "Refused to follow the socket to {}, which would hand it "
+                    "the API key".format(location)
+                )
+            while self.use_socket:
+                message = ws.recv()
+                if not message:
+                    break
+                on_message(ws, message)
+        except websocket.WebSocketConnectionClosedException:
+            pass
+        except Exception as error:
+            if ws is None:
+                ws = websocket.WebSocket()
+            on_error(ws, error)
+        finally:
+            if ws is not None:
+                ws.close()
+            on_close(ws)
 
     def setup_polling(self):
         self.setup_socket(polling=True)
