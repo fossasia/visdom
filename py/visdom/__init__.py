@@ -2559,10 +2559,12 @@ class Visdom(object):
         ), "should specify audio tensor or file"
         if tensor is not None:
             # torchaudio and librosa give (channels, N); scipy writes (N, channels).
-            if tensor.ndim == 2 and 1 in tensor.shape:
-                tensor = tensor.reshape(-1)
-            elif tensor.ndim == 2 and tensor.shape[0] == 2 and tensor.shape[1] > 2:
-                tensor = tensor.T
+            # (N, 2) already is stereo, so only other shapes are turned around.
+            if tensor.ndim == 2 and tensor.shape[1] != 2:
+                if tensor.shape[0] == 2:
+                    tensor = tensor.T
+                elif 1 in tensor.shape:
+                    tensor = tensor.reshape(-1)
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
             ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
