@@ -576,7 +576,7 @@ def _binary_clf_curve(y_true, y_score, pos_label=1):
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
 
-    distinct_value_indices = np.where(np.diff(y_score))[0]
+    distinct_value_indices = np.where(y_score[1:] != y_score[:-1])[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
 
     tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
