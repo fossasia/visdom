@@ -21,6 +21,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
+import ipaddress
 
 import math
 import re
@@ -128,8 +129,49 @@ logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
+REFUSED_STATUSES = (401, 402, 403)
+
+
+def _refusal_reason(body):
+    """The reason a server gave for turning a request down, as one line."""
+    text = (body or "").strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("detail", "error", "message"):
+            if isinstance(parsed.get(key), str) and parsed[key].strip():
+                return parsed[key].strip()
+    if not text or text.startswith("<"):
+        return "no reason given"
+    return text[:200]
+
+
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
+
+KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
+
+
+def _is_loopback(host):
+    """Whether ``host`` names this machine, and so never reaches a network."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class _KeySession(requests.Session):
+    def rebuild_auth(self, prepared_request, response):
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            for name in KEY_HEADERS:
+                prepared_request.headers.pop(name, None)
+        super().rebuild_auth(prepared_request, response)
 
 
 def get_rand_id():
@@ -784,6 +826,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
+        api_key=None,
+        workspace=None,
         proxies=None,
         offline=False,
         use_polling=False,
@@ -861,6 +905,21 @@ class Visdom(object):
             assert password, "no password given for authentication"
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+        self.api_key = api_key
+        self.workspace = workspace
+        if self.api_key:
+            assert self.workspace, "workspace is required when api_key is given"
+            parsed_server = urlparse(self.server)
+            if parsed_server.scheme != "https" and not _is_loopback(
+                parsed_server.hostname
+            ):
+                logger.warning(
+                    "Sending an API key to %s over an unencrypted connection: "
+                    "it can be read in transit. Use an https:// server url to "
+                    "protect it.",
+                    self.server,
+                )
+
         self.win_data = {}
         if self.offline:
             self.use_socket = False
@@ -927,13 +986,17 @@ class Visdom(object):
                     pass
             self._pid = current_pid
             logger.warning("Setting up a new session...")
-            sess = requests.Session()
+            sess = _KeySession()
             if self.proxies:
                 sess.proxies.update(self.proxies)
             if isinstance(self.ssl_verify, str):
                 sess.verify = self.ssl_verify
             elif not self.ssl_verify:
                 sess.verify = False
+            if self.api_key:
+                sess.headers.update(
+                    {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
+                )
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -1099,37 +1162,79 @@ class Visdom(object):
                 sock_addr = "{}://{}:{}{}/vis_socket".format(
                     ws_scheme, self.server_base_name, self.port, self.base_url
                 )
-                ws = websocket.WebSocketApp(
-                    sock_addr,
-                    on_message=on_message,
-                    on_error=on_error,
-                    on_close=on_close,
-                    header={
-                        "Cookie": "user_password="
-                        + self.session.cookies.get("user_password", "")
-                    },
-                )
-                run_forever_kwargs = {
+                ws_header = {
+                    "Cookie": "user_password="
+                    + self.session.cookies.get("user_password", "")
+                }
+                connect_kwargs = {
                     "http_proxy_host": self.http_proxy_host,
                     "http_proxy_port": self.http_proxy_port,
-                    "ping_timeout": 100.0,
                 }
                 if ws_scheme == "wss":
                     if isinstance(self.ssl_verify, str):
-                        run_forever_kwargs["sslopt"] = {
+                        connect_kwargs["sslopt"] = {
                             "cert_reqs": ssl.CERT_REQUIRED,
                             "ca_certs": self.ssl_verify,
                         }
                     elif not self.ssl_verify:
-                        run_forever_kwargs["sslopt"] = {
+                        connect_kwargs["sslopt"] = {
                             "cert_reqs": ssl.CERT_NONE,
                         }
-                ws.run_forever(**run_forever_kwargs)
-                ws.close()
+                if self.api_key:
+                    ws_header["X-API-KEY"] = self.api_key
+                    ws_header["X-Visdom-Workspace"] = self.workspace
+                    self._run_keyed_websocket(
+                        sock_addr,
+                        ws_header,
+                        connect_kwargs,
+                        on_message,
+                        on_error,
+                        on_close,
+                    )
+                else:
+                    ws = websocket.WebSocketApp(
+                        sock_addr,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close,
+                        header=ws_header,
+                    )
+                    ws.run_forever(ping_timeout=100.0, **connect_kwargs)
+                    ws.close()
             except Exception as e:
                 logger.error("Socket had error {}, attempting restart".format(e))
             if self.use_socket:
                 time.sleep(3)
+
+    def _run_keyed_websocket(
+        self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
+    ):
+        ws = None
+        try:
+            ws = websocket.create_connection(
+                sock_addr, header=header, redirect_limit=0, **connect_kwargs
+            )
+            if ws.getstatus() != 101:
+                location = (ws.getheaders() or {}).get("location")
+                raise websocket.WebSocketException(
+                    "Refused to follow the socket to {}, which would hand it "
+                    "the API key".format(location)
+                )
+            while self.use_socket:
+                message = ws.recv()
+                if not message:
+                    break
+                on_message(ws, message)
+        except websocket.WebSocketConnectionClosedException:
+            pass
+        except Exception as error:
+            if ws is None:
+                ws = websocket.WebSocket()
+            on_error(ws, error)
+        finally:
+            if ws is not None:
+                ws.close()
+            on_close(ws)
 
     def setup_polling(self):
         self.setup_socket(polling=True)
@@ -1159,6 +1264,31 @@ class Visdom(object):
                         + "\n"
                     )
 
+    def _note_refusal(self, status, body):
+        """Say so when the server turns a request down.
+
+        A hosted server answers 401, 402 or 403 for a key that is wrong,
+        revoked or read-only, for a workspace this key may not reach, and for a
+        plan that is out of storage. The body still goes back to the caller,
+        as it does for any status, but on its own it reads as a window id, so a
+        script whose every plot was refused ran to the end looking as if it had
+        worked.
+
+        A warning and never an exception, whatever ``raise_exceptions`` says:
+        a refused write has to look the way it does for ``requests``, which
+        does not raise on a 4xx. Each distinct reason is logged once, so a
+        training loop is not flooded.
+        """
+        if status not in REFUSED_STATUSES:
+            return
+        message = "The visdom server refused this request ({0}): {1}".format(
+            status, _refusal_reason(body)
+        )
+        seen = self.__dict__.setdefault("_refusals_seen", set())
+        if message not in seen:
+            seen.add(message)
+            logger.warning(message)
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1171,6 +1301,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
             raise
@@ -1186,6 +1317,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
 
     def _send(
