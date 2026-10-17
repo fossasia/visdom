@@ -4,7 +4,7 @@
 
 1. **Python Client** (`py/visdom/__init__.py`) — The `Visdom` class provides 40+ visualization methods. Communicates with the server via HTTP POST (using `requests.Session`) and WebSocket (`websocket-client`). Supports PyTorch tensor auto-conversion via the `@pytorch_wrap` decorator. Also supports offline mode and a polling fallback.
 
-2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom` and overrides only `_handle_post`, so method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
+2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom`, and `_handle_post` is its only substantive transport override — `setup_socket` just hands the backchannel to the event loop, and `_start_session_reaper` is a no-op because there is no `requests` session to reap. Method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
 
 3. **Tornado Server** (`py/visdom/server/`) — `ServerState` (`server_state.py`) owns the server-wide containers; `Application` wires routes to them and handlers reach them through `StateAccessorsMixin`:
    - `state` — Dict mapping environment IDs to window data (loaded via `LazyEnvData`)
@@ -117,11 +117,13 @@ Pane updates are batched via `addPaneBatched()` → `processBatchedPanes()` usin
 
 Tornado runs on asyncio and every handler entrypoint that touches storage is
 `async def`, so anything that blocks the IOLoop stalls every other connection.
-The four rules below are **required** for new and changed handlers; breaking one
+The five rules below are **required** for new and changed handlers; breaking one
 of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
-   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`.
+   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`. A helper that takes
+   a `store` reaches the disk too, so calling one inline is the same mistake as
+   calling the backend inline; `py/tests/unit/refactoring_docs.py` scans for both.
 2. **One storage worker.** `ServerState.storage_executor` is
    `ThreadPoolExecutor(max_workers=1)`, and the single worker is what serializes
    writes — two saves of one env would otherwise interleave and truncate a file.
@@ -135,6 +137,16 @@ of them fails quietly rather than loudly.
    soon as the delete lands, so it says nothing to a read that outlived the
    delete rather than overlapping it; a reader that has to tell those apart
    holds a `watch_env_deletes` token across the await instead.
+5. **Put state back if the write that records it fails, and take the write
+   back with it.** A handler that takes something out of `state` and only then
+   awaits the write recording it — the panes `CloseHandler` pops before
+   awaiting their undo entry — is the only thing holding it in between. Catch
+   the failure, restore the ids that are still missing (a newer one may have
+   arrived while the write was out), mark the env dirty, and re-raise. The
+   write may still land: cancelling the future does not stop the worker, so
+   whatever it records for the state that came back has to be undone by a
+   second task submitted behind it (`forget_closed_panes`), or the server ends
+   up holding the panes and calling them closed both.
 
 Password hashing (PBKDF2, ~50-100 ms) goes to the **default** executor instead, so
 logins do not queue behind environment saves. Shutdown order is fixed in

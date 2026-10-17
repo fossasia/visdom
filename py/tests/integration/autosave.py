@@ -499,7 +499,9 @@ class TestHandlersMarkTheirWrites(unittest.TestCase):
         register_window(self.handler, window(window_args(win="win_0")), "main")
         self.handler.dirtied.clear()
 
-        CloseHandler.wrap_func(self.handler, {"eid": "main", "win": "win_0"})
+        asyncio.run(
+            CloseHandler.wrap_func(self.handler, {"eid": "main", "win": "win_0"})
+        )
 
         self.assertEqual(self.handler.dirtied, ["main"])
 

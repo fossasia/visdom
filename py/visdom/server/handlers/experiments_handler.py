@@ -316,6 +316,10 @@ class ExperimentHparamsHandler(BaseHandler):
         metadata of every environment the store knows, and an ``env_ids`` one a
         file per id; on the loop, either would stall every other request for
         the whole of it.
+
+        The snapshot the worker reads resident envs from is narrowed to match:
+        an ``env_ids`` selection only ever asks for the ids it names, so only
+        those are named in it.
         """
         wanted = spec["env_ids"] if spec.get("mode") == "env_ids" else None
         return await run_on_storage_executor(

@@ -243,3 +243,27 @@ def test_a_socket_with_a_key_still_receives_messages():
         assert "X-Visdom-Workspace: lab" in server.requests[0]
     finally:
         server.close()
+
+
+def test_a_socket_with_a_key_waits_before_it_reconnects(monkeypatch):
+    client = _socket_client(1)
+    client.socket_connection_achieved = True
+    attempts = []
+    waits = []
+
+    def stop_after_two_waits(seconds):
+        waits.append(seconds)
+        if len(waits) == 2:
+            client.use_socket = False
+
+    def connect(*args):
+        attempts.append(args)
+        if len(attempts) == 3:
+            client.use_socket = False
+
+    monkeypatch.setattr(client, "_run_keyed_websocket", connect)
+    monkeypatch.setattr("visdom.time.sleep", stop_after_two_waits)
+    client._run_websocket()
+
+    assert len(attempts) == 2
+    assert waits == [3, 3]
