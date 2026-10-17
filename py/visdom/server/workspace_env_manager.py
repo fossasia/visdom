@@ -199,10 +199,11 @@ class WorkspaceState(ServerState):
 
 
 class WorkspaceEnvManager:
-    def __init__(self, base_env_path, default_state, eager=False):
+    def __init__(self, base_env_path, default_state, eager=False, live_queue=None):
         self.base_env_path = base_env_path
         self.default_state = default_state
         self.eager = eager
+        self.live_queue = live_queue
         self._states = {None: default_state}
         self._lock = threading.Lock()
         self._disk_lock = threading.Lock()
@@ -425,10 +426,7 @@ class WorkspaceEnvManager:
             env_path=env_path,
             **settings,
         )
-        # Built by the application against its own state, and safe to share:
-        # the queue carries the environments it was asked about, not a slice of
-        # any one workspace's data.
-        state.live_updates = self.default_state.live_updates
+        state.live_updates = None if self.live_queue is None else self.live_queue(state)
         # A handler bound to this workspace has to be able to rebind, so the
         # managers travel with the state rather than only with the server's.
         state.workspace_manager = getattr(self.default_state, "workspace_manager", None)

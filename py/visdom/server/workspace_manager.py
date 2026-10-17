@@ -35,6 +35,7 @@ class WorkspaceAuthError(Exception):
 
 
 MAX_ERROR_ENTRIES = 1024
+MAX_CACHE_ENTRIES = 4096
 
 
 class WorkspaceManager:
@@ -87,13 +88,13 @@ class WorkspaceManager:
 
         with self._lock:
             self._errors.pop(cache_key, None)
+            self._cache = _make_room(self._cache, MAX_CACHE_ENTRIES, now)
             self._cache[cache_key] = (workspace_id, role, now + self.cache_ttl)
         return workspace_id, role
 
     def _remember_failure(self, cache_key, exc, now):
         with self._lock:
-            if len(self._errors) >= MAX_ERROR_ENTRIES:
-                self._errors = {k: v for k, v in self._errors.items() if v[2] > now}
+            self._errors = _make_room(self._errors, MAX_ERROR_ENTRIES, now)
             self._errors[cache_key] = (
                 exc.status_code,
                 exc.message,
@@ -123,7 +124,18 @@ class WorkspaceManager:
 
         detail = "workspace resolution denied"
         try:
-            detail = resp.json().get("detail", detail)
+            data = resp.json()
         except ValueError:
-            pass
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("detail"), str):
+            detail = data["detail"]
         raise WorkspaceAuthError(resp.status_code, detail)
+
+
+def _make_room(entries, limit, now):
+    if len(entries) < limit:
+        return entries
+    entries = {key: value for key, value in entries.items() if value[2] > now}
+    while len(entries) >= limit:
+        entries.pop(next(iter(entries)))
+    return entries
