@@ -307,6 +307,7 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
             )
     except TypeError:
         is_integer_labels = False
