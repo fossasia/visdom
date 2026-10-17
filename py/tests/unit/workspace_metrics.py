@@ -162,10 +162,6 @@ class TestCounting(unittest.TestCase):
         self.assertIn("visdom_workspace_stored_bytes{", text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestWorkspacesOnlyOnDisk(unittest.TestCase):
     """A workspace nobody has touched since the instance started.
 
@@ -225,3 +221,7 @@ class TestWorkspacesOnlyOnDisk(unittest.TestCase):
         entry = next(e for e in self.gather() if e["workspace_id"] == "ws-b")
 
         self.assertEqual(entry["writes"], 4)
+
+
+if __name__ == "__main__":
+    unittest.main()
