@@ -127,6 +127,48 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
         self.assertEqual(response.code, 403)
         self.assertEqual(windows(self.space("ws-a")), {})
 
+    def post_as(self, api_key, path, body):
+        return self.fetch(
+            path,
+            method="POST",
+            body=json.dumps(body),
+            headers={
+                "Content-Type": "application/json",
+                "X-Visdom-Workspace": "alpha",
+                "X-API-KEY": api_key,
+            },
+        )
+
+    def test_a_viewer_cannot_create_an_environment(self):
+        response = self.post_as("key-v", "/env/new", {"eid": "new"})
+
+        self.assertEqual(response.code, 403)
+        self.assertNotIn("new", self.space("ws-a").state)
+
+    def test_a_member_can_still_create_an_environment(self):
+        response = self.post_as("key-a", "/env/new", {"eid": "new"})
+
+        self.assertEqual(response.code, 200)
+        self.assertIn("new", self.space("ws-a").state)
+
+    def test_a_viewer_cannot_change_experiments(self):
+        for path, body in [
+            ("/experiments/log", {"eid": "main", "name": "run"}),
+            ("/experiments/tags", {"action": "set", "eid": "main", "tags": ["a"]}),
+            ("/experiments/hparams/update", {"eid": "main", "values": {}}),
+        ]:
+            with self.subTest(path=path):
+                response = self.post_as("key-v", path, body)
+
+                self.assertEqual(response.code, 403)
+                self.assertNotIn("experiment", self.space("ws-a").state["main"])
+                self.assertEqual(windows(self.space("ws-a")), {})
+
+    def test_a_viewer_can_still_read(self):
+        response = self.post_as("key-v", "/env_state", {})
+
+        self.assertEqual(response.code, 200)
+
     def test_a_key_from_another_workspace_gets_the_gateways_answer(self):
         response = self.write({"X-Visdom-Workspace": "beta", "X-API-KEY": "key-a"})
 

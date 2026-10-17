@@ -72,15 +72,9 @@ WS_TRY_AGAIN_LATER = 1013
 
 
 class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
-    workspace_role = None
-
     def __init__(self, *args, **kwargs):
         self.polling = False
         super().__init__(*args, **kwargs)
-
-    @property
-    def readonly(self):
-        return self.workspace_role == "viewer" or super().readonly
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
