@@ -49,7 +49,6 @@ from visdom.utils.server_utils import (
     warm_env,
     window,
     register_window,
-    gather_envs,
     broadcast_envs,
     broadcast_tags,
     escape_eid,
@@ -59,7 +58,8 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password_off_loop,
     stringify,
-    push_deleted,
+    push_deleted_many_off_loop,
+    forget_closed_panes,
     notify,
     LazyEnvData,
 )
@@ -169,6 +169,18 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
         # Bumped before the patch is computed so the diff carries the new
         # version to the client, keeping its copy in step for the next update.
         UpdateHandler.bump_version(p)
@@ -454,7 +466,13 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
-    def broadcast_window_update(handler, args, eid, p, diff_packet):
+    def window_update_message(args, eid, p, diff_packet):
+        """Encode the patch broadcast for ``p``, ready to put on the wire.
+
+        Split out from ``broadcast_window_update`` so a caller that has to know
+        how large the patch is can measure the string it is about to send
+        instead of serialising the pane a second time to estimate it.
+        """
         broadcast_packet = {
             "command": "window_update",
             "win": args["win"],
@@ -462,7 +480,46 @@ class UpdateHandler(BaseHandler):
             "content": diff_packet,
             "version": p.get("version", 1),
         }
-        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+        return json.dumps(broadcast_packet, cls=NanSafeEncoder)
+
+    @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast(
+            handler,
+            UpdateHandler.window_update_message(args, eid, p, diff_packet),
+            eid,
+        )
+
+    @staticmethod
+    def pane_min_bytes(p):
+        """A lower bound on the encoded size of ``p``, without encoding it.
+
+        In a ``json.dumps`` array every element costs at least one character
+        and every element after the first also carries the two-character ``,``
+        separator, so a trace array of ``k`` values cannot encode to fewer than
+        ``3k - 2`` characters. That bounds the pane from below in O(traces)
+        where encoding it is O(points). Every element type clears the one-char
+        floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
+        keys, layout and envelope are ignored, so the bound only ever
+        understates -- which costs an exact comparison that could have been
+        skipped, never a wrong answer.
+
+        A pane with no trace arrays to count -- text, HTML, an image, anything
+        whose ``content`` is not a dict of traces -- bounds to zero, which is
+        the same understatement and simply leaves the comparison exact.
+        """
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        if not isinstance(traces, (list, tuple)):
+            return 0
+        total = 0
+        for trace in traces:
+            if not isinstance(trace, dict):
+                continue
+            for value in trace.values():
+                if isinstance(value, (list, tuple)) and value:
+                    total += 3 * len(value) - 2
+        return total
 
     @staticmethod
     def wrap_func(handler, args):
@@ -567,14 +624,28 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-        handler.mark_dirty(eid)
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # Send the smaller of the patch and the updated pane. The pane is
+            # only encoded when it could actually win: pane_min_bytes bounds its
+            # encoded size from below, so a patch already shorter than that
+            # bound cannot be beaten and the encode -- the one whose cost grows
+            # with the data already plotted -- is skipped. Every other update
+            # compares for real.
+            msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
+            if UpdateHandler.pane_min_bytes(p) < len(msg):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
+                if len(pane_msg) <= len(msg):
+                    msg = pane_msg
+            broadcast(handler, msg, eid)
+            handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -592,17 +663,97 @@ class UpdateHandler(BaseHandler):
 
 class CloseHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
+        """Close one pane, or every pane in an env, recording the undo off the loop.
+
+        The panes leave ``state`` here, on the loop, before anything is
+        awaited, so a close is still all-or-nothing as far as any other request
+        can tell -- and a pane that was already gone is still announced, as it
+        always was. Their undo entries then go to the storage worker as one
+        write rather than one per pane: closing an env with many panes used to
+        read and rewrite its undo file once per pane, inline.
+
+        If that write fails the panes go back where they came from: the only
+        copy of a closed pane between the pop and the write is the one this
+        call is holding, so a close that cannot be recorded has to be a close
+        that did not happen rather than one nothing can undo. A close that did
+        not happen also leaves no undo entry, so whatever the write may still
+        manage to record for the panes that came back is taken out again.
+
+        What is announced is decided after that write, against the env as it
+        stands then: the loop kept serving while the undo stack was written, so
+        a pane id this close popped may have been written again in the
+        meantime. Announcing its close would take that new pane off every
+        client while the server still holds it.
+        """
         eid = extract_eid(args)
+        if eid not in handler.state:
+            return
         win = args.get("win")
 
-        keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
-        for win in keys:
-            p_data = handler.state[eid]["jsons"].pop(win, None)
+        env = handler.state[eid]
+        keys = list(env["jsons"].keys()) if win is None else [win]
+        closed = []
+        for key in keys:
+            p_data = env["jsons"].pop(key, None)
+            closed.append((key, p_data))
             if p_data is not None:
-                push_deleted(handler.storage, eid, win, p_data)
                 handler.mark_dirty(eid)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+
+        panes = [(key, p_data) for key, p_data in closed if p_data is not None]
+        if panes:
+            try:
+                await push_deleted_many_off_loop(handler, eid, panes)
+            except BaseException:
+                # ``BaseException`` because a cancelled request loses the panes
+                # exactly as a failed write does: the await is where the close
+                # is interrupted either way, and the handler is the only thing
+                # holding them. Nothing is swallowed -- every one is re-raised.
+                #
+                # The panes are already out of ``state``: the only copy of
+                # them left is the one in this frame. Dropping it loses them
+                # for good -- the close is not announced, so clients keep
+                # showing panes the server no longer has, and the next autosave
+                # writes the env without them. They go back instead, and the
+                # env is marked so that save records the env as it still is.
+                #
+                # Only ids that are still missing are restored. A pane written
+                # back under one of them while this write was out is newer than
+                # what the close popped, and overwriting it here would undo a
+                # live window. If the env itself is gone, there is nothing to
+                # restore it into.
+                restored = []
+                if handler.state.get(eid) is env:
+                    for key, p_data in panes:
+                        if env["jsons"].setdefault(key, p_data) is p_data:
+                            restored.append((key, p_data))
+                    handler.mark_dirty(eid)
+                if restored:
+                    # Cancelling the future above does not stop the worker: the
+                    # push can still be queued, or running, and land after this
+                    # -- leaving the pane back in the env and recorded as
+                    # closed both, for an undo to restore over whatever holds
+                    # its id by then. The entries go back out behind the write
+                    # that may yet make them, which the single worker orders
+                    # for us. Only for the panes that actually came back: an id
+                    # taken by a newer window keeps the close that took it,
+                    # because the undo stack is then the one place the pane it
+                    # closed still exists.
+                    forget_closed_panes(handler, eid, restored)
+                raise
+            if handler.state.get(eid) is not env:
+                # A delete_env landed while the undo stack was being written:
+                # the env these panes belonged to is gone, along with the file
+                # just written, so there is nothing left to announce.
+                return
+
+        for key, _p_data in closed:
+            if key in env["jsons"]:
+                # A pane was written back under this id while the undo stack
+                # was: the window there now is a new one, not the one this
+                # close popped, and it is not this close's to announce.
+                continue
+            broadcast(handler, json.dumps({"command": "close", "data": key}), eid)
 
     @check_auth
     @check_readonly
@@ -611,7 +762,7 @@ class CloseHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         await ensure_env_loaded(self, extract_eid(args))
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DeleteEnvHandler(BaseHandler):
@@ -918,6 +1069,14 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                if "win" in args and args["win"] is None:
+                    handler.write(json.dumps({}, cls=NanSafeEncoder))
+                    return
+                raise tornado.web.HTTPError(
+                    404, reason=f"environment '{eid}' not found"
+                )
+
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
@@ -964,12 +1123,12 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, self.storage)
+            # No env listing is passed: ``login.html`` has never rendered one,
+            # and building it here read the environment directory on the loop
+            # for every unauthenticated request that reached the server.
             self.render(
                 "login.html",
                 user=getpass.getuser(),
-                items=items,
-                active_item="",
                 base_url=self.base_url,
             )
 
