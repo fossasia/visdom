@@ -20,10 +20,93 @@ import tornado.web
 import tornado.websocket
 
 from visdom.server.server_state import StateAccessorsMixin
+from visdom.server.workspace_manager import WorkspaceAuthError
 from visdom.utils.shared_utils import NanSafeEncoder
 
+# POST endpoints that mutate environment state; viewers are denied these.
+WRITE_ENDPOINTS = {
+    "events",
+    "update",
+    "close",
+    "delete_env",
+    "save",
+    "fork_env",
+    "upload_env",
+}
 
-class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandler):
+
+class WorkspaceScopedMixin:
+    """Shared workspace resolution and state-binding for HTTP and socket handlers.
+
+    ``resolve_workspace`` maps the request's X-Visdom-Workspace header plus its
+    credential (the X-API-KEY header on the write path, or the ``session_token``
+    cookie on the browser read path) to (workspace_id, role) via the gateway.
+
+    ``bind_workspace`` then swaps the handler's ``server_state`` for that
+    workspace's own one. Every accessor a handler reads through resolves against
+    whichever state is bound, so the handler bodies need to know nothing about
+    workspaces. Returns None (no binding) for ordinary keyless or local traffic,
+    which leaves the server's own state in place.
+    """
+
+    workspace_slug = None
+    workspace_role = None
+
+    @property
+    def readonly(self):
+        return self.workspace_role == "viewer" or super().readonly
+
+    @property
+    def workspace_manager(self):
+        """The gateway resolver, carried on the state every handler is given.
+
+        Passing it as a handler argument instead would mean every handler that
+        overrides ``initialize`` with its own signature had to accept it.
+        """
+        return getattr(self._bound_state, "workspace_manager", None)
+
+    @property
+    def workspace_env_manager(self):
+        return getattr(self._bound_state, "workspace_env_manager", None)
+
+    @property
+    def _bound_state(self):
+        """The state this handler was given, if it was given one at all.
+
+        A handler registered without one, such as the health endpoint, has no
+        state to scope and no managers to find; it must not raise on the way to
+        discovering that.
+        """
+        return getattr(self, "server_state", None)
+
+    def resolve_workspace(self):
+        if self.workspace_manager is None:
+            return None
+        # Socket test doubles stand in a bare object for the request, and a
+        # connection with no headers carries no workspace to resolve either way.
+        headers = getattr(getattr(self, "request", None), "headers", None)
+        if headers is None:
+            return None
+        workspace_slug = headers.get("X-Visdom-Workspace")
+        if not workspace_slug:
+            return None
+        api_key = headers.get("X-API-KEY")
+        session_token = self.get_cookie("session_token")
+        if api_key:
+            return self.workspace_manager.resolve(api_key, workspace_slug)
+        if session_token:
+            return self.workspace_manager.resolve_session(session_token, workspace_slug)
+        return None
+
+    def bind_workspace(self, workspace_id):
+        if self.workspace_env_manager is None:
+            return
+        self.server_state = self.workspace_env_manager.space(workspace_id)
+
+
+class BaseWebSocketHandler(
+    WorkspaceScopedMixin, StateAccessorsMixin, tornado.websocket.WebSocketHandler
+):
     """
     Implements any required overriden functionality from the basic tornado
     websocket handler. Also contains some shared logic for all WebSocketHandler
@@ -46,7 +129,9 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
         return self.get_secure_cookie("user_password")
 
 
-class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
+class BaseHandler(
+    WorkspaceScopedMixin, StateAccessorsMixin, tornado.web.RequestHandler
+):
     """
     Implements any required overriden functionality from the basic tornado
     request handlers, and contains any convenient shared logic helpers.
@@ -100,6 +185,38 @@ class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
+
+    def prepare(self):
+        """Bind a workspace-authenticated request to its workspace's state slice.
+
+        Engages only when the request carries the X-Visdom-Workspace header (set
+        by the python client on the write path, or injected by nginx from the
+        ``/vis/w/<slug>/`` path on the browser read path), so ordinary visdom
+        traffic (health checks, keyless clients) is unaffected. Authenticates via
+        either the X-API-KEY header (write path) or the ``session_token`` cookie
+        (browser read path), denies writes for the viewer role, and re-points this
+        handler's state/storage/subs/sources at that workspace's isolated space so
+        all subsequent handler logic operates on that workspace's environments.
+        """
+        try:
+            resolved = self.resolve_workspace()
+        except WorkspaceAuthError as exc:
+            self.set_status(exc.status_code)
+            self.finish({"error": exc.message})
+            return
+        if resolved is None:
+            return
+
+        workspace_id, role = resolved
+        self.workspace_slug = self.request.headers.get("X-Visdom-Workspace")
+        self.workspace_role = role
+        endpoint = self.request.path.rsplit("/", 1)[-1]
+        if role == "viewer" and endpoint in WRITE_ENDPOINTS:
+            self.set_status(403)
+            self.finish({"error": "Your role is read-only in this workspace."})
+            return
+
+        self.bind_workspace(workspace_id)
 
     def get_current_user(self):
         """
