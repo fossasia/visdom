@@ -45,6 +45,7 @@ from visdom import (
     _opts2layout,
     _scrub_dict,
     _title2str,
+    _to_numpy,
 )
 
 pytestmark = pytest.mark.unit
@@ -728,3 +729,27 @@ def test_decode_binary_arrays_yields_an_empty_list_for_junk_base64():
     with pytest.raises(binascii.Error):
         base64.b64decode("!!!", validate=True)
     assert _decode_binary_arrays({"dtype": "float64", "bdata": "!!!"}) == []
+
+
+def test_to_numpy_converts_tuples_and_lists():
+    """_to_numpy converts both lists and tuples to numpy arrays."""
+    arr_from_tuple = _to_numpy((1, 2, 3))
+    assert isinstance(arr_from_tuple, np.ndarray)
+    assert np.array_equal(arr_from_tuple, np.array([1, 2, 3]))
+
+    arr_from_nested_tuple = _to_numpy(((1, 2), (3, 4)))
+    assert isinstance(arr_from_nested_tuple, np.ndarray)
+    assert arr_from_nested_tuple.shape == (2, 2)
+    assert np.array_equal(arr_from_nested_tuple, np.array([[1, 2], [3, 4]]))
+
+    arr_from_list = _to_numpy([1, 2, 3])
+    assert isinstance(arr_from_list, np.ndarray)
+    assert np.array_equal(arr_from_list, np.array([1, 2, 3]))
+
+
+def test_to_numpy_leaves_non_sequences_intact():
+    """_to_numpy passes non-sequences and non-torch types through unchanged."""
+    assert _to_numpy(42) == 42
+    assert _to_numpy("text") == "text"
+    assert _to_numpy({"a": 1}) == {"a": 1}
+    assert _to_numpy(None) is None

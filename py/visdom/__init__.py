@@ -537,7 +537,7 @@ except (ImportError, AttributeError):
 
 
 def _to_numpy(a):
-    if isinstance(a, list):
+    if isinstance(a, (list, tuple)):
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):

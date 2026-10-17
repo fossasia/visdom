@@ -997,3 +997,29 @@ def test_parallel_coordinates_multi_experiment(capture_send):
     trace = sent["payload"]["data"][0]
     assert trace["type"] == "parcoords"
     assert trace["line"]["color"] == [0.1, 0.9]
+
+
+def test_line_tuple_inputs(capture_send):
+    """line accepts tuple sequence inputs for Y and X without raising AttributeError."""
+    sent = capture_send(lambda v: v.line(Y=(10, 20, 30), X=(1, 2, 3)))
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "scatter"
+    assert trace["y"] == [10, 20, 30]
+    assert trace["x"] == [1, 2, 3]
+
+
+def test_scatter_tuple_inputs(capture_send):
+    """scatter accepts tuple of tuples for X without raising AttributeError."""
+    sent = capture_send(lambda v: v.scatter(X=((1.0, 2.0), (3.0, 4.0))))
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "scatter"
+    assert trace["x"] == [1.0, 3.0]
+    assert trace["y"] == [2.0, 4.0]
+
+
+def test_heatmap_tuple_inputs(capture_send):
+    """heatmap accepts tuple of tuples for X without raising AttributeError."""
+    sent = capture_send(lambda v: v.heatmap(X=((1, 2), (3, 4))))
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "heatmap"
+    assert trace["z"] == [[1, 2], [3, 4]]
