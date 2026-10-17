@@ -607,12 +607,11 @@ def test_histogram_counts_sum_to_sample_count(capture_send):
     assert sum(sent["payload"]["data"][0]["y"]) == 100
 
 
-def test_histogram_bin_edges_span_data_range(capture_send):
-    """The x-axis runs from the minimum to the maximum of X."""
+def test_histogram_bar_centers_match_data_range(capture_send):
+    """Bars are centered inside the counted intervals, not on their boundaries."""
     sent = capture_send(lambda v: v.histogram(np.arange(100.0), opts={"numbins": 10}))
     x = sent["payload"]["data"][0]["x"]
-    assert x[0] == 0.0
-    assert x[-1] == 99.0
+    np.testing.assert_allclose([x[0], x[-1]], [4.95, 94.05])
 
 
 def test_histogram_size_one_x_renders(capture_send):
