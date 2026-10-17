@@ -11,16 +11,22 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
+import asyncio
 import logging
 import os
 import platform
+import threading
 import time
+from concurrent.futures import Future
 
+import tornado.ioloop
 import tornado.web  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
+from visdom.server.workspace_manager import WorkspaceManager
+from visdom.server.workspace_env_manager import WorkspaceEnvManager
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -33,6 +39,7 @@ from visdom.server.handlers.experiments_handler import (
     make_live_queue,
 )
 from visdom.server.handlers.web_handlers import (
+    ActivityHandler,
     CloseHandler,
     CompareHandler,
     DataHandler,
@@ -47,6 +54,7 @@ from visdom.server.handlers.web_handlers import (
     ExperimentSuggestHandler,
     ForkEnvHandler,
     HealthHandler,
+    MetricsHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -83,6 +91,49 @@ tornado_settings = {
 }
 
 
+def _combine_written(futures):
+    """One future over several writes, resolving to every id that reached disk.
+
+    The writes come back as futures belonging to the IO loop, which resolve on
+    the loop rather than blocking, so they cannot be waited on from the storage
+    worker or from any other thread. Completion is followed with callbacks
+    instead: each write reports as it settles, and the combined future is
+    resolved once the last one has. The first failure is what the caller sees,
+    since a write that raised has already been logged and retried by the state
+    that owns it.
+    """
+    if len(futures) == 1:
+        return futures[0]
+    first = futures[0]
+    if isinstance(first, asyncio.Future):
+        combined = first.get_loop().create_future()
+    else:
+        combined = Future()
+    settled = []
+    lock = threading.Lock()
+
+    def settle(future):
+        with lock:
+            settled.append(future)
+            if len(settled) < len(futures):
+                return
+        failures = [
+            done.exception()
+            for done in futures
+            if not done.cancelled() and done.exception() is not None
+        ]
+        if failures:
+            combined.set_exception(failures[0])
+        elif any(done.cancelled() for done in futures):
+            combined.cancel()
+        else:
+            combined.set_result([eid for done in futures for eid in done.result()])
+
+    for future in futures:
+        future.add_done_callback(settle)
+    return combined
+
+
 class Application(tornado.web.Application):
     def __init__(
         self,
@@ -103,6 +154,9 @@ class Application(tornado.web.Application):
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
+        self.workspace_manager = (
+            WorkspaceManager() if os.environ.get("VISDOM_GATEWAY_URL") else None
+        )
         self.state = self.load_state()
         self.user_settings = self.load_user_settings()
         self.subs = {}
@@ -147,6 +201,16 @@ class Application(tornado.web.Application):
             save_threshold=save_threshold,
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
+
+        self.workspace_env_manager = WorkspaceEnvManager(
+            base_env_path=env_path,
+            default_state=self.server_state,
+            eager=self.eager_data_loading,
+        )
+        self.server_state.workspace_manager = self.workspace_manager
+        self.server_state.workspace_env_manager = self.workspace_env_manager
+        self._workspaces_shut_down = False
+        self._workspaces_shutdown_lock = threading.Lock()
 
         settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
@@ -216,6 +280,14 @@ class Application(tornado.web.Application):
         ]
         super(Application, self).__init__(handlers, **settings)
 
+    def internal_application(self):
+        return tornado.web.Application(
+            [
+                (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
+                (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
+            ]
+        )
+
     def get_last_access(self):
         if len(self.subs) > 0 or len(self.sources) > 0:
             # update the last access time to now, as someone
@@ -276,20 +348,82 @@ class Application(tornado.web.Application):
         return self.server_state.flush_envs(eids)
 
     def flush_dirty(self):
-        """Compatibility wrapper for flushing dirty environments."""
-        return self.server_state.flush_dirty()
+        """Persist changed environments in every workspace, not just this one.
+
+        ``ServerState.flush_dirty`` only knows its own state, which on a
+        multi-tenant server is the state no tenant is using. A workspace nobody
+        happens to be looking at when the timer fires still has to be written.
+
+        One future comes back for all of them, so a caller waits the same way
+        it would for a single state.
+        """
+        futures = [
+            future
+            for future in (
+                state.flush_dirty() for state in self.workspace_env_manager.spaces()
+            )
+            if future is not None
+        ]
+        if not futures:
+            return None
+        return _combine_written(futures)
 
     def start_autosave(self):
-        """Compatibility wrapper for starting ServerState autosave."""
-        return self.server_state.start_autosave()
+        """Save changed environments on a timer, across every workspace.
+
+        Started here rather than on ``ServerState`` so the callback is the
+        application's ``flush_dirty``, which walks all of them.
+        """
+        if self.server_state.autosave is None and self.server_state.save_interval > 0:
+            self.server_state.autosave = tornado.ioloop.PeriodicCallback(
+                self.flush_dirty, self.server_state.save_interval * 1000
+            )
+            self.server_state.autosave.start()
+        return self.server_state.autosave
 
     def stop_autosave(self):
         """Compatibility wrapper for stopping the ServerState autosave."""
         return self.server_state.stop_autosave()
 
     def shutdown_storage(self):
-        """Compatibility wrapper for draining ServerState storage."""
-        return self.server_state.shutdown_storage()
+        """Drain and save every workspace, not just this server's own state.
+
+        ``ServerState.shutdown_storage`` saves the one state it belongs to,
+        which on a multi-tenant server holds nothing a tenant wrote. The worker
+        is shared, so the drain it performs covers every workspace's queued
+        writes; the final save is then per space, or a workspace keeps only
+        whatever happened to reach disk before the drain.
+
+        Idempotent for the same reason the base is: the graceful stop calls it
+        and the ``atexit`` hook calls it again, and a second pass must not
+        re-save through an executor that is already gone.
+
+        Only a pass in which every save succeeded counts as shut down, the same
+        rule the base follows. If any save raises, the ``atexit`` call runs the
+        whole thing again instead of returning early with a workspace's changes
+        still only in memory. The lock keeps two callers from writing the same
+        files at once while the flag is still clear.
+        """
+        with self._workspaces_shutdown_lock:
+            if self._workspaces_shut_down:
+                return
+            failures = []
+            try:
+                self.server_state.shutdown_storage()
+            except Exception as error:
+                failures.append(error)
+            for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
+                try:
+                    if state.env_path is not None:
+                        state.storage.save_all(state.state)
+                except Exception as error:
+                    failures.append(error)
+                    continue
+                state.dirty_envs.clear()
+                state.saving_envs.clear()
+            if failures:
+                raise failures[0]
+            self._workspaces_shut_down = True
 
     def save_layouts(self, layouts=None):
         """Compatibility wrapper for callers that still use ``Application``."""

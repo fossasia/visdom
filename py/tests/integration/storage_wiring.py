@@ -243,6 +243,105 @@ def test_none_path_does_not_touch_storage(app_factory):
     assert app_factory(env_path=None).load_layouts() == ""
 
 
+# -- Workspace isolation ------------------------------------------------------
+
+
+def test_workspaces_start_with_no_layouts(app_factory):
+    """A workspace nobody has saved a view in has none, not the server's."""
+    app = app_factory()
+    app.layouts = '[["server", {}]]'
+
+    assert app.workspace_env_manager.space("ws-a").get_layouts() == ""
+
+
+def test_saving_layouts_in_one_workspace_does_not_leak(app_factory):
+    """Layouts are per workspace, not one shared blob."""
+    manager = app_factory().workspace_env_manager
+
+    space_a = manager.space("ws-a")
+    space_a.set_layouts('[["a", {}]]')
+    space_a.save_layouts()
+
+    assert manager.space("ws-a").get_layouts() == '[["a", {}]]'
+    assert manager.space("ws-b").get_layouts() == ""
+
+
+def test_saving_in_a_workspace_leaves_the_server_state_alone(app_factory):
+    app = app_factory()
+    app.layouts = '[["server", {}]]'
+
+    space = app.workspace_env_manager.space("ws-a")
+    space.set_layouts('[["a", {}]]')
+    space.save_layouts()
+
+    assert app.layouts == '[["server", {}]]'
+
+
+def test_layouts_persist_under_the_workspace_directory(app_factory, env_path):
+    space = app_factory().workspace_env_manager.space("ws-a")
+    space.set_layouts('[["a", {}]]')
+    space.save_layouts()
+
+    written = os.path.join(env_path, "workspaces", "ws-a", "view", "layouts.json")
+    assert os.path.isfile(written)
+
+
+def test_workspace_environments_are_separate(app_factory):
+    """Two workspaces writing the same env id do not share it."""
+    manager = app_factory().workspace_env_manager
+
+    manager.space("ws-a").state["shared"] = env_payload("a")
+    manager.space("ws-b").state["shared"] = env_payload("b")
+
+    assert manager.space("ws-a").state["shared"] == env_payload("a")
+    assert manager.space("ws-b").state["shared"] == env_payload("b")
+
+
+def test_workspace_inherits_the_server_configuration(app_factory):
+    """A workspace cannot end up with different limits from its server."""
+    app = app_factory()
+    space = app.workspace_env_manager.space("ws-a")
+
+    assert space.save_interval == app.server_state.save_interval
+    assert space.max_plot_history == app.server_state.max_plot_history
+    assert space.readonly == app.server_state.readonly
+
+
+def test_eager_workspace_load_keeps_extra_env_keys(app_factory, env_path):
+    """A workspace loaded eagerly keeps the keys the server's own load keeps."""
+    experiment = {"env_id": "expt", "name": "run-1", "status": "running"}
+    workspace_store = JSONStore(os.path.join(env_path, "workspaces", "ws-a"))
+    workspace_store.save_env("expt", dict(env_payload("w1"), experiment=experiment))
+
+    app = app_factory(eager_data_loading=True)
+    space = app.workspace_env_manager.space("ws-a")
+
+    assert space.state["expt"]["experiment"] == experiment
+    assert space.state["expt"]["jsons"] == env_payload("w1")["jsons"]
+
+
+@pytest.mark.parametrize(
+    "workspace_id", ["", ".", "..", "../outside", "a/b", "/tmp/outside"]
+)
+def test_a_workspace_id_cannot_leave_the_workspaces_folder(
+    app_factory, env_path, workspace_id
+):
+    manager = app_factory().workspace_env_manager
+
+    with pytest.raises(ValueError):
+        manager.space(workspace_id)
+
+    assert not os.path.exists(os.path.join(env_path, "outside"))
+    assert not os.path.exists(os.path.join(env_path, "workspaces", "a"))
+
+
+def test_default_workspace_is_the_server_state(app_factory):
+    """Workspace None is not a copy of the server's state, it is that state."""
+    app = app_factory()
+
+    assert app.workspace_env_manager.space(None) is app.server_state
+
+
 # -- Undo ---------------------------------------------------------------------
 
 
