@@ -898,7 +898,7 @@ class Visdom(object):
                     "Sending an API key to %s over an unencrypted connection: "
                     "it can be read in transit. Use an https:// server url to "
                     "protect it.",
-                    self.server,
+                    parsed_server.hostname,
                 )
 
         self.win_data = {}

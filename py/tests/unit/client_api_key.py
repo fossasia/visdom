@@ -97,6 +97,32 @@ def test_a_redirect_on_the_same_host_keeps_the_key():
     assert headers["X-Visdom-Workspace"] == "lab"
 
 
+def test_a_redirect_from_https_to_http_on_the_same_host_drops_the_key():
+    headers = _redirect(
+        _client("visdom_live_abc", "lab"),
+        "https://visdom.example/events",
+        "http://visdom.example/events",
+    )
+
+    assert "X-API-KEY" not in headers
+    assert "X-Visdom-Workspace" not in headers
+
+
+def test_the_clear_text_warning_leaves_out_credentials_in_the_url(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING, logger="visdom"):
+        Visdom(
+            server="http://someone:secret@visdom.example",
+            api_key="visdom_live_abc",
+            workspace="lab",
+            offline=True,
+            log_to_filename=str(tmp_path / "log"),
+        )
+
+    assert "unencrypted connection" in caplog.text
+    assert "visdom.example" in caplog.text
+    assert "secret" not in caplog.text
+
+
 @pytest.mark.parametrize(
     "server, warned",
     [
