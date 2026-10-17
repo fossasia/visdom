@@ -1145,3 +1145,14 @@ def test_save_layouts_writes_what_it_was_handed(app_factory):
     app.save_layouts('[["older", {}]]')
 
     assert app.storage.calls["save_layouts"] == ['[["older", {}]]']
+
+
+def test_each_workspace_refreshes_its_own_hparams_panes(app):
+    pane = {"type": "hparams", "hparams": {"mode": "env_ids", "env_ids": ["run-1"]}}
+    space = app.workspace_env_manager.space("ws-a")
+    space.state["board"] = {"jsons": {"theirs": pane}, "reload": {}}
+    app.server_state.state["board"] = {"jsons": {"ours": pane}, "reload": {}}
+
+    assert space.live_updates is not app.server_state.live_updates
+    assert space.live_updates._resolve({"run-1"}) == [("board", "theirs")]
+    assert app.server_state.live_updates._resolve({"run-1"}) == [("board", "ours")]
