@@ -136,3 +136,35 @@ def test_an_unreadable_answer_is_a_remembered_502(gateway, reply):
 
     assert refused.value.status_code == 502
     assert gateway.call_count == 1
+
+
+@pytest.mark.parametrize("body", [["denied"], "denied", None, 7, {"detail": ["x"]}])
+def test_a_refusal_with_an_odd_body_keeps_the_gateways_status(gateway, body):
+    gateway.return_value = answer(403, body)
+    manager = WorkspaceManager(gateway_url="http://gateway:8085")
+
+    for _ in range(2):
+        with pytest.raises(WorkspaceAuthError) as refused:
+            manager.resolve("key-a", "alpha")
+
+    assert refused.value.status_code == 403
+    assert refused.value.message == "workspace resolution denied"
+    assert gateway.call_count == 1
+
+
+def test_the_caches_stay_within_their_limits(gateway, monkeypatch):
+    monkeypatch.setattr("visdom.server.workspace_manager.MAX_CACHE_ENTRIES", 5)
+    monkeypatch.setattr("visdom.server.workspace_manager.MAX_ERROR_ENTRIES", 5)
+    manager = WorkspaceManager(gateway_url="http://gateway:8085")
+
+    gateway.return_value = answer(200, {"workspace_id": "ws-a", "role": "member"})
+    for number in range(20):
+        manager.resolve("key-%d" % number, "alpha")
+    gateway.return_value = answer(401, {"detail": "Invalid API key"})
+    for number in range(20):
+        with pytest.raises(WorkspaceAuthError):
+            manager.resolve("bad-%d" % number, "alpha")
+
+    assert len(manager._cache) <= 5
+    assert len(manager._errors) <= 5
+    assert any("key-19" in key for key in manager._cache)
