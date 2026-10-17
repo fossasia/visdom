@@ -2564,6 +2564,9 @@ class Visdom(object):
                 and tensor.shape[0] in (1, 2)
             ):
                 tensor = tensor.T
+
+                 # Shapes (1, 2), (2, 1) and (2, 2) are ambiguous: keep the
+                 # sample-first default so scipy receives (samples, channels).
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] in (1, 2)
             ), "tensor should be 1D vector or 2D matrix with 1 or 2 columns"

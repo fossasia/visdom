@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import sys
+import wave
 from unittest.mock import patch
 
 import numpy as np
