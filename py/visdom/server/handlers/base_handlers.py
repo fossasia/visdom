@@ -35,6 +35,14 @@ WRITE_ENDPOINTS = {
 }
 
 
+def build_cloud_context(slug, role):
+    """Serialise the console context for the index template, or None when not in a workspace."""
+    if not slug:
+        return None
+    payload = json.dumps({"slug": slug, "role": role})
+    return payload.replace("</", "<\\/")
+
+
 class WorkspaceScopedMixin:
     """Shared workspace resolution and state-binding for HTTP and socket handlers.
 
@@ -173,6 +181,13 @@ class BaseHandler(
         self.set_header("Content-Type", "application/json; charset=UTF-8")
         self.set_header("X-Content-Type-Options", "nosniff")
         self.finish(body)
+
+    def render(self, template_name, **kwargs):
+        kwargs.setdefault(
+            "cloud_context",
+            build_cloud_context(self.workspace_slug, self.workspace_role),
+        )
+        return super().render(template_name, **kwargs)
 
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""

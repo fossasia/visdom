@@ -11,11 +11,16 @@
 import json
 import unittest
 
+import pytest
 import tornado.template
 
 from visdom.utils.shared_utils import get_visdom_path
-from visdom.server.handlers.base_handlers import WorkspaceScopedMixin
-from visdom.server.handlers.web_handlers import build_cloud_context
+from visdom.server.handlers.base_handlers import (
+    WorkspaceScopedMixin,
+    build_cloud_context,
+)
+
+pytestmark = pytest.mark.unit
 
 
 def test_no_slug_returns_none():
