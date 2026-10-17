@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import sys
+import wave
 from unittest.mock import patch
 
 import numpy as np
@@ -584,6 +585,21 @@ def test_audio_accepts_a_stereo_tensor(capture_send):
     assert "<audio controls>" in content(sent)
 
 
+def test_audio_accepts_mono_channel_first(capture_send):
+    sent = capture_send(lambda v: v.audio(tensor=np.zeros((1, 16))))
+    assert "<audio controls>" in content(sent)
+
+
+def test_audio_accepts_stereo_channel_first(capture_send):
+    sent = capture_send(lambda v: v.audio(tensor=np.zeros((2, 16))))
+    assert "<audio controls>" in content(sent)
+
+
+def test_audio_accepts_mono_column(capture_send):
+    sent = capture_send(lambda v: v.audio(tensor=np.zeros((16, 1))))
+    assert "<audio controls>" in content(sent)
+
+
 @pytest.mark.parametrize("extension", ["wav", "mp3", "ogg", "flac"])
 def test_audio_maps_the_file_extension_to_a_mime_type(
     capture_send, tmp_path, extension
@@ -616,6 +632,8 @@ def test_audio_rejects_an_unknown_file_type(offline_client, tmp_path):
     [
         ({}, "should specify audio tensor or file"),
         (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros(0)), "tensor should not be empty"),
+        (dict(tensor=np.zeros((0, 2))), "tensor should not be empty"),
     ],
 )
 def test_audio_rejects_malformed_input(offline_client, kwargs, message):

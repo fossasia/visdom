@@ -2541,7 +2541,9 @@ class Visdom(object):
         """
         This function plays audio. It takes as input the filename of the audio
         file or an `N` tensor containing the waveform (use an `Nx2` matrix for
-        stereo audio). The function does not support any plot-specific `opts`.
+        stereo audio). Channel-first `(1, N)` mono, `(2, N)` stereo and `(N, 1)`
+        mono are also accepted and converted to `Nx1` / `Nx2`. The function
+        does not support any plot-specific `opts`.
 
         The following `opts` are supported:
 
@@ -2556,9 +2558,19 @@ class Visdom(object):
             tensor is not None or audiofile is not None
         ), "should specify audio tensor or file"
         if tensor is not None:
+            if (
+                tensor.ndim == 2
+                and tensor.shape[1] not in (1, 2)
+                and tensor.shape[0] in (1, 2)
+            ):
+                tensor = tensor.T
+
+                 # Shapes (1, 2), (2, 1) and (2, 2) are ambiguous: keep the
+                 # sample-first default so scipy receives (samples, channels).
             assert tensor.ndim == 1 or (
-                tensor.ndim == 2 and tensor.shape[1] == 2
-            ), "tensor should be 1D vector or 2D matrix with 2 columns"
+                tensor.ndim == 2 and tensor.shape[1] in (1, 2)
+            ), "tensor should be 1D vector or 2D matrix with 1 or 2 columns"
+            assert tensor.size > 0, "tensor should not be empty"
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
