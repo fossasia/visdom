@@ -32,6 +32,7 @@ import socket
 import threading
 import time
 import uuid
+import warnings
 from typing import Any, Optional
 
 import numpy as np
@@ -59,6 +60,56 @@ _UNSET = object()
 
 class RunAlreadyFinishedError(Exception):
     """Raised when trying to modify a run that already reached a terminal state."""
+
+
+def _safe_warn(message: str, category=RuntimeWarning, stacklevel: int = 2) -> None:
+    """``warnings.warn()``, but never raises.
+
+    Every integration point (``visdom.tracking.graphs.TrackedVisdom``,
+    ``visdom.pytorch.VisdomLogger``, and future per-library integrations)
+    calls this instead of ``warnings.warn`` directly when a tracking
+    failure needs to be surfaced. Their shared, central guarantee is that
+    a tracking failure must never break the caller's real operation (the
+    plot/fit/log call that was already succeeding) -- but a plain
+    ``warnings.warn()`` call can break that guarantee itself, in two
+    different ways:
+
+    1. The calling application has configured its own warning filters to
+       turn warnings into exceptions (``warnings.simplefilter("error")``,
+       or specifically for a category this raises under, e.g.
+       ``warnings.filterwarnings("error", category=RuntimeWarning)``): in
+       that case ``warnings.warn`` *raises* the warning itself (a
+       ``Warning`` subclass) instead of just recording/printing it.
+    2. The calling application has replaced ``warnings.showwarning`` --
+       the function ``warnings.warn`` hands the message to once filtering
+       decides it should be displayed rather than raised -- with a custom
+       hook (e.g. to route warnings into an error-reporting/logging
+       system). If that hook itself raises, ``warnings.warn`` propagates
+       *whatever that hook raised*, which is not necessarily a ``Warning``
+       subclass at all -- it could be any exception type the hook's own
+       implementation happens to produce.
+
+    Either way, the exception would propagate out of a tracking helper
+    and break the underlying plot/fit/log call it was called from --
+    exactly the failure mode these call sites exist to prevent, not
+    cause. Catching ``Exception`` broadly (not just ``Warning``) covers
+    both cases plus any other unexpected failure inside ``warnings.warn``
+    itself; ``BaseException`` subclasses that aren't ``Exception``
+    (``KeyboardInterrupt``, ``SystemExit``) are deliberately still left
+    to propagate, since those represent real program control flow that
+    happening to occur during a warn() call shouldn't suppress.
+
+    If even this best-effort notification can't get through, there's
+    nothing more useful to do here without violating the actual
+    guarantee: the warning is simply dropped rather than allowed to
+    propagate as an exception. ``stacklevel`` is passed through unchanged
+    plus one, to account for this wrapper itself being one more frame
+    between the original call site and the actual ``warnings.warn`` call.
+    """
+    try:
+        warnings.warn(message, category, stacklevel=stacklevel + 1)
+    except Exception:
+        pass
 
 
 def _slugify(name: str) -> str:

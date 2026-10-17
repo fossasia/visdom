@@ -186,6 +186,33 @@ class TestTrackedVisdomAutoLogging(unittest.TestCase):
 
         self.assertEqual(self._plot_update_events(run), [])
 
+    def test_failed_append_is_not_logged_even_with_an_explicit_win_kwarg(self):
+        """Regression test: a non-raising failed send (False/None) must
+        not fall back to the caller's own win= and get logged as if it
+        had succeeded -- that's exactly the non-raising-failure case
+        _resolve_win exists to detect, not the "no usable win at all"
+        case the test above covers. A valid first call establishes a
+        real window id, then a second call that explicitly passes that
+        win= back (the normal append pattern) fails non-raisingly; only
+        the first call's update may end up in the run's history."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        tvis = run.track(self.vis)
+
+        with patch.object(self.vis, "_send", side_effect=lambda msg, **kw: "win_1"):
+            win = tvis.line(X=np.array([0]), Y=np.array([1.0]))
+        self.assertEqual(win, "win_1")
+
+        with patch.object(self.vis, "_send", side_effect=lambda msg, **kw: False):
+            result = tvis.line(
+                X=np.array([1]), Y=np.array([2.0]), win=win, update="append"
+            )
+        self.assertFalse(result)
+        run.finish()
+
+        updates = self._plot_update_events(run)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["data"]["win"], "win_1")
+
     def test_graph_methods_set_matches_actual_visdom_methods(self):
         """Every name in GRAPH_METHODS must exist as a callable Visdom
         method -- guards against the whitelist drifting from the real API
