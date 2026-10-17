@@ -275,12 +275,18 @@ class Application(tornado.web.Application):
                 UserSettingsHandler,
                 server_state_args,
             ),
-            (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
-            (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **settings)
+
+    def internal_application(self):
+        return tornado.web.Application(
+            [
+                (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
+                (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
+            ]
+        )
 
     def get_last_access(self):
         if len(self.subs) > 0 or len(self.sources) > 0:

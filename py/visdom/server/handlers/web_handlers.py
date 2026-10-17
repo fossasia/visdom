@@ -63,7 +63,7 @@ from visdom.utils.server_utils import (
     notify,
     LazyEnvData,
 )
-from visdom.server import metrics
+from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
@@ -1929,8 +1929,8 @@ class ActivityHandler(BaseHandler):
     Only ever the instance's own share of them: the proxy hashes each workspace
     onto exactly one instance, so a caller wanting the whole deployment asks every
     instance and concatenates. Carries no environment data or plot contents, only
-    counts, but it does name every workspace on the instance, so the proxy keeps it
-    off the public surface and it is reached directly over the internal network.
+    counts, but it does name every workspace on the instance, so it is served only
+    on the internal port, and only to a request signed with a read key.
     """
 
     # Registered against the application rather than a state, because it
@@ -1993,6 +1993,14 @@ class ActivityHandler(BaseHandler):
 
         return list(workspaces.values())
 
+    def allowed(self):
+        return internal.is_signed(self.request, internal.READ)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
     def get(self):
         self.write({"workspaces": self.gather()})
 
@@ -2001,9 +2009,13 @@ class MetricsHandler(ActivityHandler):
     """The same workspace numbers, in the format a Prometheus scrape wants.
 
     Inherits the gathering rather than repeating it. Like the activity endpoint
-    it names every workspace on the instance, so it belongs on the internal
-    network and the proxy keeps it off the public surface.
+    it names every workspace on the instance, so it is served only on the
+    internal port. Prometheus cannot sign a request, so a metrics token is
+    accepted here as well as a read signature.
     """
+
+    def allowed(self):
+        return internal.has_metrics_token(self.request) or super().allowed()
 
     def get(self):
         samples = [metrics.sample_from_activity(entry) for entry in self.gather()]

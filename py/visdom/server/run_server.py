@@ -88,6 +88,7 @@ def start_server(
     ssl_keyfile=None,
     save_interval=DEFAULT_SAVE_INTERVAL,
     save_threshold=DEFAULT_SAVE_THRESHOLD,
+    internal_port=None,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
@@ -108,6 +109,7 @@ def start_server(
             ssl_ctx=ssl_ctx,
             save_interval=save_interval,
             save_threshold=save_threshold,
+            internal_port=internal_port,
         )
     )
 
@@ -191,6 +193,7 @@ async def _serve(
     ssl_ctx,
     save_interval,
     save_threshold,
+    internal_port=None,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -231,6 +234,16 @@ async def _serve(
     app.port = port
     server.add_sockets(sockets)
 
+    internal_server = None
+    if internal_port is not None:
+        internal_server = tornado.httpserver.HTTPServer(app.internal_application())
+        internal_server.add_sockets(
+            tornado.netutil.bind_sockets(
+                internal_port, address=bind_addr, family=family
+            )
+        )
+        logging.info(f"Internal endpoints on port {internal_port}")
+
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
@@ -261,6 +274,8 @@ async def _serve(
     finally:
         logging.info("Shutting down")
         server.stop()
+        if internal_server is not None:
+            internal_server.stop()
         # Through the state that owns them: rebinding ``app.subs`` left both
         # the live sockets and the dictionaries the handlers share untouched.
         app.server_state.close_connections()
@@ -286,6 +301,14 @@ def main(print_func=None):
         type=valid_port,
         default=DEFAULT_PORT,
         help="port to run the server on.",
+    )
+    parser.add_argument(
+        "-internal_port",
+        metavar="internal_port",
+        type=valid_port,
+        default=None,
+        help="port for the endpoints a gateway calls, which only answer signed "
+        "requests. They are not served at all when this is unset.",
     )
     parser.add_argument(
         "-hostname",
@@ -474,6 +497,7 @@ def main(print_func=None):
         ssl_keyfile=FLAGS.ssl_keyfile,
         save_interval=FLAGS.save_interval,
         save_threshold=FLAGS.save_threshold,
+        internal_port=FLAGS.internal_port,
     )
 
 
