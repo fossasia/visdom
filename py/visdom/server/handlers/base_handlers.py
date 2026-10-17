@@ -53,6 +53,10 @@ class WorkspaceScopedMixin:
     workspace_role = None
 
     @property
+    def readonly(self):
+        return self.workspace_role == "viewer" or super().readonly
+
+    @property
     def workspace_manager(self):
         """The gateway resolver, carried on the state every handler is given.
 

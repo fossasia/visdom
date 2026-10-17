@@ -56,6 +56,34 @@ class TestWorkspaceShutdown(unittest.TestCase):
 
         self.assertEqual(len(self.saves), 1)
 
+    def test_one_workspace_failing_does_not_stop_the_others_saving(self):
+        self.flaky(fail_first=True)
+        self.space.dirty_envs["main"] = 1
+        other = self.app.workspace_env_manager.space("ws-b")
+        other.dirty_envs["main"] = 1
+        other_saves = []
+        other.storage.save_all = other_saves.append
+
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
+
+        self.assertEqual(len(other_saves), 1)
+        self.assertFalse(other.dirty_envs)
+        self.assertIn("main", self.space.dirty_envs)
+
+    def test_a_failed_server_save_still_saves_every_workspace(self):
+        self.flaky(fail_first=False)
+
+        def broken_save_all(state):
+            raise OSError("disk full")
+
+        self.app.server_state.storage.save_all = broken_save_all
+
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
+
+        self.assertEqual(len(self.saves), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

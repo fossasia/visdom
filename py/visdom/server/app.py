@@ -401,12 +401,22 @@ class Application(tornado.web.Application):
         with self._workspaces_shutdown_lock:
             if self._workspaces_shut_down:
                 return
-            self.server_state.shutdown_storage()
+            failures = []
+            try:
+                self.server_state.shutdown_storage()
+            except Exception as error:
+                failures.append(error)
             for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
-                if state.env_path is not None:
-                    state.storage.save_all(state.state)
+                try:
+                    if state.env_path is not None:
+                        state.storage.save_all(state.state)
+                except Exception as error:
+                    failures.append(error)
+                    continue
                 state.dirty_envs.clear()
                 state.saving_envs.clear()
+            if failures:
+                raise failures[0]
             self._workspaces_shut_down = True
 
     def save_layouts(self, layouts=None):

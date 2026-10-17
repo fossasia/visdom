@@ -49,7 +49,6 @@ from visdom.utils.server_utils import (
     warm_env,
     window,
     register_window,
-    gather_envs,
     broadcast_envs,
     broadcast_tags,
     escape_eid,
@@ -58,7 +57,9 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    push_deleted,
+    stringify,
+    push_deleted_many_off_loop,
+    forget_closed_panes,
     notify,
     LazyEnvData,
 )
@@ -663,19 +664,97 @@ class UpdateHandler(BaseHandler):
 
 class CloseHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
+        """Close one pane, or every pane in an env, recording the undo off the loop.
+
+        The panes leave ``state`` here, on the loop, before anything is
+        awaited, so a close is still all-or-nothing as far as any other request
+        can tell -- and a pane that was already gone is still announced, as it
+        always was. Their undo entries then go to the storage worker as one
+        write rather than one per pane: closing an env with many panes used to
+        read and rewrite its undo file once per pane, inline.
+
+        If that write fails the panes go back where they came from: the only
+        copy of a closed pane between the pop and the write is the one this
+        call is holding, so a close that cannot be recorded has to be a close
+        that did not happen rather than one nothing can undo. A close that did
+        not happen also leaves no undo entry, so whatever the write may still
+        manage to record for the panes that came back is taken out again.
+
+        What is announced is decided after that write, against the env as it
+        stands then: the loop kept serving while the undo stack was written, so
+        a pane id this close popped may have been written again in the
+        meantime. Announcing its close would take that new pane off every
+        client while the server still holds it.
+        """
         eid = extract_eid(args)
         if eid not in handler.state:
             return
         win = args.get("win")
 
-        keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
-        for win in keys:
-            p_data = handler.state[eid]["jsons"].pop(win, None)
+        env = handler.state[eid]
+        keys = list(env["jsons"].keys()) if win is None else [win]
+        closed = []
+        for key in keys:
+            p_data = env["jsons"].pop(key, None)
+            closed.append((key, p_data))
             if p_data is not None:
-                push_deleted(handler.storage, eid, win, p_data)
                 handler.mark_dirty(eid)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+
+        panes = [(key, p_data) for key, p_data in closed if p_data is not None]
+        if panes:
+            try:
+                await push_deleted_many_off_loop(handler, eid, panes)
+            except BaseException:
+                # ``BaseException`` because a cancelled request loses the panes
+                # exactly as a failed write does: the await is where the close
+                # is interrupted either way, and the handler is the only thing
+                # holding them. Nothing is swallowed -- every one is re-raised.
+                #
+                # The panes are already out of ``state``: the only copy of
+                # them left is the one in this frame. Dropping it loses them
+                # for good -- the close is not announced, so clients keep
+                # showing panes the server no longer has, and the next autosave
+                # writes the env without them. They go back instead, and the
+                # env is marked so that save records the env as it still is.
+                #
+                # Only ids that are still missing are restored. A pane written
+                # back under one of them while this write was out is newer than
+                # what the close popped, and overwriting it here would undo a
+                # live window. If the env itself is gone, there is nothing to
+                # restore it into.
+                restored = []
+                if handler.state.get(eid) is env:
+                    for key, p_data in panes:
+                        if env["jsons"].setdefault(key, p_data) is p_data:
+                            restored.append((key, p_data))
+                    handler.mark_dirty(eid)
+                if restored:
+                    # Cancelling the future above does not stop the worker: the
+                    # push can still be queued, or running, and land after this
+                    # -- leaving the pane back in the env and recorded as
+                    # closed both, for an undo to restore over whatever holds
+                    # its id by then. The entries go back out behind the write
+                    # that may yet make them, which the single worker orders
+                    # for us. Only for the panes that actually came back: an id
+                    # taken by a newer window keeps the close that took it,
+                    # because the undo stack is then the one place the pane it
+                    # closed still exists.
+                    forget_closed_panes(handler, eid, restored)
+                raise
+            if handler.state.get(eid) is not env:
+                # A delete_env landed while the undo stack was being written:
+                # the env these panes belonged to is gone, along with the file
+                # just written, so there is nothing left to announce.
+                return
+
+        for key, _p_data in closed:
+            if key in env["jsons"]:
+                # A pane was written back under this id while the undo stack
+                # was: the window there now is a new one, not the one this
+                # close popped, and it is not this close's to announce.
+                continue
+            broadcast(handler, json.dumps({"command": "close", "data": key}), eid)
 
     @check_auth
     @check_readonly
@@ -684,7 +763,7 @@ class CloseHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         await ensure_env_loaded(self, extract_eid(args))
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DeleteEnvHandler(BaseHandler):
@@ -841,6 +920,9 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
+            if self.readonly:
+                reject_readonly(self)
+                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
@@ -1045,12 +1127,12 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, self.storage)
+            # No env listing is passed: ``login.html`` has never rendered one,
+            # and building it here read the environment directory on the loop
+            # for every unauthenticated request that reached the server.
             self.render(
                 "login.html",
                 user=getpass.getuser(),
-                items=items,
-                active_item="",
                 base_url=self.base_url,
             )
 
