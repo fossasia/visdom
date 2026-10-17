@@ -36,6 +36,7 @@ import logging
 import warnings
 import time
 import errno
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -130,6 +131,11 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 REFUSED_STATUSES = (401, 402, 403)
+REFUSALS_REMEMBERED = 100
+
+
+def _one_line(text):
+    return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
 
 
 def _refusal_reason(body):
@@ -141,11 +147,11 @@ def _refusal_reason(body):
         parsed = None
     if isinstance(parsed, dict):
         for key in ("detail", "error", "message"):
-            if isinstance(parsed.get(key), str) and parsed[key].strip():
-                return parsed[key].strip()
+            if isinstance(parsed.get(key), str) and _one_line(parsed[key]):
+                return _one_line(parsed[key])[:200]
     if not text or text.startswith("<"):
         return "no reason given"
-    return text[:200]
+    return _one_line(text)[:200]
 
 
 SESSION_IDLE_TIMEOUT = 600
@@ -1284,10 +1290,14 @@ class Visdom(object):
         message = "The visdom server refused this request ({0}): {1}".format(
             status, _refusal_reason(body)
         )
-        seen = self.__dict__.setdefault("_refusals_seen", set())
-        if message not in seen:
-            seen.add(message)
-            logger.warning(message)
+        seen = self.__dict__.setdefault("_refusals_seen", OrderedDict())
+        if message in seen:
+            seen.move_to_end(message)
+            return
+        seen[message] = True
+        if len(seen) > REFUSALS_REMEMBERED:
+            seen.popitem(last=False)
+        logger.warning(message)
 
     def _handle_post(self, url, data=None):
         """

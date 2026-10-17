@@ -69,6 +69,9 @@ def _warnings(caplog):
         ("<html><body>403 Forbidden</body></html>", "no reason given"),
         ("", "no reason given"),
         (None, "no reason given"),
+        ("line one\nline two", "line one line two"),
+        ('{"detail": "forged\\nERROR fake entry"}', "forged ERROR fake entry"),
+        ("bell\x07 and\x1b[31m escape", "bell and[31m escape"),
         (
             '{"detail": [{"msg": "not a string"}]}',
             '{"detail": [{"msg": "not a string"}]}',
@@ -119,6 +122,16 @@ def test_a_different_reason_is_said_as_well(caplog):
 
     assert len(_warnings(caplog)) == 2
     assert "out of storage" in _warnings(caplog)[1]
+
+
+def test_only_so_many_reasons_are_remembered(caplog):
+    client = _client(401, BAD_KEY)
+
+    for number in range(visdom.REFUSALS_REMEMBERED + 50):
+        client._session.response = _Response(401, '{"detail":"key %d"}' % number)
+        client._handle_post("http://x/events", "{}")
+
+    assert len(client._refusals_seen) == visdom.REFUSALS_REMEMBERED
 
 
 @pytest.mark.parametrize("status", [200, 400, 404, 500])
