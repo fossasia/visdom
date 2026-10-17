@@ -63,6 +63,7 @@ from visdom.utils.server_utils import (
     notify,
     LazyEnvData,
 )
+from visdom.server import metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
@@ -919,6 +920,9 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
+            if self.readonly:
+                reject_readonly(self)
+                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
@@ -1917,3 +1921,93 @@ class TagsHandler(BaseHandler):
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
+
+
+class ActivityHandler(BaseHandler):
+    """Reports who is connected to each workspace this instance currently holds.
+
+    Only ever the instance's own share of them: the proxy hashes each workspace
+    onto exactly one instance, so a caller wanting the whole deployment asks every
+    instance and concatenates. Carries no environment data or plot contents, only
+    counts, but it does name every workspace on the instance, so the proxy keeps it
+    off the public surface and it is reached directly over the internal network.
+    """
+
+    # Registered against the application rather than a state, because it
+    # reports on every workspace rather than acting inside one. Named apart from
+    # the inherited accessor so it does not collide with that read-only view.
+    _manager = None
+
+    def initialize(self, app=None):
+        """Take only the workspace manager, not a state to act within.
+
+        This endpoint reports counts and never touches environments or
+        rendering, so it has no use for the rest and no reason to fail if one is
+        missing.
+        """
+        self._manager = getattr(app, "workspace_env_manager", None)
+
+    def gather(self):
+        """Every workspace this instance can say anything about.
+
+        Split out from get so the metrics endpoint reports the same numbers
+        rather than collecting them a second way, which is how two endpoints end
+        up disagreeing about the same deployment.
+        """
+        manager = self._manager
+        workspaces = {}
+        if manager is not None:
+            for workspace_id, space in manager.workspace_spaces():
+                entry = space.activity()
+                entry["workspace_id"] = str(workspace_id)
+                workspaces[entry["workspace_id"]] = entry
+
+            # Every instance shares the env volume, so the disk pass also turns up
+            # workspaces this instance does not serve. Reporting them is harmless
+            # and it is what lets a caller see a workspace nobody has touched since
+            # the last restart, which the socket pass alone cannot show.
+            for workspace_id, stored in manager.stored_workspaces().items():
+                entry = workspaces.setdefault(
+                    workspace_id,
+                    {
+                        "workspace_id": workspace_id,
+                        "slug": None,
+                        "viewers": 0,
+                        "writers": 0,
+                        "last_active_at": None,
+                        # Zero rather than absent. This instance counts, and a
+                        # workspace it has not served since starting has had no
+                        # work done on it, which is a real answer. Leaving them
+                        # out would say the counters are unavailable, which is
+                        # what a caller should be told about an older server.
+                        "writes": 0,
+                        "broadcasts": 0,
+                        "broadcast_bytes": 0,
+                        "active_hour": None,
+                        "active_minutes_mask": 0,
+                    },
+                )
+                entry["bytes"] = stored["bytes"]
+                if not entry.get("last_active_at"):
+                    entry["last_active_at"] = stored["last_active_at"]
+
+        return list(workspaces.values())
+
+    def get(self):
+        self.write({"workspaces": self.gather()})
+
+
+class MetricsHandler(ActivityHandler):
+    """The same workspace numbers, in the format a Prometheus scrape wants.
+
+    Inherits the gathering rather than repeating it. Like the activity endpoint
+    it names every workspace on the instance, so it belongs on the internal
+    network and the proxy keeps it off the public surface.
+    """
+
+    def get(self):
+        samples = [metrics.sample_from_activity(entry) for entry in self.gather()]
+        # The version parameter is part of the format's content type. Scrapers
+        # accept a bare text/plain, but tools that inspect the header expect it.
+        self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.write(metrics.render(samples))
