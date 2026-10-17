@@ -12,9 +12,13 @@ import tempfile
 import types
 import unittest
 
+import pytest
+
 from visdom.server import metrics
 from visdom.server.app import Application
 from visdom.utils.server_utils import broadcast
+
+pytestmark = pytest.mark.unit
 
 
 class TestRendering(unittest.TestCase):

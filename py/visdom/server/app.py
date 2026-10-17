@@ -221,6 +221,7 @@ class Application(tornado.web.Application):
             base_env_path=env_path,
             default_state=self.server_state,
             eager=self.eager_data_loading,
+            live_queue=make_live_queue,
         )
         self.server_state.workspace_manager = self.workspace_manager
         self.server_state.workspace_env_manager = self.workspace_env_manager
