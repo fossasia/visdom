@@ -23,7 +23,12 @@ import tornado.ioloop
 import tornado.web  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    broadcast_envs,
+    delete_env_off_loop,
+    purge_env,
+)
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.workspace_env_manager import WorkspaceEnvManager
@@ -63,6 +68,7 @@ from visdom.server.handlers.web_handlers import (
     ForkEnvHandler,
     HealthHandler,
     MetricsHandler,
+    RetireHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -295,6 +301,7 @@ class Application(tornado.web.Application):
                 (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
                 (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
                 (r"%s/_evict" % self.base_url, EvictHandler, {"app": self}),
+                (r"%s/_retire" % self.base_url, RetireHandler, {"app": self}),
             ]
         )
 
@@ -434,6 +441,69 @@ class Application(tornado.web.Application):
         if closed:
             logging.info("drained %d socket(s) before shutdown", closed)
         return closed
+
+    def retire_workspace(self, workspace_id, older_than_days, dry_run=True):
+        """Drop the environments a workspace's plan no longer keeps.
+
+        The gateway knows the retention a workspace is entitled to and which
+        instance holds it; this knows which of its environments have aged out
+        and how to remove one without leaving it behind in memory. A file
+        deleted underneath a loaded workspace comes straight back, because the
+        environment is still in state and the next autosave writes it out again,
+        so the removal goes through the same path a person clicking delete uses.
+
+        A workspace nothing has loaded is swept through its files directly.
+        Building its state to delete from would write a fresh ``main`` into it,
+        which would leave a file behind in every dormant workspace this visits.
+
+        ``loaded`` says whether this instance is the one holding the workspace,
+        which the caller needs when instances share a disk: sweeping a workspace
+        from an instance that does not hold it, while another does, deletes a
+        file the holder then writes back from memory. Asking each instance first
+        is how the caller finds the right one.
+
+        ``dry_run`` reports what would go and touches nothing, which is how this
+        is meant to be run first on a deployment holding real work. The count is
+        what was handed to the storage worker, which runs the removals in order
+        behind any write already queued.
+        """
+        manager = self.workspace_env_manager
+        expired = manager.expired_envs(workspace_id, older_than_days)
+        answer = {
+            "workspace_id": str(workspace_id),
+            "dry_run": bool(dry_run),
+            "loaded": manager.loaded_space(workspace_id) is not None,
+            "envs": [item["eid"] for item in expired],
+            "bytes": sum(item["bytes"] for item in expired),
+            "removed": 0,
+        }
+        if dry_run or not expired:
+            return answer
+
+        space = manager.loaded_space(workspace_id)
+        if space is not None:
+            storage = space.storage
+        else:
+            storage = manager.workspace_storage(workspace_id)
+        for item in expired:
+            eid = item["eid"]
+            try:
+                if space is not None:
+                    space.state.pop(eid, None)
+                    delete_env_off_loop(space, eid)
+                else:
+                    purge_env(storage, eid)
+            except Exception as exc:
+                logging.warning("could not retire %s in %s: %s", eid, workspace_id, exc)
+                continue
+            answer["removed"] += 1
+
+        if answer["removed"] and space is not None:
+            broadcast_envs(space)
+            logging.info(
+                "retired %d env(s) from workspace %s", answer["removed"], workspace_id
+            )
+        return answer
 
     def evict_workspace(self, slug, reason=WITHDRAWN_REASON):
         """Close every socket bound to one workspace, viewers and sources alike.

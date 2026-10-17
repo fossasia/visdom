@@ -95,13 +95,33 @@ class TestTheInternalPort(InternalPortCase):
             json.loads(allowed.body), {"workspace_slug": "alpha", "closed": 0}
         )
 
+    def test_retiring_needs_the_admin_key(self):
+        body = {"workspace_id": "ws-a", "older_than_days": 7}
+
+        self.assertEqual(self.signed_post("/_retire", body, "read-key").code, 401)
+        allowed = self.signed_post("/_retire", body, "admin-key")
+        self.assertEqual(allowed.code, 200)
+        self.assertEqual(json.loads(allowed.body)["dry_run"], True)
+
+    def test_retiring_refuses_a_bad_request(self):
+        for body in [
+            {"older_than_days": 7},
+            {"workspace_id": "ws-a", "older_than_days": "soon"},
+            {"workspace_id": "ws-a", "older_than_days": 0},
+            {"workspace_id": "../outside", "older_than_days": 7},
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(
+                    self.signed_post("/_retire", body, "admin-key").code, 400
+                )
+
     def test_the_rest_of_visdom_is_not_on_this_port(self):
         self.assertEqual(self.fetch("/events", method="POST", body="{}").code, 404)
 
 
 class TestThePublicPort(KeysSetCase):
     def test_the_internal_endpoints_are_not_served(self):
-        for path in ["/_activity", "/_metrics", "/_evict"]:
+        for path in ["/_activity", "/_metrics", "/_evict", "/_retire"]:
             with self.subTest(path=path):
                 response = self.fetch(
                     path, headers=internal.signed_headers("read-key", "GET", path)

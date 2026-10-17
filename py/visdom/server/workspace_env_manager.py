@@ -292,6 +292,78 @@ class WorkspaceEnvManager:
             self._disk_scanned_at = now
             return self._disk_cache
 
+    def loaded_space(self, workspace_id):
+        """The state for a workspace only if something has already built it.
+
+        ``space`` creates one on demand, which is right for a request arriving
+        for that workspace and wrong for a caller sweeping every workspace on
+        disk: building a state writes a fresh ``main`` into a workspace that had
+        been dormant, so a tidy-up would leave a file behind everywhere it went.
+        """
+        with self._lock:
+            return self._states.get(workspace_id)
+
+    def workspace_storage(self, workspace_id):
+        """A store over one workspace's directory, without building its state.
+
+        For acting on the files of a workspace nothing has loaded. A store is
+        just a path, so this costs nothing and keeps the file layout in the one
+        place that knows it.
+        """
+        if self.base_env_path is None:
+            return JSONStore(None)
+        return JSONStore(self._workspace_path(workspace_id))
+
+    def expired_envs(self, workspace_id, older_than_days, keep=("main",)):
+        """Environments in one workspace nobody has written to for that long.
+
+        Read from disk rather than from memory, because a workspace nothing has
+        touched since this process started holds no state here at all, and a
+        dormant workspace is exactly the one with the oldest environments in it.
+
+        ``main`` is kept whatever its age. It is the environment a client writes
+        to when it names none, so removing it makes a workspace look broken
+        rather than tidied.
+        """
+        if self.base_env_path is None or older_than_days is None:
+            return []
+
+        cutoff = time.time() - (older_than_days * 86400)
+        directory = self._workspace_path(workspace_id)
+        expired = []
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            return []
+
+        for entry in entries:
+            if not entry.is_file() or not entry.name.endswith(".json"):
+                continue
+            eid = entry.name[: -len(".json")]
+            if eid in keep:
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            if stat.st_mtime < cutoff:
+                expired.append(
+                    {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
+                )
+        return sorted(expired, key=lambda item: item["last_written"])
+
+    def _workspace_path(self, workspace_id):
+        name = str(workspace_id)
+        root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
+        path = os.path.join(root, name)
+        if (
+            name in ("", ".", "..")
+            or os.path.basename(name) != name
+            or os.path.dirname(os.path.realpath(path)) != root
+        ):
+            raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+        return path
+
     def _create_space(self, workspace_id, slug=None):
         """Build a workspace's state, inheriting the server's configuration.
 
@@ -306,15 +378,7 @@ class WorkspaceEnvManager:
             storage = JSONStore(None)
             env_path = None
         else:
-            name = str(workspace_id)
-            root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
-            env_path = os.path.join(root, name)
-            if (
-                name in ("", ".", "..")
-                or os.path.basename(name) != name
-                or os.path.dirname(os.path.realpath(env_path)) != root
-            ):
-                raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+            env_path = self._workspace_path(workspace_id)
             ensure_dir_exists(env_path)
             storage = JSONStore(env_path)
 
