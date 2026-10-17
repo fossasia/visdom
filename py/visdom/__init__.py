@@ -757,9 +757,12 @@ def _decode_binary_arrays(obj):
                     base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
                 )
                 if "shape" in obj:
-                    arr = arr.reshape(obj["shape"])
+                    shape = obj["shape"]
+                    if isinstance(shape, str):
+                        shape = tuple(int(dim) for dim in shape.split(","))
+                    arr = arr.reshape(shape)
                 return arr.tolist()
-            except (binascii.Error, ValueError, TypeError):
+            except (binascii.Error, ValueError, TypeError, OverflowError):
                 return obj
         return {k: _decode_binary_arrays(v) for k, v in obj.items()}
     if isinstance(obj, list):
