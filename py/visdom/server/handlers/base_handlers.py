@@ -98,10 +98,16 @@ class WorkspaceScopedMixin:
             return self.workspace_manager.resolve_session(session_token, workspace_slug)
         return None
 
-    def bind_workspace(self, workspace_id):
+    def bind_workspace(self, workspace_id, slug=None):
         if self.workspace_env_manager is None:
             return
-        self.server_state = self.workspace_env_manager.space(workspace_id)
+        if slug is None:
+            # Socket test doubles have no request, hence the guard rather than
+            # a direct attribute read.
+            request = getattr(self, "request", None)
+            if request is not None:
+                slug = request.headers.get("X-Visdom-Workspace")
+        self.server_state = self.workspace_env_manager.space(workspace_id, slug=slug)
 
 
 class BaseWebSocketHandler(
