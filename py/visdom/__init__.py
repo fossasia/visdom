@@ -364,7 +364,7 @@ def _markerColorCheck(mc, X, Y, L):
 
     ret = {}
     for k, v in enumerate(markercolor):
-        ret[Y[k]] = ret.get(Y[k], []) + [v]
+        ret.setdefault(Y[k], []).append(v)
 
     return ret
 
