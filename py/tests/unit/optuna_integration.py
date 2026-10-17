@@ -11,6 +11,7 @@
 import sys
 import types
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -235,6 +236,70 @@ class TestOptunaIntermediateValues(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "offline"):
             raising_callback(study, trial)
+
+
+class TestOptunaRejectedWrites(unittest.TestCase):
+    """A write the server refuses must not pass for a recorded trial."""
+
+    # What visdom hands back when the server answers with an error page.
+    REJECTED = "<html><title>Visdom - Error 409</title></html>"
+
+    def test_rerun_into_a_finished_trial_env_warns(self):
+        viz = Mock()
+        viz.experiment.return_value = self.REJECTED
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+
+        with self.assertWarnsRegex(
+            RuntimeWarning,
+            "failed to log trial 0: visdom did not record it in env "
+            "'optuna_quadratic_trial_000000'.*new study_name",
+        ):
+            callback(make_study([trial]), trial)
+        viz.log_metrics.assert_not_called()
+        viz.finish_experiment.assert_not_called()
+        self.assertEqual(callback._trial_envs, [])
+
+    def test_rejection_raises_with_raise_on_error(self):
+        viz = Mock()
+        viz.experiment.return_value = self.REJECTED
+        trial = make_trial()
+        callback = OptunaCallback(
+            viz, dashboard_env="optuna_quadratic", raise_on_error=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "did not record it"):
+            callback(make_study([trial]), trial)
+
+    def test_every_write_is_checked(self):
+        trial = make_trial(intermediate_values={0: 0.9})
+        for method in ("log_metrics", "finish_experiment"):
+            viz = Mock()
+            getattr(viz, method).return_value = self.REJECTED
+            callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+            with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
+                callback(make_study([trial]), trial)
+            self.assertEqual(callback._trial_envs, [])
+
+    def test_unreachable_server_warns(self):
+        viz = Mock()
+        viz.experiment.return_value = False
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
+            callback(make_study([trial]), trial)
+
+    def test_recorded_writes_do_not_warn(self):
+        stored = {"env_id": "optuna_quadratic_trial_000000"}
+        viz = Mock()
+        viz.experiment.return_value = stored
+        viz.log_metrics.return_value = stored
+        viz.finish_experiment.return_value = stored
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            callback(make_study([trial]), trial)
+        self.assertEqual(callback._trial_envs, ["optuna_quadratic_trial_000000"])
 
 
 class TestOptunaIntermediateDashboard(unittest.TestCase):

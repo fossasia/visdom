@@ -594,28 +594,48 @@ class OptunaCallback:
             "status": "finished" if state == "COMPLETE" else "failed",
         }
 
+    @staticmethod
+    def _check_recorded(reply: Any, env: str) -> None:
+        """Raise if the server did not record a write.
+
+        A rejection comes back as the server's error text and an unreachable
+        server as ``False``/``None``; a recorded write is the stored experiment.
+        """
+        if reply is None or reply is False or isinstance(reply, str):
+            raise RuntimeError(
+                "visdom did not record it in env {!r}. If an earlier run of this "
+                "study already finished there, use a new study_name or "
+                "dashboard_env, or delete the old trial envs".format(env)
+            )
+
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
         try:
             payload = self._build_payload(study, trial)
-            self.viz.experiment(
-                name=payload["name"],
-                params=payload["params"],
-                tags=payload["tags"],
-                description=payload["description"],
-                env=payload["env"],
+            env = payload["env"]
+            self._check_recorded(
+                self.viz.experiment(
+                    name=payload["name"],
+                    params=payload["params"],
+                    tags=payload["tags"],
+                    description=payload["description"],
+                    env=env,
+                ),
+                env,
             )
             for step, value in self._intermediate_values(trial):
-                self.viz.log_metrics(
-                    {_INTERMEDIATE_METRIC_NAME: value},
-                    step=step,
-                    env=payload["env"],
+                self._check_recorded(
+                    self.viz.log_metrics(
+                        {_INTERMEDIATE_METRIC_NAME: value}, step=step, env=env
+                    ),
+                    env,
                 )
             if payload["metrics"]:
-                self.viz.log_metrics(payload["metrics"], env=payload["env"])
-            self.viz.finish_experiment(
-                status=payload["status"],
-                env=payload["env"],
+                self._check_recorded(
+                    self.viz.log_metrics(payload["metrics"], env=env), env
+                )
+            self._check_recorded(
+                self.viz.finish_experiment(status=payload["status"], env=env), env
             )
         except Exception as error:
             if self.raise_on_error:
