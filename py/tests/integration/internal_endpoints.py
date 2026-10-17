@@ -9,7 +9,10 @@
 import asyncio
 import json
 import os
+import shutil
 import socket
+import ssl
+import subprocess
 from unittest import mock
 
 import pytest
@@ -95,10 +98,39 @@ def _free_port():
         return probe.getsockname()[1]
 
 
+def _self_signed(tmp_path):
+    cert, key = tmp_path / "internal.crt", tmp_path / "internal.key"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=visdom-internal",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return cert, key
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
 def test_the_server_serves_the_internal_endpoints_on_their_own_port(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("VISDOM_INTERNAL_READ_KEYS", "read-key")
+    cert, key = _self_signed(tmp_path)
+    pinned = ssl.create_default_context(cafile=str(cert))
+    pinned.check_hostname = False
     public, private = _free_port(), _free_port()
     stops = []
     monkeypatch.setattr(run_server, "_install_stop_handlers", stops.append)
@@ -120,6 +152,7 @@ def test_the_server_serves_the_internal_endpoints_on_their_own_port(
                 save_interval=run_server.DEFAULT_SAVE_INTERVAL,
                 save_threshold=run_server.DEFAULT_SAVE_THRESHOLD,
                 internal_port=private,
+                internal_ssl_ctx=run_server._build_ssl_context(str(cert), str(key)),
             )
         )
         while not stops:
@@ -127,20 +160,28 @@ def test_the_server_serves_the_internal_endpoints_on_their_own_port(
         client = tornado.httpclient.AsyncHTTPClient()
         try:
             inside = await client.fetch(
-                "http://127.0.0.1:%d/_activity" % private,
+                "https://127.0.0.1:%d/_activity" % private,
                 headers=internal.signed_headers("read-key", "GET", "/_activity"),
+                ssl_options=pinned,
                 raise_error=False,
             )
+            try:
+                in_the_clear = await client.fetch(
+                    "http://127.0.0.1:%d/_activity" % private, raise_error=False
+                )
+            except OSError:
+                in_the_clear = None
             outside = await client.fetch(
                 "http://127.0.0.1:%d/_activity" % public, raise_error=False
             )
         finally:
             stops[0].set()
             await serving
-        return inside, outside
+        return inside, in_the_clear, outside
 
-    inside, outside = asyncio.run(serve_and_ask())
+    inside, in_the_clear, outside = asyncio.run(serve_and_ask())
 
     assert inside.code == 200
+    assert in_the_clear is None or in_the_clear.code != 200
     assert "workspaces" in json.loads(inside.body)
     assert b"workspaces" not in outside.body
