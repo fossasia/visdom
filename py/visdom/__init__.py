@@ -1172,16 +1172,16 @@ class Visdom(object):
                         on_error,
                         on_close,
                     )
-                    continue
-                ws = websocket.WebSocketApp(
-                    sock_addr,
-                    on_message=on_message,
-                    on_error=on_error,
-                    on_close=on_close,
-                    header=ws_header,
-                )
-                ws.run_forever(ping_timeout=100.0, **connect_kwargs)
-                ws.close()
+                else:
+                    ws = websocket.WebSocketApp(
+                        sock_addr,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close,
+                        header=ws_header,
+                    )
+                    ws.run_forever(ping_timeout=100.0, **connect_kwargs)
+                    ws.close()
             except Exception as e:
                 logger.error("Socket had error {}, attempting restart".format(e))
             if self.use_socket:
