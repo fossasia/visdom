@@ -266,12 +266,23 @@ class TestOptunaRejectedWrites(unittest.TestCase):
         with self.assertWarnsRegex(
             RuntimeWarning,
             "failed to log trial 0: visdom did not record it in env "
-            "'optuna_quadratic_trial_000000'.*new study_name",
+            "'optuna_quadratic_trial_000000'.*use a new dashboard_env or delete",
         ):
             callback(make_study([trial]), trial)
         viz.log_metrics.assert_not_called()
         viz.finish_experiment.assert_not_called()
         self.assertEqual(callback._trial_envs, [])
+
+    def test_advice_names_study_name_when_envs_come_from_it(self):
+        viz = recording_viz()
+        viz.experiment.return_value = self.REJECTED
+        trial = make_trial()
+        callback = OptunaCallback(viz)
+        with self.assertWarnsRegex(
+            RuntimeWarning,
+            "'optuna_quadratic_trial_000000'.*use a new study_name or delete",
+        ):
+            callback(make_study([trial]), trial)
 
     def test_rejection_raises_with_raise_on_error(self):
         viz = recording_viz()

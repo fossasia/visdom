@@ -594,20 +594,23 @@ class OptunaCallback:
             "status": "finished" if state == "COMPLETE" else "failed",
         }
 
-    @staticmethod
-    def _check_recorded(reply: Any, env: str) -> None:
+    def _check_recorded(self, reply: Any, env: str) -> None:
         """Raise unless the reply is the stored experiment.
 
         ``True`` is the client's offline sentinel: nothing was sent, so there is
         nothing to confirm. Anything else that is not a stored experiment (error
         text, ``False`` when the server can't be reached) was not recorded.
         """
-        if reply is not True and not (isinstance(reply, Mapping) and "env_id" in reply):
-            raise RuntimeError(
-                "visdom did not record it in env {!r}. If an earlier run of this "
-                "study already finished there, use a new study_name or "
-                "dashboard_env, or delete the old trial envs".format(env)
+        if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
+            return
+        # Trial envs come from dashboard_env when it is set, else from study_name.
+        rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+        raise RuntimeError(
+            "visdom did not record it in env {!r}. If an earlier run already "
+            "finished there, use a new {} or delete the old trial envs".format(
+                env, rename
             )
+        )
 
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
