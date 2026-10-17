@@ -4038,7 +4038,7 @@ class Visdom(object):
                 and opts["normalize"] > 0
                 and np.isfinite(opts["normalize"])
             ), "opts.normalize should be a finite positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            magnitude = np.hypot(X, Y, dtype=np.result_type(X, Y, np.float64))
             finite_mask = np.isfinite(magnitude)
 
             if not np.any(finite_mask):
@@ -4055,18 +4055,23 @@ class Visdom(object):
                         RuntimeWarning,
                     )
                 else:
-                    scale = max_mag / opts["normalize"]
-
-                    if scale <= 0 or not np.isfinite(scale):
-                        warnings.warn(
-                            "Skipping quiver normalization: invalid scale computed",
-                            RuntimeWarning,
-                        )
-                    else:
-                        X = np.where(np.isfinite(X), X, np.nan)
-                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                    with np.errstate(over="ignore", under="ignore"):
+                        scale = max_mag / opts["normalize"]
+                    nonzero_vectors = finite_mask & ((X != 0) | (Y != 0))
+                    X = np.where(np.isfinite(X), X, np.nan)
+                    Y = np.where(np.isfinite(Y), Y, np.nan)
+                    if scale >= np.finfo(magnitude.dtype).tiny and np.isfinite(scale):
+                        # Avoid losing tiny components with a normal scale.
                         X = X / scale
                         Y = Y / scale
+                    else:
+                        X = (X / max_mag) * opts["normalize"]
+                        Y = (Y / max_mag) * opts["normalize"]
+                    if np.any(nonzero_vectors & (X == 0) & (Y == 0)):
+                        warnings.warn(
+                            "Quiver normalization underflow: nonzero vectors became zero",
+                            RuntimeWarning,
+                        )
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
