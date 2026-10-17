@@ -22,8 +22,10 @@ local visdom behaves exactly as before.
 """
 
 import os
+import shutil
 import threading
 import time
+import uuid
 from collections import Counter
 
 from visdom.data_model.json_store import JSONStore
@@ -314,6 +316,34 @@ class WorkspaceEnvManager:
             return JSONStore(None)
         return JSONStore(self._workspace_path(workspace_id))
 
+    def workspace_directory(self, workspace_id):
+        """Where one workspace's files live, or ``None`` for anything else.
+
+        Only a well-formed workspace id names a directory, so an id arriving
+        over the wire cannot point this anywhere else on the disk.
+        """
+        if self.base_env_path is None:
+            return None
+        try:
+            canonical = str(uuid.UUID(str(workspace_id)))
+        except ValueError:
+            return None
+        return os.path.join(self.base_env_path, "workspaces", canonical)
+
+    def forget(self, workspace_id):
+        """Stop holding a workspace, returning the state it had, or ``None``.
+
+        Autosave walks the states held here, so a forgotten workspace is never
+        written out again.
+        """
+        if workspace_id is None:
+            return None
+        with self._lock:
+            state = self._states.pop(workspace_id, None)
+        with self._disk_lock:
+            self._disk_scanned_at = None
+        return state
+
     def expired_envs(self, workspace_id, older_than_days, keep=("main",)):
         """Environments in one workspace nobody has written to for that long.
 
@@ -405,3 +435,22 @@ class WorkspaceEnvManager:
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def remove_directory(path):
+    """Delete a workspace directory, returning the bytes it held.
+
+    ``None`` when there was no directory, which is the normal answer from every
+    instance but the first one asked, since they share the disk.
+    """
+    if path is None or not os.path.isdir(path):
+        return None
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    shutil.rmtree(path)
+    return total

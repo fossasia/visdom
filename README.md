@@ -214,7 +214,7 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
-11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, and `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise). They are not served at all without it, and never on the main port.
+11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
 12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
 
 The internal port only answers signed requests. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
