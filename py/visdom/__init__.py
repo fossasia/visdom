@@ -4060,6 +4060,7 @@ class Visdom(object):
                         warnings.warn(
                             "Quiver normalization underflow: nonzero vectors became zero",
                             RuntimeWarning,
+                            stacklevel=3,
                         )
 
         # interleave X and Y with copies / NaNs to get lines:

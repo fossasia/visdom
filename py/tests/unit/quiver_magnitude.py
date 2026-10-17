@@ -154,3 +154,31 @@ def test_normalization_does_not_warn_for_nonfinite_vectors(capture_send):
                 opts={"normalize": 1e-300, "arrowheads": False},
             )
         )
+
+
+def test_underflow_warning_identifies_each_call_site(offline_client, monkeypatch):
+    monkeypatch.setattr(offline_client, "_send", lambda *args, **kwargs: "quiver")
+    kwargs = {
+        "X": np.array([[1e-30, 1.0]]),
+        "Y": np.zeros((1, 2)),
+        "opts": {"normalize": 1e-300, "arrowheads": False},
+    }
+
+    def first_call():
+        offline_client.quiver(**kwargs)
+
+    def second_call():
+        offline_client.quiver(**kwargs)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default", RuntimeWarning)
+        first_call()
+        first_call()
+        second_call()
+
+    assert len(caught) == 2
+    assert all(warning.filename == __file__ for warning in caught)
+    assert [warning.lineno for warning in caught] == [
+        first_call.__code__.co_firstlineno + 1,
+        second_call.__code__.co_firstlineno + 1,
+    ]
