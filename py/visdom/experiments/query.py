@@ -543,6 +543,17 @@ class ExperimentLike(Protocol):
     def metrics(self) -> Sequence[_KeyValueLike]:
         ...
 
+    def latest_metric_values(self) -> dict:
+        """``{key: latest value}`` for the experiment's metric series.
+
+        Asked for rather than derived from :attr:`metrics` because metrics are
+        a time series and a record holds one value per key: an experiment that
+        keeps its observations in their stored form can answer this without
+        building an object per observation, and walking the series here would
+        take that back.
+        """
+        ...
+
     @property
     def tags(self) -> Sequence[_KeyValueLike]:
         ...
@@ -573,10 +584,7 @@ def build_record(experiment: ExperimentLike) -> dict:
     for param in experiment.params:
         record.setdefault(param.key, param.value)
         record["param." + param.key] = param.value
-    latest_metrics: dict[str, Any] = {}
-    for metric in reversed(experiment.metrics):
-        latest_metrics.setdefault(metric.key, metric.value)
-    for key, value in latest_metrics.items():
+    for key, value in experiment.latest_metric_values().items():
         record.setdefault(key, value)
         record["metric." + key] = value
     for tag in experiment.tags:

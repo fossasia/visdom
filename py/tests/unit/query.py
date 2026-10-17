@@ -526,6 +526,13 @@ class _FakeExperiment:
         self.metrics = [_FakeNamedValue("acc", 99.0)]
         self.tags = [_FakeNamedValue("owner", "bob")]
 
+    def latest_metric_values(self):
+        """Answer for the series itself, as ``ExperimentLike`` asks it to."""
+        latest = {}
+        for metric in reversed(self.metrics):
+            latest.setdefault(metric.key, metric.value)
+        return latest
+
 
 class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
     """build_record reads a structural shape, not the concrete Experiment class."""

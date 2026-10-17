@@ -51,10 +51,7 @@ def _metric_values(experiment: ComparableExperiment) -> dict:
     :func:`~visdom.experiments.query.build_record` compares on, so a run found by
     ``acc > 0.9`` shows that same ``acc`` here.
     """
-    latest: dict[str, Any] = {}
-    for metric in reversed(experiment.metrics):
-        latest.setdefault(metric.key, metric.value)
-    return latest
+    return experiment.latest_metric_values()
 
 
 def _tag_values(experiment: ComparableExperiment) -> dict:
