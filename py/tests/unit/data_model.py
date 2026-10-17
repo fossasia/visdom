@@ -321,6 +321,7 @@ def test_list_skips_unreadable_hash_files(store, env_path):
         (lambda s: s.save_envs({"main": _env()}, ["main"]), []),
         (lambda s: s.save_all({"main": _env()}), []),
         (lambda s: s.load_env("main"), {}),
+        (lambda s: s.load_experiment("main"), None),
         (lambda s: s.list_envs(), []),
         (lambda s: s.env_exists("main"), False),
         (lambda s: s.delete_env("main"), False),
@@ -335,6 +336,7 @@ def test_list_skips_unreadable_hash_files(store, env_path):
         "save_envs",
         "save_all",
         "load_env",
+        "load_experiment",
         "list_envs",
         "env_exists",
         "delete_env",
@@ -664,3 +666,363 @@ def test_forked_env_persists_under_its_own_id(store):
 
     assert store.load_env("main") == _env()
     assert sorted(store.load_env("forked")["jsons"]) == ["win_0", "win_1"]
+
+
+# -- the metadata cache ------------------------------------------------------
+#
+# An env is one JSON document, so reading the experiment blob out of it used to
+# mean parsing every window in the file -- and a search, an hparams selection or
+# a GET /experiments/tags does that for every env on disk. These pin that the
+# file is parsed once per version of itself, and that every way it can change
+# underneath the cache is noticed.
+
+
+class _CountingJson:
+    """Stand-in for the ``json`` module that counts :func:`json.load` calls.
+
+    Substituted for ``json_store``'s own reference rather than patched onto the
+    stdlib module, so the count is this store's parses and nothing else's.
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self.loads = 0
+
+    def load(self, *args, **kwargs):
+        self.loads += 1
+        return self._real.load(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+@pytest.fixture
+def parses(monkeypatch):
+    """Count the file parses ``json_store`` performs."""
+    counter = _CountingJson(json)
+    monkeypatch.setattr(json_store_module, "json", counter)
+    return counter
+
+
+def _experiment_env(eid="run", lr="0.10"):
+    """An env carrying both window data and an experiment blob."""
+    return {
+        "jsons": {"win_0": {"id": "win_0", "content": "x" * 2048}},
+        "reload": {},
+        "experiment": {"env_id": eid, "params": {"lr": lr}},
+    }
+
+
+def test_repeat_experiment_read_parses_the_file_once(store, parses):
+    """A second read of an unchanged env does not parse it again."""
+    store.save_env("run", _experiment_env())
+    parses.loads = 0
+
+    first = store.load_experiment("run")
+    second = store.load_experiment("run")
+
+    assert first == second == _experiment_env()["experiment"]
+    assert parses.loads == 1
+
+
+def test_repeat_experiment_reads_hand_back_the_same_blob(store):
+    """Two reads share one object, as a stored blob is never edited in place.
+
+    ``ExperimentStore`` writes a blob by rebinding ``env["experiment"]`` to a
+    freshly built ``to_dict``, which is what lets ``_resident_experiments`` hand
+    blobs to the storage worker uncopied. Sharing the read object relies on the
+    same promise, so it is pinned here rather than left implicit.
+    """
+    store.save_env("run", _experiment_env())
+
+    assert store.load_experiment("run") is store.load_experiment("run")
+
+
+def test_experiment_read_sees_a_save_through_the_store(store, parses):
+    """A save between two reads is reflected, and costs exactly one parse."""
+    store.save_env("run", _experiment_env(lr="0.10"))
+    assert store.load_experiment("run")["params"]["lr"] == "0.10"
+    parses.loads = 0
+
+    store.save_env("run", _experiment_env(lr="0.20"))
+
+    assert store.load_experiment("run")["params"]["lr"] == "0.20"
+    assert parses.loads == 1
+
+
+def test_experiment_read_sees_an_out_of_band_rewrite(store, env_path):
+    """A file rewritten by someone else is re-read, even at the same size.
+
+    The size is held constant deliberately: this is what a cache keyed on
+    ``st_mtime`` alone would miss, because whole-second timestamps cannot
+    separate a rewrite from the read that preceded it.
+    """
+    store.save_env("run", _experiment_env(lr="0.10"))
+    assert store.load_experiment("run")["params"]["lr"] == "0.10"
+
+    with open(os.path.join(env_path, "run.json"), "w") as fn:
+        fn.write(json.dumps(_experiment_env(lr="0.20")))
+
+    assert store.load_experiment("run")["params"]["lr"] == "0.20"
+
+
+def test_recreated_env_is_not_served_from_the_cache(store):
+    """An id deleted and written again reads as the new file, not the old one."""
+    store.save_env("run", _experiment_env(lr="0.10"))
+    assert store.load_experiment("run")["params"]["lr"] == "0.10"
+
+    assert store.delete_env("run")
+    store.save_env("run", _experiment_env(lr="0.20"))
+
+    assert store.load_experiment("run")["params"]["lr"] == "0.20"
+
+
+def test_corrupt_env_keeps_returning_none_without_reparsing(store, env_path, parses):
+    """A file that cannot be parsed is remembered as such, not retried."""
+    with open(os.path.join(env_path, "broken.json"), "w") as fn:
+        fn.write("{not valid json")
+    parses.loads = 0
+
+    assert store.load_experiment("broken") is None
+    assert store.load_experiment("broken") is None
+    assert parses.loads == 1
+
+
+def test_missing_env_is_not_cached_as_an_answer(store):
+    """An id with no file reads as None before and after it is written."""
+    assert store.load_experiment("run") is None
+
+    store.save_env("run", _experiment_env())
+
+    assert store.load_experiment("run") == _experiment_env()["experiment"]
+
+
+def test_list_envs_parses_a_hash_file_once(store, parses):
+    """Resolving a hash-fallback file's real id re-reads it only when it changes."""
+    eid = "e" * 300
+    store.save_env(eid, _env())
+    parses.loads = 0
+
+    assert store.list_envs() == [eid]
+    assert store.list_envs() == [eid]
+    assert parses.loads == 1
+
+
+def test_list_envs_keeps_skipping_an_unreadable_hash_file(store, env_path, parses):
+    """The skip survives being cached: a corrupt hash file stays unlisted."""
+    with open(os.path.join(env_path, "hash_{0}.json".format("a" * 64)), "w") as fn:
+        fn.write("{not valid json")
+    store.save_env("main", _env())
+    parses.loads = 0
+
+    assert store.list_envs() == ["main"]
+    assert store.list_envs() == ["main"]
+    assert parses.loads == 1
+
+
+def test_load_env_is_never_served_from_the_cache(store, parses):
+    """Window data is re-read every time, which is the point of the projection.
+
+    Caching it would hold every window of every env ever read -- the memory
+    ``load_experiment`` exists to avoid.
+    """
+    store.save_env("run", _experiment_env())
+    parses.loads = 0
+
+    assert store.load_env("run") == _experiment_env()
+    assert store.load_env("run") == _experiment_env()
+    assert parses.loads == 2
+
+
+def test_cache_does_not_outlive_the_files_it_describes(store, env_path):
+    """Vanished envs are forgotten, so a churning directory does not accumulate.
+
+    The files go behind the store's back rather than through
+    :meth:`delete_env`, which drops its own record: this is the case only the
+    sweep in ``list_envs`` can clean up.
+    """
+    for index in range(5):
+        eid = "run-{0}".format(index)
+        store.save_env(eid, _experiment_env(eid))
+        store.load_experiment(eid)
+    assert len(store._meta_cache) == 5
+
+    for index in range(5):
+        os.remove(os.path.join(env_path, "run-{0}.json".format(index)))
+    store.list_envs()
+
+    assert store._meta_cache == {}
+
+
+# -- the cache's memory ceiling ----------------------------------------------
+#
+# Plot data is never held, so the cache does not grow as a run plots more. A
+# metric history does grow without limit, though, and that is what the budget
+# is for. Evicting only costs a re-parse, so these pin that the ceiling holds
+# and that nothing it drops changes an answer.
+
+
+def _with_metrics(eid, observations):
+    """An env whose experiment carries ``observations`` stored metric entries."""
+    return {
+        "jsons": {"win_0": {"id": "win_0"}},
+        "reload": {},
+        "experiment": {
+            "env_id": eid,
+            "metrics": [
+                {"key": "acc", "value": 0.5, "step": i, "timestamp": 0.0}
+                for i in range(observations)
+            ],
+        },
+    }
+
+
+def test_weight_tracks_the_metric_history_and_nothing_else(env_path):
+    """The estimate grows with observations, not with window data."""
+    plain = json_store_module.MetaRecord(
+        readable=True, experiment={"env_id": "run"}, name=None
+    )
+    big_window = json_store_module.MetaRecord(
+        readable=True, experiment={"env_id": "run", "jsons": "x" * 100000}, name=None
+    )
+    long_history = json_store_module.MetaRecord(
+        readable=True,
+        experiment={"env_id": "run", "metrics": [{} for _ in range(100)]},
+        name=None,
+    )
+
+    assert json_store_module.meta_weight(plain) == json_store_module.META_ENTRY_BYTES
+    assert json_store_module.meta_weight(big_window) == json_store_module.meta_weight(
+        plain
+    )
+    assert json_store_module.meta_weight(long_history) > json_store_module.meta_weight(
+        plain
+    )
+
+
+def test_unreadable_and_blobless_records_still_carry_a_weight(env_path):
+    """Every entry counts against the budget, including the empty answers."""
+    for record in (
+        json_store_module.UNREADABLE_META,
+        json_store_module.MetaRecord(readable=True, experiment=None, name="x"),
+        json_store_module.MetaRecord(readable=True, experiment="not a dict", name=None),
+    ):
+        assert (
+            json_store_module.meta_weight(record) == json_store_module.META_ENTRY_BYTES
+        )
+
+
+def test_the_cache_evicts_once_it_is_over_budget(env_path):
+    """A budget of three records holds three, not the fourth."""
+    budget = 3 * json_store_module.META_ENTRY_BYTES
+    store = JSONStore(env_path, meta_cache_bytes=budget)
+    for index in range(4):
+        eid = "run-%d" % index
+        store.save_env(eid, _with_metrics(eid, 0))
+        store.load_experiment(eid)
+
+    assert len(store._meta_cache) == 3
+    assert store._meta_bytes <= budget
+
+
+def test_eviction_drops_the_least_recently_used_entry(env_path):
+    """Reading an entry again saves it from the next eviction."""
+    budget = 2 * json_store_module.META_ENTRY_BYTES
+    store = JSONStore(env_path, meta_cache_bytes=budget)
+    for eid in ("old", "new"):
+        store.save_env(eid, _with_metrics(eid, 0))
+        store.load_experiment(eid)
+    store.save_env("third", _with_metrics("third", 0))
+
+    # Touch "old" so it is the most recent, then force one eviction.
+    store.load_experiment("old")
+    store.load_experiment("third")
+
+    held = {os.path.basename(path) for path in store._meta_cache}
+    assert held == {"old.json", "third.json"}, held
+
+
+def test_a_record_larger_than_the_whole_budget_is_still_cached(env_path, parses):
+    """The last entry standing is kept: the caller is holding that blob anyway."""
+    store = JSONStore(env_path, meta_cache_bytes=1)
+    store.save_env("run", _with_metrics("run", 50))
+    parses.loads = 0
+
+    first = store.load_experiment("run")
+    second = store.load_experiment("run")
+
+    assert first == second
+    assert len(store._meta_cache) == 1
+    assert parses.loads == 1
+
+
+def test_eviction_never_changes_an_answer(env_path):
+    """An evicted env reads correctly again, by re-parsing."""
+    store = JSONStore(env_path, meta_cache_bytes=json_store_module.META_ENTRY_BYTES)
+    for index in range(4):
+        eid = "run-%d" % index
+        store.save_env(eid, _with_metrics(eid, index))
+        store.load_experiment(eid)
+
+    assert len(store._meta_cache) == 1
+    for index in range(4):
+        eid = "run-%d" % index
+        blob = store.load_experiment(eid)
+        assert blob["env_id"] == eid
+        assert len(blob["metrics"]) == index
+
+
+def test_the_running_total_falls_back_to_zero(env_path):
+    """Forgetting, pruning and deleting all credit their weight back."""
+    store = JSONStore(env_path)
+    for index in range(3):
+        eid = "run-%d" % index
+        store.save_env(eid, _with_metrics(eid, 10))
+        store.load_experiment(eid)
+    assert store._meta_bytes > 0
+
+    assert store.delete_env("run-0")
+    os.remove(os.path.join(env_path, "run-1.json"))
+    os.remove(os.path.join(env_path, "run-2.json"))
+    store.list_envs()
+
+    assert store._meta_cache == {}
+    assert store._meta_bytes == 0
+
+
+def test_a_rewrite_does_not_double_count_its_entry(env_path):
+    """Re-reading a changed file replaces its weight instead of adding to it."""
+    store = JSONStore(env_path)
+    store.save_env("run", _with_metrics("run", 10))
+    store.load_experiment("run")
+    once = store._meta_bytes
+
+    for _ in range(5):
+        store.save_env("run", _with_metrics("run", 10))
+        store.load_experiment("run")
+
+    assert store._meta_bytes == once
+    assert len(store._meta_cache) == 1
+
+
+def test_a_forked_store_keeps_the_budget(env_path):
+    """A fork starts cold but is not handed a different ceiling."""
+    store = JSONStore(env_path, meta_cache_bytes=4096)
+
+    fork = copy.deepcopy(store)
+
+    assert fork._meta_cache_bytes == 4096
+    assert fork._meta_bytes == 0
+
+
+def test_a_forked_store_starts_cold(store):
+    """A deep copy shares the path but not the cache, and still reads."""
+    store.save_env("run", _experiment_env())
+    store.load_experiment("run")
+
+    fork = copy.deepcopy(store)
+
+    assert fork is not store
+    assert fork.env_path == store.env_path
+    assert fork._meta_cache == {}
+    assert fork.load_experiment("run") == _experiment_env()["experiment"]
