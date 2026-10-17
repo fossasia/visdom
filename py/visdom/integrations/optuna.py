@@ -594,30 +594,64 @@ class OptunaCallback:
             "status": "finished" if state == "COMPLETE" else "failed",
         }
 
+    def _check_recorded(self, reply: Any, env: str) -> None:
+        """Raise unless the reply is the stored experiment.
+
+        ``True`` is the client's offline sentinel: nothing was sent, so there is
+        nothing to confirm. Anything else that is not a stored experiment (error
+        text, ``False`` when the server can't be reached) was not recorded.
+        """
+        if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
+            return
+        # Trial envs come from dashboard_env when it is set, else from study_name.
+        rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+        raise RuntimeError(
+            "visdom did not record it in env {!r}. If an earlier run already "
+            "finished there, use a new {} or delete the old trial envs".format(
+                env, rename
+            )
+        )
+
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
+        env = None
+        unfinished = False
         try:
             payload = self._build_payload(study, trial)
-            self.viz.experiment(
-                name=payload["name"],
-                params=payload["params"],
-                tags=payload["tags"],
-                description=payload["description"],
-                env=payload["env"],
+            env = payload["env"]
+            self._check_recorded(
+                self.viz.experiment(
+                    name=payload["name"],
+                    params=payload["params"],
+                    tags=payload["tags"],
+                    description=payload["description"],
+                    env=env,
+                ),
+                env,
             )
+            unfinished = True
             for step, value in self._intermediate_values(trial):
-                self.viz.log_metrics(
-                    {_INTERMEDIATE_METRIC_NAME: value},
-                    step=step,
-                    env=payload["env"],
+                self._check_recorded(
+                    self.viz.log_metrics(
+                        {_INTERMEDIATE_METRIC_NAME: value}, step=step, env=env
+                    ),
+                    env,
                 )
             if payload["metrics"]:
-                self.viz.log_metrics(payload["metrics"], env=payload["env"])
-            self.viz.finish_experiment(
-                status=payload["status"],
-                env=payload["env"],
+                self._check_recorded(
+                    self.viz.log_metrics(payload["metrics"], env=env), env
+                )
+            unfinished = False
+            self._check_recorded(
+                self.viz.finish_experiment(status=payload["status"], env=env), env
             )
         except Exception as error:
+            if unfinished:
+                # Don't leave a half-written trial looking like it's still running.
+                try:
+                    self.viz.finish_experiment(status="failed", env=env)
+                except Exception:
+                    pass
             if self.raise_on_error:
                 raise
             warnings.warn(
