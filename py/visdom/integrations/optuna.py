@@ -596,12 +596,13 @@ class OptunaCallback:
 
     @staticmethod
     def _check_recorded(reply: Any, env: str) -> None:
-        """Raise if the server did not record a write.
+        """Raise unless the reply is the stored experiment.
 
-        A rejection comes back as the server's error text and an unreachable
-        server as ``False``/``None``; a recorded write is the stored experiment.
+        ``True`` is the client's offline sentinel: nothing was sent, so there is
+        nothing to confirm. Anything else that is not a stored experiment (error
+        text, ``False`` when the server can't be reached) was not recorded.
         """
-        if reply is None or reply is False or isinstance(reply, str):
+        if reply is not True and not (isinstance(reply, Mapping) and "env_id" in reply):
             raise RuntimeError(
                 "visdom did not record it in env {!r}. If an earlier run of this "
                 "study already finished there, use a new study_name or "
@@ -610,6 +611,8 @@ class OptunaCallback:
 
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
+        env = None
+        unfinished = False
         try:
             payload = self._build_payload(study, trial)
             env = payload["env"]
@@ -623,6 +626,7 @@ class OptunaCallback:
                 ),
                 env,
             )
+            unfinished = True
             for step, value in self._intermediate_values(trial):
                 self._check_recorded(
                     self.viz.log_metrics(
@@ -634,10 +638,17 @@ class OptunaCallback:
                 self._check_recorded(
                     self.viz.log_metrics(payload["metrics"], env=env), env
                 )
+            unfinished = False
             self._check_recorded(
                 self.viz.finish_experiment(status=payload["status"], env=env), env
             )
         except Exception as error:
+            if unfinished:
+                # Don't leave a half-written trial looking like it's still running.
+                try:
+                    self.viz.finish_experiment(status="failed", env=env)
+                except Exception:
+                    pass
             if self.raise_on_error:
                 raise
             warnings.warn(
