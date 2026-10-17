@@ -96,3 +96,16 @@ def test_with_no_metrics_token_set_none_is_accepted(monkeypatch):
     monkeypatch.delenv("VISDOM_METRICS_TOKENS", raising=False)
 
     assert not internal.has_metrics_token(request({"Authorization": "Bearer "}))
+
+
+def test_the_signature_matches_what_the_gateway_sends():
+    assert (
+        internal.signature("test-key", "GET", "/vis/_activity", 1800000000, b"")
+        == "0d322e34f6824f7fc34f64a830f5bf19b82cf6ccccdf70984a68eccc1562c1a9"
+    )
+    assert (
+        internal.signature(
+            "test-key", "POST", "/vis/_drop", 1800000000, b'{"workspace_id": "ws-a"}'
+        )
+        == "56bdd87730abd4c3a545707937679b3ad3cabc131adf186a219f737b698e3ecf"
+    )
