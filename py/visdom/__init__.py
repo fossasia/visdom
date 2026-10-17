@@ -2567,6 +2567,7 @@ class Visdom(object):
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] in (1, 2)
             ), "tensor should be 1D vector or 2D matrix with 1 or 2 columns"
+            assert tensor.size > 0, "tensor should not be empty"
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
