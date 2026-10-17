@@ -2514,14 +2514,16 @@ class Visdom(object):
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
-        # The tile has always been inset one extra pixel into its cell, which
-        # leaves one pixel less padding below and to the right of it. That
-        # extra pixel only fits while `padding` is at least 1; with padding=0
-        # the last row and column ran off the end of the grid and the copy
-        # raised, so drop the offset in that case.
-        offset = padding + 1 if padding > 0 else 0
-
-        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
+        offset = padding
+        normalize = opts is not None and opts.get("normalize", False)
+        use_uint8 = tensor.dtype == np.uint8 and not normalize
+        grid_dtype = np.uint8 if use_uint8 else np.float64
+        pad_value = 255 if use_uint8 else 1
+        grid = np.full(
+            [tensor.shape[1], height * ymaps, width * xmaps],
+            pad_value,
+            dtype=grid_dtype,
+        )
         k = 0
         for y in range(ymaps):
             for x in range(xmaps):
