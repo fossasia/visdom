@@ -19,8 +19,9 @@
 - Python >= 3.12 compatibility
 - Use `@pytorch_wrap` on all `Visdom` methods
 - Use `warn_once()` for deprecation warnings
-- **Never touch disk on the IOLoop.** Storage-touching handlers are `async def`; disk work goes through `run_on_storage_executor` / the `*_off_loop` helpers in `server_utils.py`, and the env is snapshotted on the loop first. `ServerState.storage_executor` has one worker on purpose — see Concurrency Model in `architecture.md`.
+- **Never touch disk on the IOLoop.** Storage-touching handlers are `async def`; disk work goes through `run_on_storage_executor` / the `*_off_loop` helpers in `server_utils.py`, and the env is snapshotted on the loop first. A `server_utils` helper that takes a `store` is disk work as well, wherever it is called. `ServerState.storage_executor` has one worker on purpose — see Concurrency Model in `architecture.md`.
 - After an `await`, re-check that the env you were working on still exists before writing to `state`
+- If you take something out of `state` before awaiting the write that records it, put it back when that write fails — restore only the ids still missing, mark the env dirty, then re-raise. Submit a second task to undo whatever that write may still record for what came back: cancelling the future does not stop the worker, and the single executor is what orders the two
 
 ## License Headers
 
