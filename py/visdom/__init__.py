@@ -355,16 +355,17 @@ def _markerColorCheck(mc, X, Y, L):
     mc = np.uint8(mc)
 
     if mc.ndim == 1:
-        markercolor = ["rgba(0, 0, 255, %s)" % (mc[i] / 255.0) for i in range(len(mc))]
+        markercolor = ["rgba(0, 0, 255, %s)" % alpha for alpha in (mc / 255.0).tolist()]
     else:
-        markercolor = ["#%02x%02x%02x" % (i[0], i[1], i[2]) for i in mc]
+        markercolor = ["#%02x%02x%02x" % (r[0], r[1], r[2]) for r in mc.tolist()]
 
+    labels = Y.tolist()
     if mc.shape[0] != X.shape[0]:
-        markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]
+        markercolor = [markercolor[label - 1] for label in labels]
 
     ret = {}
-    for k, v in enumerate(markercolor):
-        ret[Y[k]] = ret.get(Y[k], []) + [v]
+    for label, color in zip(labels, markercolor):
+        ret.setdefault(label, []).append(color)
 
     return ret
 
@@ -386,7 +387,10 @@ def _markerSizeCheck(ms, X, Y):
         "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+    if len(Y) == 0:
+        return np.array([], dtype=float)
+
+    return ms[np.asarray(Y) - 1].astype(float)
 
 
 def _lineColorCheck(lc, K):
@@ -449,7 +453,7 @@ def _assert_opts(opts):
     if opts.get("markersize") is not None:
         ms = opts.get("markersize")
         if isinstance(ms, (list, tuple, np.ndarray)):
-            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+            assert np.all(np.asarray(ms) > 0), "all marker sizes must be positive"
         else:
             assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
@@ -708,13 +712,34 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
 
     label_to_idx = {label: i for i, label in enumerate(labels)}
     n = len(labels)
-    cm = np.zeros((n, n), dtype=int)
-    skipped = 0
-    for t, p in zip(y_true, y_pred):
-        if t in label_to_idx and p in label_to_idx:
-            cm[label_to_idx[t], label_to_idx[p]] += 1
-        else:
-            skipped += 1
+
+    def label_indices(values):
+        """Map a value vector to label indices, -1 where the label is unknown.
+
+        The dict is consulted once per *distinct* value rather than once per
+        sample, so a long run of a few labels costs a sort and a gather.
+        """
+        uniq, inverse = np.unique(values, return_inverse=True)
+        lookup = np.fromiter(
+            (label_to_idx.get(value, -1) for value in uniq.tolist()),
+            dtype=np.intp,
+            count=uniq.shape[0],
+        )
+        return lookup[inverse.ravel()]
+
+    true_idx = label_indices(y_true)
+    pred_idx = label_indices(y_pred)
+    counted = (true_idx >= 0) & (pred_idx >= 0)
+    skipped = int(counted.shape[0] - np.count_nonzero(counted))
+
+    cm = (
+        np.bincount(
+            true_idx[counted] * n + pred_idx[counted],
+            minlength=n * n,
+        )
+        .reshape(n, n)
+        .astype(int)
+    )
     if skipped > 0:
         warnings.warn(
             "{} samples had labels not in the provided labels list "
@@ -2968,9 +2993,30 @@ class Visdom(object):
         )
         lc = opts.get("linecolor")
 
-        for k in labels:
-            ind = np.equal(Y, k)
-            if ind.any():
+        # Each coordinate column is extracted once here rather than once per
+        # trace, and the points are grouped by label in a single pass: both
+        # used to be redone for every label, so an M-trace plot walked all N
+        # points M times.
+        columns = [X.take(axis, 1) for axis in range(X.shape[1])]
+        if len(labels) == 1:
+            # One trace holding every point, which is what every unlabelled
+            # plot (``line`` included) reduces to. No grouping work at all.
+            runs = [slice(None)]
+            run_lengths = [X.shape[0]]
+        else:
+            # ``labels`` is ``np.unique(Y)``, so it is sorted and covers every
+            # value in ``Y``: one stable argsort lays the points out in
+            # contiguous per-label runs, in their original order, and the left
+            # boundaries alone partition it.
+            grouped = np.argsort(Y, kind="stable")
+            bounds = np.searchsorted(Y[grouped], labels, side="left").tolist()
+            bounds.append(X.shape[0])
+            runs = [grouped[bounds[i] : bounds[i + 1]] for i in range(len(labels))]
+            run_lengths = [len(run) for run in runs]
+
+        for position, k in enumerate(labels):
+            ind = runs[position]
+            if run_lengths[position]:
                 if "legend" in opts:
                     trace_name = opts.get("legend")[k - 1]
                 elif len(labels) == 1 and name is not None:
@@ -2984,8 +3030,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": X.take(0, 1)[ind].tolist(),
-                    "y": X.take(1, 1)[ind].tolist(),
+                    "x": columns[0][ind].tolist(),
+                    "y": columns[1][ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -3015,7 +3061,7 @@ class Visdom(object):
                     _data["fill"] = "tonexty"
 
                 if is3d:
-                    _data["z"] = X.take(2, 1)[ind].tolist()
+                    _data["z"] = columns[2][ind].tolist()
 
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
@@ -4490,15 +4536,16 @@ class Visdom(object):
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
+        assert X.ndim == 1, "values of X should be one-dimensional"
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         if opts is None:
             opts = {}
             opts["height"] = 300
             opts["width"] = 500
-        X = [float(value) for value in X]
-        Y1 = [float(value) for value in Y1]
-        Y2 = [float(value) for value in Y2]
+        X = X.astype(float).tolist()
+        Y1 = Y1.astype(float).tolist()
+        Y2 = Y2.astype(float).tolist()
         trace1 = {
             "x": X,
             "y": Y1,

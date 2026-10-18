@@ -31,6 +31,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from testutils import recording_array
 from visdom import (
     _average_precision,
     _binary_clf_curve,
@@ -445,6 +446,58 @@ def test_confusion_matrix_rejects_bad_input(y_true, y_pred, message):
     """Length mismatch and an empty pair raise before the counting loop."""
     with pytest.raises(ValueError, match=message):
         _compute_confusion_matrix(np.asarray(y_true), np.asarray(y_pred), [0, 1])
+
+
+def test_confusion_matrix_counts_without_iterating_the_samples():
+    """The label dict is consulted per distinct value, not per sample.
+
+    The counting used to be a Python ``for t, p in zip(y_true, y_pred)`` with
+    two dict lookups and an in-place matrix increment per sample, so a run of
+    20k predictions cost 11 ms to tally ten labels.
+    """
+    y_true = recording_array([0, 1, 1, 2, 0, 1], dtype=int)
+    y_pred = recording_array([0, 1, 2, 2, 1, 1], dtype=int)
+    cm = _compute_confusion_matrix(y_true, y_pred, [0, 1, 2])
+    np.testing.assert_array_equal(cm, [[1, 1, 0], [0, 2, 1], [0, 0, 1]])
+    assert y_true.counts["iter"] == 0 and y_true.counts["getitem"] == 0
+    assert y_pred.counts["iter"] == 0 and y_pred.counts["getitem"] == 0
+
+
+@pytest.mark.parametrize("n", [1, 7, 300])
+def test_confusion_matrix_matches_a_per_sample_tally(n):
+    """Cross-check against the loop it replaced, unknown labels included.
+
+    The value vectors carry labels that are deliberately absent from
+    ``labels``, so both the kept and the skipped counts are exercised.
+    """
+    rng = np.random.default_rng(n)
+    labels = [0, 1, 2]
+    pool = np.array(labels + [9])
+    y_true = pool[rng.integers(0, pool.shape[0], n)]
+    y_pred = pool[rng.integers(0, pool.shape[0], n)]
+
+    expected = np.zeros((len(labels), len(labels)), dtype=int)
+    for actual, predicted in zip(y_true.tolist(), y_pred.tolist()):
+        if actual in labels and predicted in labels:
+            expected[labels.index(actual), labels.index(predicted)] += 1
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        cm = _compute_confusion_matrix(y_true, y_pred, labels)
+    np.testing.assert_array_equal(cm, expected)
+
+
+def test_confusion_matrix_tolerates_an_unsorted_label_list():
+    """``labels`` fixes the row and column order; it is not re-sorted.
+
+    The vectorised mapping goes through ``np.unique`` on the *values*, which is
+    sorted, so the indices it produces have to come back out of the caller's
+    own ``labels`` order.
+    """
+    cm = _compute_confusion_matrix(np.array([2, 0]), np.array([0, 2]), [2, 0, 1])
+    assert cm[0][1] == 1
+    assert cm[1][0] == 1
+    assert cm.sum() == 2
 
 
 def test_roc_curve_from_raw_labels_sends_two_traces(capture_send):
