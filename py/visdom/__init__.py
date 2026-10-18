@@ -2779,6 +2779,17 @@ class Visdom(object):
                 X.shape[0], num_steps
             )
 
+        if (
+            update == "append"
+            and win is not None
+            and self.use_preflight_checks
+            and not self.offline
+            and self.win_exists(win, env) is False
+        ):
+            # Appending to a window that isn't there creates it, so do that
+            # here and give it the defaults like any new window.
+            update = None
+
         opts = {} if opts is None else dict(opts)
         if update is None:
             # Only a new window gets the defaults; on an update they would

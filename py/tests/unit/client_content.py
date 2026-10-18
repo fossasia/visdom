@@ -409,6 +409,35 @@ def test_learning_curve_update_keeps_the_window_title_and_labels(
         assert "title" not in msg["layout"].get("yaxis", {})
 
 
+def test_learning_curve_append_to_a_missing_window_creates_it_with_defaults(
+    offline_client,
+):
+    with patch.object(offline_client, "win_exists", return_value=False):
+        with patch.object(offline_client, "_send", return_value="w1") as send:
+            offline_client.learning_curve(
+                {"a": [1.0], "b": [2.0]}, step=[1], win="w1", update="append"
+            )
+
+    (created,) = sends_to(send, "events")
+    assert created["win"] == "w1"
+    assert [t["name"] for t in created["data"]] == ["a", "b"]
+    assert created["opts"]["title"] == "Learning Curve"
+    assert created["layout"]["yaxis"]["title"] == {"text": "metric"}
+
+
+def test_learning_curve_append_to_an_existing_window_sends_no_defaults(
+    offline_client,
+):
+    with patch.object(offline_client, "win_exists", return_value=True):
+        with patch.object(offline_client, "_send", return_value="w1") as send:
+            offline_client.learning_curve(
+                {"a": [1.0]}, step=[2], win="w1", update="append"
+            )
+
+    (msg,) = sends_to(send, "update")
+    assert "title" not in msg["opts"]
+
+
 def test_learning_curve_update_sends_opts_the_caller_passed(offline_client):
     with patch.object(offline_client, "_send", return_value="w1") as send:
         offline_client.learning_curve(
