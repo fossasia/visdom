@@ -22,6 +22,7 @@ from unittest import mock
 import pytest
 
 from visdom.server.app import Application
+from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.ownership import (
     MOVED_REASON,
     WITHDRAWN_REASON,
@@ -112,6 +113,24 @@ class TestEviction(unittest.TestCase):
             space.subs["v1"].closed_with,
             (WS_POLICY_VIOLATION, "this workspace is in the trash"),
         )
+
+    def test_a_withdrawn_workspace_is_asked_about_again(self):
+        manager = WorkspaceManager(gateway_url="http://gateway:8085")
+        self.app.workspace_manager = manager
+        member = SimpleNamespace(
+            status_code=200, json=lambda: {"workspace_id": "ws-a", "role": "member"}
+        )
+        with mock.patch(
+            "visdom.server.workspace_manager.requests.post", return_value=member
+        ) as post:
+            manager.resolve("key-a", "alpha")
+            manager.resolve("key-b", "beta")
+
+            self.app.evict_workspace("alpha")
+            manager.resolve("key-a", "alpha")
+            manager.resolve("key-b", "beta")
+
+        self.assertEqual(post.call_count, 3)
 
 
 class TestOwnership(unittest.TestCase):

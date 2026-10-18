@@ -208,7 +208,7 @@ def test_the_server_serves_the_internal_endpoints_on_their_own_port(
                 in_the_clear = await client.fetch(
                     "http://127.0.0.1:%d/_activity" % private, raise_error=False
                 )
-            except OSError:
+            except (OSError, tornado.httpclient.HTTPClientError):
                 in_the_clear = None
             outside = await client.fetch(
                 "http://127.0.0.1:%d/_activity" % public, raise_error=False

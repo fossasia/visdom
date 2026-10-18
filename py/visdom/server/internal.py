@@ -7,6 +7,7 @@
 import hashlib
 import hmac
 import os
+import re
 import time
 
 MAX_SKEW_SECONDS = 60
@@ -19,6 +20,8 @@ KEY_VARIABLES = {
     ADMIN: "VISDOM_INTERNAL_ADMIN_KEYS",
 }
 METRICS_TOKEN_VARIABLE = "VISDOM_METRICS_TOKENS"
+
+TIMESTAMP = re.compile(r"[0-9]{1,12}")
 
 TIMESTAMP_HEADER = "X-Visdom-Timestamp"
 SIGNATURE_HEADER = "X-Visdom-Signature"
@@ -56,15 +59,14 @@ def is_signed(request, scope, now=None):
     keys = configured(KEY_VARIABLES[scope])
     timestamp = request.headers.get(TIMESTAMP_HEADER, "")
     given = request.headers.get(SIGNATURE_HEADER, "")
-    if not keys or not timestamp.isdigit() or not given:
+    if not keys or not TIMESTAMP.fullmatch(timestamp) or not given:
         return False
     current = time.time() if now is None else now
     if abs(current - int(timestamp)) > MAX_SKEW_SECONDS:
         return False
     return any(
-        hmac.compare_digest(
-            signature(key, request.method, request.uri, timestamp, request.body),
-            given,
+        _same(
+            signature(key, request.method, request.uri, timestamp, request.body), given
         )
         for key in keys
     )
@@ -76,4 +78,8 @@ def has_metrics_token(request):
     if not tokens or not header.startswith("Bearer "):
         return False
     given = header[len("Bearer ") :]
-    return any(hmac.compare_digest(token, given) for token in tokens)
+    return any(_same(token, given) for token in tokens)
+
+
+def _same(expected, given):
+    return hmac.compare_digest(expected.encode(), given.encode())

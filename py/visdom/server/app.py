@@ -522,6 +522,8 @@ class Application(tornado.web.Application):
         The code is the one a refused connection already gets, so a client sees
         the same answer whether it arrived before or after the suspension.
         """
+        if self.workspace_manager is not None:
+            self.workspace_manager.forget(slug)
         closed = 0
         for _workspace_id, space in self.workspace_env_manager.workspace_spaces():
             if space.slug != slug:
