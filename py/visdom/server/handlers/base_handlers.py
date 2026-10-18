@@ -252,13 +252,20 @@ class BaseHandler(
         workspace_id, role = resolved
         self.workspace_slug = self.request.headers.get("X-Visdom-Workspace")
         self.workspace_role = role
-        endpoint = self.request.path.rsplit("/", 1)[-1]
-        if role == "viewer" and endpoint in WRITE_ENDPOINTS:
+        if role == "viewer" and self._writes():
             self.set_status(403)
             self.finish({"error": "Your role is read-only in this workspace."})
             return
 
         self.bind_workspace(workspace_id)
+
+    def _writes(self):
+        endpoint = self.request.path.rstrip("/").rsplit("/", 1)[-1]
+        return (
+            self.request.method == "POST"
+            and not self.path_args
+            and endpoint in WRITE_ENDPOINTS
+        )
 
     def get_current_user(self):
         """
@@ -301,6 +308,8 @@ class BaseHandler(
             except Exception as e:
                 logging.error(e)
             self.set_status(status_code)
-            self.write(f"""
+            self.write(
+                f"""
                 <h1>{status_code} - {title}</h1>
-                """)
+                """
+            )
