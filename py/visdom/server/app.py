@@ -536,6 +536,8 @@ class Application(tornado.web.Application):
         if directory is None:
             raise ValueError("workspace_id is not a workspace id")
         canonical = os.path.basename(directory)
+        if self.workspace_manager is not None:
+            self.workspace_manager.forget_workspace(canonical)
         space = manager.forget(canonical)
         closed = 0
         if space is not None:

@@ -19,11 +19,14 @@ import os
 import tempfile
 import unittest
 import uuid
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
 from visdom.server.app import DROPPED_REASON, Application
 from visdom.server.ownership import WS_POLICY_VIOLATION
+from visdom.server.workspace_manager import WorkspaceManager
 
 pytestmark = pytest.mark.unit
 
@@ -144,6 +147,32 @@ class TestDrop(unittest.TestCase):
         self.assertIsNone(self.manager.loaded_space(self.workspace.upper()))
         self.app.flush_dirty()
         self.assertFalse(os.path.exists(self.directory))
+
+    def test_a_dropped_workspace_is_asked_about_again(self):
+        manager = WorkspaceManager(gateway_url="http://gateway:8085")
+        self.app.workspace_manager = manager
+        member = SimpleNamespace(
+            status_code=200,
+            json=lambda: {"workspace_id": self.workspace, "role": "member"},
+        )
+        with mock.patch(
+            "visdom.server.workspace_manager.requests.post", return_value=member
+        ) as post:
+            manager.resolve("key-a", "alpha")
+            self.drop()
+            manager.resolve("key-a", "alpha")
+
+        self.assertEqual(post.call_count, 2)
+
+    def test_a_directory_removed_by_another_instance_is_not_an_error(self):
+        self.write_env("main")
+        with mock.patch(
+            "visdom.server.workspace_env_manager.shutil.rmtree",
+            side_effect=FileNotFoundError,
+        ):
+            answer, freed = self.drop()
+
+        self.assertIsNone(freed)
 
 
 if __name__ == "__main__":

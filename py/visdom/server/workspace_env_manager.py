@@ -471,7 +471,10 @@ def remove_directory(path):
                 total += os.path.getsize(os.path.join(root, name))
             except OSError:
                 pass
-    shutil.rmtree(path)
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return None
     return total
 
 
