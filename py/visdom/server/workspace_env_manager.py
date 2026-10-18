@@ -21,10 +21,12 @@ Workspace ``None`` maps to the server's own state, so plain single-tenant or
 local visdom behaves exactly as before.
 """
 
+import asyncio
 import os
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from visdom.data_model.json_store import JSONStore
 from visdom.server.server_state import ServerState
@@ -205,6 +207,9 @@ class WorkspaceEnvManager:
         self._states = {None: default_state}
         self._lock = threading.Lock()
         self._disk_lock = threading.Lock()
+        self._scan_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="workspace-scan"
+        )
         self._disk_cache = {}
         self._disk_scanned_at = None
 
@@ -240,6 +245,11 @@ class WorkspaceEnvManager:
             return [
                 (wid, state) for wid, state in self._states.items() if wid is not None
             ]
+
+    async def stored_workspaces_off_loop(self):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, self.stored_workspaces
+        )
 
     def stored_workspaces(self):
         """Every workspace with a directory on disk, with its size and last write.
