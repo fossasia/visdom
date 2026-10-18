@@ -63,7 +63,7 @@ from visdom.utils.server_utils import (
     notify,
     LazyEnvData,
 )
-from visdom.server import metrics
+from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
@@ -1993,6 +1993,14 @@ class ActivityHandler(BaseHandler):
 
         return list(workspaces.values())
 
+    def allowed(self):
+        return internal.is_signed(self.request, internal.READ)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
     def get(self):
         self.write({"workspaces": self.gather()})
 
@@ -2004,6 +2012,9 @@ class MetricsHandler(ActivityHandler):
     it names every workspace on the instance, so it belongs on the internal
     network and the proxy keeps it off the public surface.
     """
+
+    def allowed(self):
+        return internal.has_metrics_token(self.request) or super().allowed()
 
     def get(self):
         samples = [metrics.sample_from_activity(entry) for entry in self.gather()]
