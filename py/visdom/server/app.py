@@ -469,11 +469,19 @@ class Application(tornado.web.Application):
         behind any write already queued.
         """
         manager = self.workspace_env_manager
+        space = manager.loaded_space(workspace_id)
         expired = manager.expired_envs(workspace_id, older_than_days)
+        if space is not None:
+            expired = [
+                item
+                for item in expired
+                if not space.dirty_envs.get(item["eid"])
+                and item["eid"] not in space.saving_envs
+            ]
         answer = {
             "workspace_id": str(workspace_id),
             "dry_run": bool(dry_run),
-            "loaded": manager.loaded_space(workspace_id) is not None,
+            "loaded": space is not None,
             "envs": [item["eid"] for item in expired],
             "bytes": sum(item["bytes"] for item in expired),
             "removed": 0,
@@ -481,7 +489,6 @@ class Application(tornado.web.Application):
         if dry_run or not expired:
             return answer
 
-        space = manager.loaded_space(workspace_id)
         if space is not None:
             storage = space.storage
         else:

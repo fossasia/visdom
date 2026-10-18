@@ -108,6 +108,8 @@ class TestTheInternalPort(InternalPortCase):
             {"older_than_days": 7},
             {"workspace_id": "ws-a", "older_than_days": "soon"},
             {"workspace_id": "ws-a", "older_than_days": 0},
+            {"workspace_id": "ws-a", "older_than_days": "nan"},
+            {"workspace_id": "ws-a", "older_than_days": "inf"},
             {"workspace_id": "../outside", "older_than_days": 7},
         ]:
             with self.subTest(body=body):
