@@ -39,7 +39,9 @@ from visdom.server.handlers.socket_handlers import SocketWrapper, VisSocketWrapp
 from visdom.utils.server_utils import hash_password
 
 from testutils import socket_double
+from testutils.fakes import SpyStore
 from testutils.http import VisdomHTTPTestCase
+from testutils.payloads import env_payload
 
 pytestmark = pytest.mark.integration
 
@@ -108,6 +110,51 @@ class TestLoginPage(LoginTestCase):
 
         self.assertEqual(resp.code, 200)
         self.assertNotIn("Visdom Login", resp.body.decode())
+
+
+class TestLoginPageReadsNothing(LoginTestCase):
+    """Serving the login form touches no environment file.
+
+    It used to list every environment -- ``list_envs`` is a directory read --
+    and pass the result to ``login.html`` as ``items``. That template has never
+    rendered them: the listing was built and thrown away, on the IOLoop, for
+    every unauthenticated request that reached the server.
+    """
+
+    def get_app(self):
+        # ``ServerState`` keeps its own reference to the store, so the spy has
+        # to be what the application builds for itself.
+        with patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        return app
+
+    def setUp(self):
+        super().setUp()
+        # Written after the app booted, so only a fresh listing could find it.
+        self.spy.save_env("seeded", env_payload())
+        self.spy.threads.clear()
+
+    def test_the_page_is_served_without_reaching_the_store(self):
+        resp = self.fetch("/")
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(self.spy.threads, [])
+
+    def test_the_page_does_not_show_the_environments(self):
+        """The premise of dropping the listing: the form never displayed one.
+
+        If the login page is ever given an environment list to show, this is
+        what fails, and whoever adds it has to read it off the loop.
+        """
+        self.assertNotIn("seeded", self.fetch("/").body.decode())
+
+    def test_the_dashboard_is_served_without_reaching_the_store_either(self):
+        headers = self.session_headers()
+        self.spy.threads.clear()
+
+        self.assertEqual(self.fetch("/", headers=headers).code, 200)
+        self.assertEqual(self.spy.threads, [])
 
 
 class TestLoginCredentials(LoginTestCase):
@@ -247,6 +294,26 @@ class TestHealthIsPublic(LoginTestCase):
 
         self.assertEqual(resp.code, 200)
         self.assertEqual(json.loads(resp.body), {"status": "ok"})
+
+
+class TestBadCookieSecretConfig(LoginTestCase):
+    """Ensure misconfigured cookie_secret raises exception instead of hiding it."""
+
+    def get_app(self):
+        app = super().get_app()
+        # Deliberately misconfigure the cookie secret to be an integer (wrong type)
+        # to ensure that get_current_user does not swallow TypeError silently.
+        app.settings["cookie_secret"] = 12345
+        return app
+
+    def test_get_current_user_does_not_swallow_typeerror(self):
+        # Provide a syntactically valid secure cookie so get_secure_cookie
+        # reaches the signature verification logic, which crashes on the int secret.
+        forged = "2|1:0|10:1790439103|13:user_password|8:dGVzdA==|7135b0700b5c87506de8f06c3981cf779671f6f76b8a1e6b688b408b3ca6349c"
+        resp = self.fetch("/env/main", headers={"Cookie": f"user_password={forged}"})
+        # The server should error out (500) rather than swallowing the TypeError
+        # and returning 401 Unauthorized.
+        self.assertEqual(resp.code, 500)
 
 
 class TestAuthDisabledByDefault(VisdomHTTPTestCase):

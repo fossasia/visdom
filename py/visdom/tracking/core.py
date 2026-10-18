@@ -67,11 +67,11 @@ def _slugify(name: str) -> str:
     Keeps things simple and dependency-free: alnum/dash/underscore/dot
     survive, everything else (path separators included) becomes ``_`` so a
     run name can never escape ``out_dir`` or collide with OS-reserved
-    characters. Truncated to ``_MAX_SLUG_LEN`` so an overly long name can't
-    push the final filename past OS limits.
+    characters. Truncated to ``_MAX_SLUG_LEN`` UTF-8 bytes so an overly long
+    name can't push the final filename past OS limits, even for non-ASCII names.
     """
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
-    safe = safe[:_MAX_SLUG_LEN]
+    safe = safe.encode("utf-8")[:_MAX_SLUG_LEN].decode("utf-8", errors="ignore")
     return safe or "run"
 
 

@@ -14,6 +14,7 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
+import contextlib
 import copy
 import functools
 import hashlib
@@ -301,9 +302,52 @@ def purge_env(store, eid):
     store.delete_env(eid)
 
 
+class EnvDeleteWatch:
+    """Records that ``eid`` was deleted while a request was off the loop.
+
+    ``env_is_deleting`` answers for the instant it is asked, and a delete is
+    only in flight until the worker is done with it. A request that reads for
+    longer than the delete takes asks after it has settled and is told
+    nothing: the counter has been dropped, and ``state`` holds no entry to
+    have changed identity either when the env was never materialised. This
+    outlives the delete instead -- once set, it stays set for as long as the
+    holder keeps the watch.
+    """
+
+    __slots__ = ("deleted",)
+
+    def __init__(self, deleted=False):
+        self.deleted = deleted
+
+
+@contextlib.contextmanager
+def watch_env_deletes(handler, eid):
+    """Hold a watch on ``eid`` for the body of the ``with``.
+
+    The watch starts out already tripped when a delete is in flight as it is
+    taken, so the holder does not have to ask separately: a delete running now
+    and a delete that starts later both leave the env gone by the time the
+    holder looks.
+    """
+    watch = EnvDeleteWatch(env_is_deleting(handler, eid))
+    handler.env_delete_watches.setdefault(eid, []).append(watch)
+    try:
+        yield watch
+    finally:
+        watches = handler.env_delete_watches.get(eid)
+        if watches is not None and watch in watches:
+            watches.remove(watch)
+            if not watches:
+                handler.env_delete_watches.pop(eid, None)
+
+
 def _note_env_deleting(handler, eid):
     """Record that a delete of ``eid`` is on its way to disk."""
     handler.deleting_envs[eid] = handler.deleting_envs.get(eid, 0) + 1
+    # tell everyone holding this env off the loop, before the delete settles
+    # and the record above is dropped again.
+    for watch in handler.env_delete_watches.get(eid, ()):
+        watch.deleted = True
 
 
 def _note_env_deleted(handler, eid):
@@ -435,6 +479,46 @@ def push_deleted_off_loop(handler, eid, win_id, p_data):
     )
 
 
+def push_deleted_many_off_loop(handler, eid, panes):
+    """Record several closed panes off the loop; resolves to the new undo depth.
+
+    The panes are already out of ``state`` -- the close popped them on the loop
+    -- so the worker is the only owner of what it is handed and there is
+    nothing left for the loop to mutate mid-write.
+    """
+    return run_on_storage_executor(
+        handler, push_deleted_many, handler.storage, eid, panes
+    )
+
+
+def drop_deleted_many_off_loop(handler, eid, panes):
+    """Take back the undo entries a close pushed; resolves to the new depth.
+
+    Submitted rather than run here, so it lands on the worker behind the write
+    it is taking back: the executor runs one task at a time, and a close that
+    is rolled back after its push was submitted cannot otherwise tell whether
+    the push has run yet. Cancelling the future the close awaited does not
+    stop the worker, so very often it has not.
+    """
+    return run_on_storage_executor(
+        handler, drop_deleted_many, handler.storage, eid, panes
+    )
+
+
+def forget_closed_panes(handler, eid, panes):
+    """Queue the removal of a rolled-back close's undo entries, logging failure.
+
+    The close that asks for this is on its way out with an exception of its
+    own -- a failed write, or a client that went away -- so the removal is not
+    awaited: the caller has nothing left to tell anyone, and awaiting disk work
+    inside the cancellation it is unwinding would only park it again. Returned
+    all the same, for callers that do want to wait.
+    """
+    future = drop_deleted_many_off_loop(handler, eid, panes)
+    future.add_done_callback(_log_storage_failure)
+    return future
+
+
 def pop_deleted_off_loop(handler, eid):
     """Undo the newest close off the loop; resolves to ``(popped, depth)``."""
     return run_on_storage_executor(
@@ -506,12 +590,21 @@ def extract_eid(args):
 
 
 def update_window(p, args):
-    """Adds new args to a window if they exist"""
+    """Merge an update's ``layout``/``opts``/``legend`` into an existing window.
+
+    Does not touch ``p["version"]``. That counter sequences the incremental
+    ``window_update`` broadcast, and only some updates reach this helper --
+    ``UpdateHandler.update()`` returns before it for text, image_history,
+    plot_history and table panes -- so it is advanced once per accepted update
+    by ``UpdateHandler.update_packet()`` instead.
+    """
     content = p["content"]
+    has_layout = isinstance(content, dict) and isinstance(content.get("layout"), dict)
     layout_update = args.get("layout", {})
-    for layout_name, layout_val in layout_update.items():
-        if layout_val is not None:
-            content["layout"][layout_name] = layout_val
+    if has_layout:
+        for layout_name, layout_val in layout_update.items():
+            if layout_val is not None:
+                content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
@@ -521,7 +614,12 @@ def update_window(p, args):
             else:
                 p[opt_name] = opt_val
 
-    if "legend" in opts:
+    has_traces = (
+        p.get("type") == "plot"
+        and isinstance(content, dict)
+        and isinstance(content.get("data"), list)
+    )
+    if "legend" in opts and has_traces:
         legend = opts["legend"]
         pdata = p["content"]["data"]
         name = args.get("name")
@@ -541,7 +639,6 @@ def update_window(p, args):
             for i, d in enumerate(pdata):
                 if i < len(legend):
                     d["name"] = legend[i]
-    p["version"] += 1
     return p
 
 
@@ -641,8 +738,15 @@ def window(args):
     return p
 
 
-def gather_envs(state, store):
-    return sorted(set(store.list_envs() + list(state.keys())))
+def _is_named_trace(trace):
+    """True if ``trace`` is a mapping carrying a ``name``.
+
+    Pane content is read back from stored env JSON, so a trace list can hold
+    anything -- ``None`` and non-mapping entries included. Checking the shape
+    before testing for ``"name"`` keeps a malformed env from raising out of a
+    comparison.
+    """
+    return isinstance(trace, dict) and "name" in trace
 
 
 def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
@@ -690,8 +794,8 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             ptype = win.get("type", None)
             if ptype not in ["plot", "image"]:
                 continue
-            if "content" not in win:
-                continue
+            if not isinstance(win.get("content"), dict):
+                continue  # pane content is missing or not in the expected shape
             if "title" not in win:
                 continue
             title = win["title"]
@@ -714,6 +818,12 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             # long environment id string), to make combined plot lines readable.
             if ptype == "image":
                 if ix == 0 and destWid not in seen_dest_wids:
+                    if not isinstance(destWidJson["content"], dict):
+                        # Bail before marking the pane initialised, so a later
+                        # env cannot treat a base we never converted to a list
+                        # as one that is ready to be appended to.
+                        continue  # base image content is not in the expected shape
+
                     seen_dest_wids.add(destWid)
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
@@ -737,28 +847,45 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
-                base_data = destWidJson["content"].get("data") or []
-                if not base_data or "name" not in base_data[0]:
+                if not isinstance(destWidJson["content"], dict):
+                    continue  # base plot content is not in the expected shape
+                base_data = destWidJson["content"].get("data")
+                if not isinstance(base_data, list) or not base_data:
+                    continue  # Skip windows with no usable data
+                if not all(_is_named_trace(trace) for trace in base_data):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
+                    # Plotly treats layout as optional, so a stored plot can
+                    # legitimately carry none. Give the merged pane one rather
+                    # than failing the whole comparison over a missing key.
+                    if not isinstance(destWidJson["content"].get("layout"), dict):
+                        destWidJson["content"]["layout"] = {}
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
+                    # Every base trace was validated above, so the rename
+                    # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        if "name" not in data:
-                            break  # stop working with this plot, not right format
                         destWidJson["content"]["data"][dataIdx][
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
+                    # A contributor is merged only if every one of its traces
+                    # is named, so a malformed one cannot leave half its traces
+                    # behind. has_compare is deliberately left untouched when we
+                    # skip: if an earlier env already contributed, that
+                    # comparison is still valid, and if none has, the flag is
+                    # still False from the base env and the pane drops out below.
+                    incoming_data = win["content"].get("data")
+                    if not isinstance(incoming_data, list) or not incoming_data:
+                        continue
+                    if not all(_is_named_trace(trace) for trace in incoming_data):
+                        continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
-                    for _dataIdx, data in enumerate(win["content"]["data"]):
+                    for data in incoming_data:
                         data = copy.deepcopy(data)
-                        if "name" not in data:
-                            destWidJson["has_compare"] = False
-                            break  # stop working with this plot, not right format
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 
@@ -946,6 +1073,83 @@ def push_deleted(store, eid, win_id, p_data):
     if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
         stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
     store.save_undo(eid, stack)
+    return len(stack)
+
+
+def push_deleted_many(store, eid, panes):
+    """Append several closed panes to the env's undo stack in one write.
+
+    ``/close`` with no ``win`` closes every pane an environment has. Pushing
+    them one at a time costs a read and a write of the stack per pane, and once
+    the push is off the loop, a round trip to the storage worker per pane with
+    the loop free to change the env in between. They travel together instead:
+    the stack is read once and extended in the order the panes were closed, so
+    what lands is the stack that pushing them in turn would have left --
+    including the trim, which keeps the last ``DEFAULT_MAX_UNDO_HISTORY``
+    either way.
+
+    Returns the depth the stack was left at, as ``push_deleted`` does.
+    """
+    stack = store.load_undo(eid)
+    stack.extend([win_id, p_data] for win_id, p_data in panes)
+    if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
+        stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
+    store.save_undo(eid, stack)
+    return len(stack)
+
+
+def _newest_undo_entry(stack, win_id, p_data):
+    """Where ``stack`` holds the entry a close left for ``win_id``, or ``None``.
+
+    Searched from the newest end, by value first: an id can appear more than
+    once, and the entry wanted here is the one carrying the pane that was
+    closed. The newest entry under the id answers when nothing matches by
+    value, because the stack has been through JSON by then -- a NaN comes back
+    as ``None`` and a tuple comes back as a list -- and the id still names the
+    pane the close took.
+    """
+    by_id = None
+    for index in range(len(stack) - 1, -1, -1):
+        entry = stack[index]
+        if not entry or entry[0] != win_id:
+            continue
+        if list(entry) == [win_id, p_data]:
+            return index
+        if by_id is None:
+            by_id = index
+    return by_id
+
+
+def drop_deleted_many(store, eid, panes):
+    """Remove the undo entries a rolled-back close pushed, keeping the rest.
+
+    A close that puts its panes back has to take its undo entries back with
+    them, or the panes end up in memory and recorded as closed both: an undo
+    would then restore what was never gone, over whatever is in its place.
+
+    One entry per pane, and only if it is there: the write the close awaited
+    may never have landed, the trim may have dropped the entry, or a delete of
+    the env may have taken the whole stack. Entries this close did not push --
+    an older close's, or one from a close that landed behind it -- are left
+    where they are, so what is on the stack afterwards is what the closes that
+    still stand put there.
+
+    Returns the depth the stack was left at, as ``push_deleted_many`` does.
+    """
+    stack = store.load_undo(eid)
+    removed = 0
+    for win_id, p_data in reversed(panes):
+        index = _newest_undo_entry(stack, win_id, p_data)
+        if index is not None:
+            del stack[index]
+            removed += 1
+    if removed:
+        if stack:
+            store.save_undo(eid, stack)
+        else:
+            # Writing an empty stack back would leave an undo file saying the
+            # env has nothing to undo, which is what having no file says.
+            store.clear_undo(eid)
     return len(stack)
 
 

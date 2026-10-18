@@ -17,18 +17,31 @@ window; the tests inspect the created window in the app state. Experiments are
 seeded through a real ``ExperimentStore`` over a temporary directory.
 """
 
+import asyncio
 import json
 import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import pytest
 import tornado.testing
+import tornado.web
 
 from visdom.data_model import JSONStore
-from visdom.experiments import ExperimentStore, flatten_experiments
+from visdom.experiments import METADATA_KEY, ExperimentStore, flatten_experiments
 from visdom.server.app import Application
+from visdom.server.handlers import experiments_handler
+from visdom.server.handlers.experiments_handler import (
+    ExperimentHparamsHandler,
+    _resident_experiments,
+    _select_hparams,
+)
+from visdom.utils.server_utils import LazyEnvData
+
+from testutils.fakes import FakeHandler, SpyStore
+from testutils.payloads import env_payload
 
 pytestmark = pytest.mark.integration
 
@@ -242,3 +255,565 @@ class TestHparamsEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def edit_tags_in_memory(env_path, env_id, tags):
+    """Load ``env_id`` whole and retag it without writing the change to disk.
+
+    Returns the env, which now answers with ``tags`` while its file still holds
+    the old ones -- the state an env is in between an edit and the autosave.
+    """
+    env = JSONStore(env_path).load_env(env_id)
+    ExperimentStore(
+        JSONStore(env_path),
+        env_provider=lambda eid: env if eid == env_id else None,
+        persist=lambda eid, data: None,
+    ).update_tags(env_id, tags)
+    return env
+
+
+class TestHparamsPaneStaysOffTheLoop(tornado.testing.AsyncHTTPTestCase):
+    """Building a pane reads and writes disk, and none of it on the loop.
+
+    A query selection reads the metadata of every environment the store knows,
+    and an ``env_ids`` one a file per id -- each of them a whole environment
+    file to parse. Done on the loop, that is every other request and socket
+    stalled for as long as the reads take.
+    """
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_hparams_loop_")
+        # Seeded before the app is built, so the runs exist only on disk: the
+        # server knows them by their files and has never materialised them.
+        seed_experiments(ExperimentStore(JSONStore(self._tmp_dir)))
+        super().setUp()
+        # Booting lists the env directory to build the lazy state; only what a
+        # request goes on to do counts here.
+        self.spy.threads.clear()
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def get_app(self):
+        # ``ServerState`` takes its own reference to the store at construction,
+        # so the spy has to be the store the app builds for itself.
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
+            self._app = Application(port=self.get_http_port(), env_path=self._tmp_dir)
+        self.spy = self._app.storage
+        return self._app
+
+    def hparams(self, body):
+        return self.fetch(
+            "/experiments/hparams",
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def records(self, resp):
+        win = self._app.state["main"]["jsons"][resp.body.decode()]
+        return {record["env_id"]: record for record in win["content"]["records"]}
+
+    def assertReachedOffLoop(self, *methods):
+        """Each of ``methods`` reached the store, and only on the storage worker."""
+        for method in methods:
+            ran = [name for called, name in self.spy.threads if called == method]
+            self.assertTrue(ran, "{0} never reached the store".format(method))
+            for name in ran:
+                self.assertTrue(name.startswith("visdom-storage"), (method, name))
+
+    def test_a_query_selection_reads_on_the_storage_worker(self):
+        resp = self.hparams({"query": "lr < 0.01"})
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(list(self.records(resp)), ["run-b"])
+        self.assertReachedOffLoop("list_envs", "load_experiment")
+
+    def test_an_env_ids_selection_reads_on_the_storage_worker(self):
+        resp = self.hparams({"env_ids": ["run-c", "run-a"]})
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(self.spy.calls["load_experiment"], ["run-c", "run-a"])
+        self.assertReachedOffLoop("load_experiment")
+
+    def _snapshot_taken_for(self, body):
+        """Post ``body`` and return the resident ids the worker was handed."""
+        taken = []
+        select = experiments_handler._select_hparams
+
+        def capture(store, spec, resident):
+            taken.append(sorted(resident))
+            return select(store, spec, resident)
+
+        with mock.patch.object(experiments_handler, "_select_hparams", capture):
+            resp = self.hparams(body)
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(len(taken), 1)
+        return taken[0]
+
+    def _make_resident(self, *env_ids):
+        for env_id in env_ids:
+            self._app.state[env_id] = JSONStore(self._tmp_dir).load_env(env_id)
+
+    def test_an_env_ids_selection_copies_only_the_named_envs(self):
+        """The copy the loop takes is the ids asked for and nothing else.
+
+        The blobs carry the runs' metric histories, so copying every resident
+        env would charge a two-run pane -- and every live rebuild of it -- the
+        whole of what the server is holding.
+        """
+        self._make_resident("run-a", "run-b", "run-c")
+
+        self.assertEqual(self._snapshot_taken_for({"env_ids": ["run-a"]}), ["run-a"])
+
+    def test_a_query_selection_still_copies_every_resident_env(self):
+        """It reads every environment the store knows, so it needs them all."""
+        self._make_resident("run-a", "run-b", "run-c")
+
+        taken = self._snapshot_taken_for({"query": "epochs > 0"})
+
+        self.assertEqual(
+            [env_id for env_id in taken if env_id != "main"],
+            ["run-a", "run-b", "run-c"],
+        )
+
+    def test_the_pane_is_saved_on_the_storage_worker(self):
+        resp = self.hparams({"env_ids": ["run-a"]})
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("main", self.spy.calls["save_env"])
+        self.assertReachedOffLoop("save_env")
+
+    def test_no_store_call_the_request_makes_runs_on_the_loop(self):
+        """Registering the window reads its env too; that read is not exempt.
+
+        The pane goes into ``run-a``, which the server knows only by its file,
+        so putting a window in it has to bring the env in off disk first.
+        """
+        resp = self.hparams({"query": "epochs > 0", "eid": "run-a", "win": "hp"})
+
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(self.spy.threads)
+        on_loop = [
+            (method, name)
+            for method, name in self.spy.threads
+            if not name.startswith("visdom-storage")
+        ]
+        self.assertEqual(on_loop, [])
+
+    def test_a_disk_only_env_keeps_the_windows_its_file_holds(self):
+        """A pane lands in an env the server has never seen without losing it.
+
+        The file is written after the app has booted, so ``state`` has no entry
+        for it at all -- not even a cold one. Registering a window into an id
+        ``state`` does not know creates an empty env, and saving that env is
+        what puts an empty file over one full of windows, so the env has to be
+        read back off disk before the pane goes into it.
+        """
+        JSONStore(self._tmp_dir).save_env("late", env_payload("plot_0"))
+
+        resp = self.hparams({"env_ids": ["run-a"], "eid": "late"})
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("plot_0", self._app.state["late"]["jsons"])
+        saved = JSONStore(self._tmp_dir).load_env("late")
+        self.assertEqual(sorted(saved["jsons"]), sorted(["plot_0", resp.body.decode()]))
+        self.assertReachedOffLoop("load_env")
+
+    def test_an_env_held_in_memory_wins_over_its_file(self):
+        """The worker reads files, but an env the server is holding answers
+        from the copy the loop took of it, never from its stale file."""
+        self._app.state["run-a"] = edit_tags_in_memory(
+            self._tmp_dir, "run-a", {"dataset": "memory-only"}
+        )
+        self.spy.calls["load_experiment"].clear()
+
+        resp = self.hparams({"env_ids": ["run-a", "run-b"]})
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            self.records(resp)["run-a"]["tags"], {"dataset": "memory-only"}
+        )
+        self.assertEqual(self.spy.calls["load_experiment"], ["run-b"])
+
+
+class TestHparamsCreateRaces(tornado.testing.AsyncHTTPTestCase):
+    """The loop serves other requests while the selection is read.
+
+    The pane's env is read before that selection and materialised once it is
+    back, so a delete that lands in between is answered rather than undone.
+    Each test parks one selection, changes the state from the loop, then lets
+    the selection go; it is held with events rather than by yielding a few
+    times, so the interleaving does not depend on how quickly the storage
+    worker happens to answer.
+    """
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_hparams_race_")
+        super().setUp()
+        seed_experiments(ExperimentStore(self._app.storage))
+        self.held = []
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def get_app(self):
+        self._app = Application(port=self.get_http_port(), env_path=self._tmp_dir)
+        return self._app
+
+    def post(self, body):
+        return self.http_client.fetch(
+            self.get_url("/experiments/hparams"),
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+            raise_error=False,
+        )
+
+    def hold_selections(self):
+        """Park every selection until the test releases it.
+
+        Returns a patch whose selections announce themselves on ``self.held``
+        as ``(started, release)`` event pairs, in the order they begin.
+        """
+        build = ExperimentHparamsHandler._build_content_off_loop
+
+        async def held_build(handler, spec):
+            started, release = asyncio.Event(), asyncio.Event()
+            self.held.append((started, release))
+            started.set()
+            await release.wait()
+            return await build(handler, spec)
+
+        return mock.patch.object(
+            ExperimentHparamsHandler,
+            "_build_content_off_loop",
+            staticmethod(held_build),
+        )
+
+    async def wait_held(self, count):
+        """Wait until ``count`` selections are parked."""
+        while len(self.held) < count:
+            await asyncio.sleep(0.001)
+        await self.held[count - 1][0].wait()
+
+    @tornado.testing.gen_test
+    async def test_an_env_deleted_during_the_read_is_not_brought_back(self):
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+            # the shape a delete leaves behind while the worker still has it:
+            # out of state, and marked on its way to disk. Without the mark the
+            # env is only absent, and the file it still has is materialised
+            # again rather than refused. The mark is set here rather than taken
+            # from a real delete so that it stays put for the whole of the
+            # read, which pins the in-flight branch on its own;
+            # ``test_a_delete_that_finishes_first_still_refuses_the_pane``
+            # drives the real handler to cover the delete that is over before
+            # the check runs, which this marker would otherwise hide.
+            del self._app.state["dash"]
+            self._app.server_state.deleting_envs["dash"] = 1
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("dash", self._app.state)
+
+    @tornado.testing.gen_test
+    async def test_a_delete_that_finishes_first_still_refuses_the_pane(self):
+        """The real delete path, run to completion before the pane is built.
+
+        ``deleting_envs`` is cleared the moment the worker is done, so a delete
+        that outruns the selection leaves no mark for the resumed request to
+        find. With the env known only by its file there is no ``state`` entry
+        to have changed identity either, which together is how a deleted env
+        came back carrying a pane: the create passed both checks, registered
+        the window into a fresh env and saved it behind the delete.
+        """
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+        env_file = os.path.join(self._tmp_dir, "dash.json")
+        self.assertTrue(os.path.exists(env_file))
+        # the server now knows the env only by its file, as it would after a
+        # restart; this is what leaves the create nothing to compare against.
+        del self._app.state["dash"]
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+
+            await self.http_client.fetch(
+                self.get_url("/delete_env"),
+                method="POST",
+                body=json.dumps({"eid": "dash"}),
+                headers={"Content-Type": "application/json"},
+            )
+            # the delete is settled: nothing is in flight for the create to
+            # notice when it resumes.
+            self.assertEqual(self._app.server_state.deleting_envs, {})
+            self.assertFalse(os.path.exists(env_file))
+
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("dash", self._app.state)
+        self.assertFalse(os.path.exists(env_file))
+
+    @tornado.testing.gen_test
+    async def test_an_env_replaced_during_the_read_is_rejected(self):
+        """A deleted env recreated under the same name is not the target."""
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+            self._app.state["dash"] = {"jsons": {}, "reload": {}}
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(self._app.state["dash"]["jsons"], {})
+
+    @tornado.testing.gen_test
+    async def test_an_env_the_server_never_knew_is_still_created(self):
+        """Only a target that was there and went away is refused."""
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "fresh"})
+            await self.wait_held(1)
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("hp1", self._app.state["fresh"]["jsons"])
+
+    @tornado.testing.gen_test
+    async def test_an_env_created_during_the_read_receives_the_pane(self):
+        """An env that appeared while the selection ran is not a conflict."""
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "fresh"})
+            await self.wait_held(1)
+            self._app.state["fresh"] = {
+                "jsons": {"other": {"id": "other", "type": "text"}},
+                "reload": {},
+            }
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(sorted(self._app.state["fresh"]["jsons"]), ["hp1", "other"])
+
+
+class TestSelectHparams(unittest.TestCase):
+    """The worker half of the endpoint, driven without a server."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        seed_experiments(ExperimentStore(JSONStore(self._tmp.name)))
+        self.store = SpyStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def spec(self, env_ids):
+        return ExperimentHparamsHandler._resolve_spec(None, env_ids, None)
+
+    def test_a_resident_copy_is_served_without_reading_its_file(self):
+        env = edit_tags_in_memory(self._tmp.name, "run-a", {"dataset": "memory-only"})
+        resident = {"run-a": {METADATA_KEY: env[METADATA_KEY]}}
+
+        content = _select_hparams(self.store, self.spec(["run-a"]), resident)
+
+        self.assertEqual(content["records"][0]["tags"], {"dataset": "memory-only"})
+        self.assertEqual(self.store.calls["load_experiment"], [])
+
+    def test_an_id_with_no_experiment_is_still_a_404(self):
+        with self.assertRaises(tornado.web.HTTPError) as caught:
+            _select_hparams(self.store, self.spec(["run-a", "ghost"]), {})
+
+        self.assertEqual(caught.exception.status_code, 404)
+
+
+class TestResidentExperiments(unittest.TestCase):
+    """What the loop hands the worker about the envs it is holding."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = SpyStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def env(self, env_id, **params):
+        return {
+            METADATA_KEY: {
+                "env_id": env_id,
+                "params": [{"key": k, "value": v} for k, v in params.items()],
+            }
+        }
+
+    def test_a_blob_crosses_over_as_it_stands(self):
+        """No deep copy: copying every resident experiment to hand the worker
+        a selection puts all of the server's metadata through the loop first."""
+        env = self.env("run-a", lr=0.1)
+
+        resident = _resident_experiments({"run-a": env})
+
+        self.assertIs(resident["run-a"][METADATA_KEY], env[METADATA_KEY])
+
+    def test_a_blob_the_loop_replaces_leaves_the_handed_one_alone(self):
+        """Which is what makes handing the object over safe: a write rebinds
+        ``env["experiment"]`` rather than editing the dict the worker holds."""
+        env = self.env("run-a", lr=0.1)
+        resident = _resident_experiments({"run-a": env})
+
+        ExperimentStore(
+            self.store,
+            env_provider=lambda eid: env if eid == "run-a" else None,
+            persist=lambda eid, data: None,
+        ).log_experiment("run-a", params={"lr": 0.2})
+
+        self.assertEqual(resident["run-a"][METADATA_KEY]["params"][0]["value"], 0.1)
+
+    def test_a_materialised_env_with_no_experiment_is_kept_as_an_empty_one(self):
+        resident = _resident_experiments({"run-a": {"jsons": {}}})
+
+        self.assertEqual(resident, {"run-a": {}})
+
+    def test_an_env_never_read_off_disk_is_left_to_its_file(self):
+        state = {"run-a": LazyEnvData(self.store, "run-a")}
+
+        self.assertEqual(_resident_experiments(state), {})
+
+    def test_named_ids_bound_the_walk(self):
+        """An ``env_ids`` selection cannot reach past the ids it names, so the
+        envs the server holds beyond them are never visited."""
+        state = {"run-a": self.env("run-a"), "run-b": self.env("run-b")}
+
+        resident = _resident_experiments(state, ["run-a", "run-a", "ghost"])
+
+        self.assertEqual(list(resident), ["run-a"])
+
+
+class TestHparamsPaneRejectsAStaleEnv(unittest.TestCase):
+    """The env a pane targets has to be the same env when the pane is written.
+
+    Selecting the runs and materialising the destination both yield the loop,
+    and a delete or a fork landing in between leaves a different env -- or none
+    at all -- under the id the request named. Registering the window regardless
+    would put the pane in an env nobody asked for, or bring a just-deleted one
+    back, and then save it there.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        seed_experiments(ExperimentStore(JSONStore(self._tmp.name)))
+        self.store = SpyStore(self._tmp.name)
+        self.handler = FakeHandler(state={}, storage=self.store)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build_pane(self, eid, meanwhile=None):
+        """Run the endpoint, letting ``meanwhile`` edit state mid-build.
+
+        It stands in for whatever else the loop ran while the selection was on
+        the storage worker: the selection itself has no bearing on the check,
+        so it is replaced rather than raced against.
+        """
+
+        async def selection(handler, spec):
+            if meanwhile is not None:
+                meanwhile(handler)
+            return flatten_experiments([])
+
+        with mock.patch.object(
+            ExperimentHparamsHandler,
+            "_build_content_off_loop",
+            staticmethod(selection),
+        ):
+            asyncio.run(
+                ExperimentHparamsHandler.wrap_func(
+                    self.handler, {"env_ids": ["run-a"], "eid": eid}
+                )
+            )
+
+    def delete_env(self, handler):
+        """Take an env out of state the way ``DeleteEnvHandler`` does."""
+        handler.state.pop("main", None)
+        handler.deleting_envs["main"] = 1
+
+    def test_an_env_replaced_mid_build_is_rejected(self):
+        self.handler.state["main"] = env_payload("plot_0")
+        replacement = env_payload("other_0")
+
+        def replace(handler):
+            handler.state["main"] = replacement
+
+        with self.assertRaises(tornado.web.HTTPError) as caught:
+            self.build_pane("main", replace)
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(list(replacement["jsons"]), ["other_0"])
+        self.assertEqual(self.store.calls["save_env"], [])
+
+    def test_an_env_deleted_mid_build_is_not_recreated(self):
+        self.handler.state["main"] = env_payload("plot_0")
+
+        with self.assertRaises(tornado.web.HTTPError) as caught:
+            self.build_pane("main", self.delete_env)
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertNotIn("main", self.handler.state)
+        self.assertEqual(self.store.calls["save_env"], [])
+
+    def test_an_env_being_deleted_is_not_recreated_by_the_pane(self):
+        """A destination the server knows only by its file, deleted mid-build.
+
+        ``state`` held nothing under the id, so there is no entry to compare
+        against and the delete on its way to disk is the only sign the
+        destination is gone. Creating the env regardless would queue the pane's
+        save behind that delete on the one storage worker, so the env the user
+        deleted would come back holding nothing but the pane.
+        """
+        self.store.save_env("filed", env_payload("plot_0"))
+        self.store.calls["save_env"].clear()
+
+        def start_delete(handler):
+            handler.deleting_envs["filed"] = 1
+
+        with self.assertRaises(tornado.web.HTTPError) as caught:
+            self.build_pane("filed", start_delete)
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertNotIn("filed", self.handler.state)
+        self.assertEqual(self.store.calls["save_env"], [])
+
+    def test_an_env_absent_from_the_start_is_created(self):
+        """Nothing was there to go stale, so the pane creates the env."""
+        self.build_pane("fresh")
+
+        self.assertEqual(self.store.calls["save_env"], ["fresh"])
+        window_id = self.handler.body
+        self.assertEqual(
+            self.handler.state["fresh"]["jsons"][window_id]["type"], "hparams"
+        )
+
+    def test_a_cold_env_primed_in_place_is_not_stale(self):
+        """Priming a ``LazyEnvData`` edits the object state already holds.
+
+        The identity the check compares is the entry's, not its contents', so
+        the read every cold destination needs must not read as a replacement.
+        """
+        self.store.save_env("cold", env_payload("plot_0"))
+        self.handler.state["cold"] = LazyEnvData(self.store, "cold")
+        self.store.calls["save_env"].clear()
+
+        self.build_pane("cold")
+
+        self.assertEqual(self.store.calls["save_env"], ["cold"])
+        self.assertIn("plot_0", self.handler.state["cold"]["jsons"])

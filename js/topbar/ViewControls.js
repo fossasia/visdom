@@ -161,7 +161,7 @@ function ViewControls(props) {
   });
   return (
     <span>
-      <span>View&nbsp;</span>
+      <span className="topbar-label">View</span>
       <div className="btn-group navbar-btn" role="group" aria-label="View:">
         <div className="btn-group" role="group" ref={viewDropdownRef}>
           <button

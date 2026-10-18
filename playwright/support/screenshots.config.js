@@ -107,9 +107,11 @@ const screenshotOptions = {
   misc_plot_latex: { maxDiffPixels: 3000 },
   text_basic: { threshold: 0.05 },
   text_update: { threshold: 0.05 },
+  image_basic: { threshold: 0.05, maxDiffPixels: 50 },
 };
 
 const compareScreenshotOptions = {
+  image_save_jpeg: { maxDiffPixels: 10 },
   plot_line_doubleyaxis: { maxDiffPixels: 2000 },
   plot_scatter_append: { maxDiffPixels: 200 },
   plot_scatter_custom_marker: { maxDiffPixels: 200 },

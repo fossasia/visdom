@@ -7,11 +7,25 @@
  *
  */
 
-import { Eraser, Eye, FolderOpen, Save } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Eraser,
+  Eye,
+  File,
+  Folder,
+  FolderOpen,
+  Save,
+} from 'lucide-react';
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 import React, { useContext, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
+
+const isGroupNode = (nodeProps) =>
+  typeof nodeProps.eventKey === 'string' &&
+  nodeProps.eventKey.startsWith('__group__');
 
 const formatEnvironmentLabel = (env, tags) => {
   const tagLabels = Object.entries(tags || {}).map(([name, value]) =>
@@ -109,7 +123,7 @@ function EnvControls(props) {
   // ---------
   return (
     <span>
-      <span>Environment&nbsp;</span>
+      <span className="topbar-label">Environment</span>
       <div
         className="btn-group navbar-btn"
         role="group"
@@ -126,6 +140,17 @@ function EnvControls(props) {
             }}
             placeholder={<i>Select environment(s)</i>}
             treeLine
+            switcherIcon={(nodeProps) =>
+              isGroupNode(nodeProps) ? <ChevronRight size={12} /> : null
+            }
+            treeIcon={(nodeProps) => {
+              if (!isGroupNode(nodeProps)) return <File size={14} />;
+              return nodeProps.expanded ? (
+                <FolderOpen size={14} />
+              ) : (
+                <Folder size={14} />
+              );
+            }}
             maxTagTextLength={1000}
             value={validEnvIDs}
             treeData={env_options2}
@@ -148,7 +173,7 @@ function EnvControls(props) {
                 disabled={isAtStart}
                 onClick={onPrevEnv}
               >
-                ▲
+                <ChevronUp size={12} />
               </button>
               <button
                 aria-label="Next Environment"
@@ -157,7 +182,7 @@ function EnvControls(props) {
                 disabled={isAtEnd}
                 onClick={onNextEnv}
               >
-                ▼
+                <ChevronDown size={12} />
               </button>
             </div>
           )}

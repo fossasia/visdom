@@ -44,7 +44,6 @@ from visdom.utils.server_utils import (
 )
 from visdom.experiments import retarget_experiment
 
-
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 # TODO Try to standardize the code between the client-server and

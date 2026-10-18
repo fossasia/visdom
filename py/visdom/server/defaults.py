@@ -14,6 +14,10 @@ DEFAULT_PORT = 8097
 DEFAULT_HOSTNAME = "localhost"
 DEFAULT_BASE_URL = "/"
 MAX_SOCKET_WAIT = 15
+# Seconds between server pings on every websocket; a connection that misses the
+# pong for as long is closed. Without it a client that vanished without a close
+# frame stays registered until TCP gives up, which can take hours.
+WEBSOCKET_PING_INTERVAL = 30
 DEFAULT_MAX_IMAGE_HISTORY = 4
 DEFAULT_MAX_OLD_CONTENT = 50
 DEFAULT_MAX_PLOT_HISTORY = 4

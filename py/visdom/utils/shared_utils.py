@@ -12,6 +12,7 @@ parts of the visdom stack. Not to be used for particularly specific
 helper functions.
 """
 
+import copy
 import importlib
 import json
 import math
@@ -31,7 +32,6 @@ def warn_once(msg, warningtype=None):
     :param str msg: Message to display
     :param Warning warningtype: Type of warning, e.g. DeprecationWarning
     """
-    global _seen_warnings
     if msg not in _seen_warnings:
         _seen_warnings.add(msg)
         warnings.warn(msg, warningtype, stacklevel=2)
@@ -106,9 +106,11 @@ def _normalize_table_data(data, headers):
     used by both `table()` and `html_table()` so that the two can
     accept identical set of input shapes:
 
-    - `data`: a 2D list/tuple of rows, a 2D numpy array, or a list of
-      dicts (in which case `headers` is derived from the first dict's
-      keys unless `headers` is explicitly given).
+    - `data`: a 2D list/tuple of rows (each a list, tuple or 1-D numpy
+      array), a 2D numpy array, or a list of dicts (in which case
+      `headers` is derived from the first dict's keys unless `headers` is
+      explicitly given). A row that is itself a multi-dimensional array is
+      rejected.
     - `headers`: a list/tuple/1D numpy array of column names. Optional
       only when `data` is a list of dicts.
 
@@ -155,9 +157,16 @@ def _normalize_table_data(data, headers):
     else:
         assert has_headers, "headers required when data rows are lists/tuples"
         if has_data:
+            # Iterating a 2-D array -- list(arr), or a comprehension over it --
+            # yields 1-D arrays, so accept those rows the same way the 2-D array
+            # itself is accepted above.
+            data = [
+                row.tolist() if isinstance(row, np.ndarray) and row.ndim == 1 else row
+                for row in data
+            ]
             assert all(
                 isinstance(row, (list, tuple)) for row in data
-            ), "each row in `data` should be a list or tuple"
+            ), "each row in `data` should be a list, tuple or 1-D numpy array"
         headers = list(headers)
         rows = [list(r) for r in data] if has_data else []
 
@@ -169,6 +178,29 @@ def _normalize_table_data(data, headers):
     headers = [_table_cell_to_native(h) for h in headers]
 
     return headers, rows
+
+
+def _sanitize_nan_key(key):
+    """Unwrap a numpy scalar dict key that json cannot stringify itself.
+
+    A non-finite *value* becomes None, but a key cannot: JSON keys are
+    strings, so json writes the float itself as "NaN", "Infinity" or
+    "-Infinity" -- which is exactly what this module emitted under the
+    ``allow_nan=True`` default it encoded with historically. Leaving the
+    float a float rather than pre-stringifying it here is what keeps
+    ``sort_keys=True`` comparing it against the other numeric keys instead
+    of a str against an int.
+
+    json only recognises a real float, though, and np.float32 is not one, so
+    for a non-finite numpy scalar the wrapper is what has to go. Finite keys
+    are handed over untouched, numpy or not.
+    """
+    if not isinstance(key, np.generic):
+        return key
+    value = key.item()
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return value
+    return key
 
 
 def _sanitize_nans(obj):
@@ -184,10 +216,26 @@ def _sanitize_nans(obj):
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
     if isinstance(obj, dict):
-        return {k: _sanitize_nans(v) for k, v in obj.items()}
+        return {_sanitize_nan_key(k): _sanitize_nans(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_sanitize_nans(v) for v in obj]
     return obj
+
+
+# The message json raises for a NaN or an Inf under allow_nan=False. The C and
+# the pure-Python encoders word it identically up to a trailing ": <repr>".
+_NON_FINITE_FLOAT_ERROR = "Out of range float values are not JSON compliant"
+
+
+def _is_non_finite_float_error(error):
+    """Whether ``error`` is json reporting a non-finite float, and not something else.
+
+    ``JSONEncoder`` also raises ``ValueError`` for a circular reference, and a
+    circular payload handed to ``_sanitize_nans`` recurses until the
+    interpreter gives up -- turning a clear "Circular reference detected" into
+    a ``RecursionError``. Only the non-finite report is worth a retry.
+    """
+    return str(error).startswith(_NON_FINITE_FLOAT_ERROR)
 
 
 def _is_missing_value(value):
@@ -210,10 +258,83 @@ class NanSafeEncoder(json.JSONEncoder):
 
     Standard JSON does not support NaN/Inf. This encoder handles them
     automatically so callers don't need manual nan2none() preprocessing.
+
+    ``_sanitize_nans`` rebuilds the whole payload in pure Python, so it runs
+    only once the C encoder has proven it is needed. ``allow_nan=False`` is
+    what makes that proof free: it turns a non-finite float into a
+    ``ValueError`` raised at the first offending value instead of a ``NaN``
+    token buried somewhere in the output. A clean payload therefore pays
+    nothing for the check, and -- unlike searching the encoded output for the
+    token -- a *string* containing "NaN" cannot trigger the slow path, because
+    only a real non-finite float can raise.
+
+    ``encode()`` is deliberately not overridden. ``JSONEncoder.encode`` calls
+    ``self.iterencode`` internally, so overriding both sanitized every payload
+    twice before the C encoder ever saw it.
+
+    Recovering from that ``ValueError`` means re-encoding from the start, which
+    is free on the ``json.dumps`` path and wrong on the other two, so the fast
+    path is taken only when both of these hold:
+
+    * ``_one_shot`` is set -- that is, ``json.dumps``, which joins the chunks
+      into a single string on return regardless. ``json.dump`` streams instead,
+      and restarting there would mean either buffering the whole payload, which
+      costs the bounded memory that is the point of streaming, or resuming
+      after the caller had already written part of the output.
+    * no caller-supplied ``default()`` hook is in play, since a restart would
+      hand every object the first attempt reached to the hook a second time.
+
+    Both excluded cases sanitize up front instead: one pass, same output, and
+    ``json.dump`` keeps streaming lazily.
     """
 
-    def encode(self, o):
-        return super().encode(_sanitize_nans(o))
+    def __init__(self, **kwargs):
+        self._requested_allow_nan = kwargs.get("allow_nan", True)
+        kwargs["allow_nan"] = False
+        super().__init__(**kwargs)
+
+    def _has_custom_default(self):
+        """Whether ``default()`` is json's own, or a hook someone supplied.
+
+        A subclass overrides the method; ``json.dumps(default=...)`` lands on
+        the instance instead, so both spellings have to be checked.
+        """
+        subclassed = type(self).default is not json.JSONEncoder.default
+        return subclassed or "default" in vars(self)
+
+    def _iterencode_sanitized(self, o, _one_shot):
+        """Encode a sanitized payload under the ``allow_nan`` the caller asked for.
+
+        ``allow_nan=False`` is this encoder's detector, not a setting anyone
+        requested, and the sanitized payload must not be judged by it: every
+        non-finite *value* is None by now, but a non-finite *key* is still a
+        float, and json is the one that turns it into "NaN", "Infinity" or
+        "-Infinity". Restoring the caller's value is therefore what makes the
+        two passes add up to what a single ``allow_nan``-honouring pass over
+        the sanitized payload would have emitted.
+        """
+        encoder = self
+        if self._requested_allow_nan:
+            encoder = copy.copy(self)
+            encoder.allow_nan = True
+        return json.JSONEncoder.iterencode(
+            encoder, _sanitize_nans(o), _one_shot=_one_shot
+        )
 
     def iterencode(self, o, _one_shot=False):
-        return super().iterencode(_sanitize_nans(o), _one_shot=_one_shot)
+        if not _one_shot or self._has_custom_default():
+            return self._iterencode_sanitized(o, _one_shot)
+        try:
+            # Materialized so a non-finite value raises here, where the retry
+            # can still start from the beginning. json.dumps is about to join
+            # these chunks anyway, so this holds nothing new.
+            return iter(list(json.JSONEncoder.iterencode(self, o, _one_shot=True)))
+        except ValueError as error:
+            if not _is_non_finite_float_error(error):
+                raise
+        except TypeError:
+            # A numpy scalar: json cannot serialize one, but _sanitize_nans
+            # coerces it via .item(). With no custom default() hook in play,
+            # every TypeError arriving here is json's own.
+            pass
+        return self._iterencode_sanitized(o, True)

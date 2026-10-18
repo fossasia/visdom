@@ -36,6 +36,21 @@ class VisdomHTTPTestCase(tornado.testing.AsyncHTTPTestCase):
         super().setUp()
 
     def tearDown(self):
+        """Release what the application owns, then the loop, then the files.
+
+        The order is the point. Every ``Application`` builds a storage worker
+        and can arm two periodic callbacks; left running they outlive the test,
+        so a whole file's worth of them piles up threads and timers, and a
+        worker still holding a queued write would write into ``env_path``
+        after the tree below had been removed. Draining first is what keeps
+        each test's cleanup identical and self-contained rather than something
+        individual test classes remember to do.
+        """
+        app = getattr(self, "_app", None)
+        if app is not None:
+            app.server_state.stop_socket_monitor()
+            app.server_state.stop_autosave()
+            app.server_state.storage_executor.shutdown(wait=True)
         super().tearDown()
         shutil.rmtree(self.env_path, ignore_errors=True)
 

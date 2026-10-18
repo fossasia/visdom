@@ -67,6 +67,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
+    WEBSOCKET_PING_INTERVAL,
 )
 
 # Template only -- never mutate it. ``__init__`` copies it per instance because
@@ -115,6 +116,10 @@ class Application(tornado.web.Application):
         self.wrap_socket = use_frontend_client_polling
 
         settings = dict(tornado_settings)
+        # Polling wrappers are reaped by ``ServerState`` instead; this reaches
+        # only real websockets. The pong deadline is left at tornado's default,
+        # which is the interval itself.
+        settings["websocket_ping_interval"] = WEBSOCKET_PING_INTERVAL
 
         if user_credential:
             self.login_enabled = True

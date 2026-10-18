@@ -10,6 +10,7 @@ import TextPane from './panes/TextPane';
 
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
+const PANE_TITLE_BAR_HEIGHT = 15; // pixels, matches .bar in style.css
 const DEFAULT_LAYOUT = 'current';
 const PANES = {
   image: ImagePane,
@@ -54,6 +55,7 @@ export {
   MARGIN,
   MODAL_STYLE,
   PANE_SIZE,
+  PANE_TITLE_BAR_HEIGHT,
   PANES,
   POLLING_INTERVAL,
   ROW_HEIGHT,

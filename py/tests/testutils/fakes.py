@@ -101,6 +101,9 @@ class FakeHandler:
         # Envs with a delete on its way to disk, as ``ServerState`` tracks
         # them; readers that resume after yielding the loop consult it.
         self.deleting_envs = {}
+        # Watches those readers hold while they are away, so a delete that is
+        # over before they resume is still reported to them.
+        self.env_delete_watches = {}
 
         self.written = []
         self.status = None
@@ -158,6 +161,7 @@ class SpyStore(JSONStore):
         self.calls = {
             "list_envs": 0,
             "load_env": [],
+            "load_experiment": [],
             "save_env": [],
             "save_envs": [],
             "save_layouts": [],
@@ -183,6 +187,10 @@ class SpyStore(JSONStore):
     def load_env(self, eid):
         self._record("load_env", eid)
         return super().load_env(eid)
+
+    def load_experiment(self, eid):
+        self._record("load_experiment", eid)
+        return super().load_experiment(eid)
 
     def save_env(self, eid, env_data):
         self._record("save_env", eid)

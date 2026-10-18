@@ -17,6 +17,7 @@ TODOs, and a natural future home for the data_model classes.
 """
 
 import logging
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -109,6 +110,10 @@ class StateAccessorsMixin:
     def deleting_envs(self):
         return self.server_state.deleting_envs
 
+    @property
+    def env_delete_watches(self):
+        return self.server_state.env_delete_watches
+
     def mark_dirty(self, eid):
         """Mark an environment for persistence through the shared state."""
         return self.server_state.mark_dirty(eid)
@@ -175,6 +180,12 @@ class ServerState:
         # back into ``state`` when it resumes, or the deleted env is listed
         # again for as long as the server runs.
         self.deleting_envs = {}
+        # Watches held by requests that are off the loop with an env in mind,
+        # keyed by that env. ``deleting_envs`` is dropped as soon as the delete
+        # lands, so a request that resumes after it would see no trace of it;
+        # these are told as the delete starts and keep saying so until their
+        # holder is done.
+        self.env_delete_watches = {}
         self.autosave = None
         # Disk work is handed to one worker thread rather than run on the loop.
         # A single worker keeps the writes serialized, so two saves of the same
@@ -183,6 +194,14 @@ class ServerState:
             max_workers=1, thread_name_prefix="visdom-storage"
         )
         self._storage_shut_down = False
+        # ``shutdown_storage`` has two callers -- the graceful stop and the
+        # ``atexit`` hook -- and nothing orders them: a server embedded in a
+        # thread runs the first off the main thread, where the second always
+        # runs. Only the flag above keeps the second pass from saving again,
+        # and it is not set until the final save has returned, so without this
+        # both could be inside ``save_all`` at once, writing the same files
+        # from two threads.
+        self._storage_shutdown_lock = threading.Lock()
         # Set by the application once the handlers it drives can be imported;
         # a queue built here would need experiments_handler, which needs the
         # handlers that need this module.
@@ -332,15 +351,31 @@ class ServerState:
         pass must not re-run ``save_all`` -- the executor is already gone, so
         anything written after the first pass could only be state the process
         never served.
+
+        Only a final save that succeeded counts as shut down. If ``save_all``
+        raises, the ``atexit`` call tries it again instead of returning early
+        and leaving the changed environments in memory only. Stopping the timer
+        and the executor again on that retry is harmless.
+
+        That retry is also why the flag alone cannot be the whole guard: it is
+        not set until the save has returned, so two callers arriving at once
+        would both find it clear and write the same environment files from two
+        threads. The lock serializes them -- the second waits, then finds the
+        flag set and returns, which also makes it a real barrier rather than a
+        hint, so ``atexit`` never outruns a save still running on the loop. A
+        caller unwound out of the save, a signal handler raising ``SystemExit``
+        mid-write being the usual one, releases the lock on the way out, so the
+        retry can still take it.
         """
-        if self._storage_shut_down:
-            return
-        self._storage_shut_down = True
-        self.stop_autosave()
-        self.storage_executor.shutdown(wait=True)
-        self.storage.save_all(self.state)
-        self.dirty_envs.clear()
-        self.saving_envs.clear()
+        with self._storage_shutdown_lock:
+            if self._storage_shut_down:
+                return
+            self.stop_autosave()
+            self.storage_executor.shutdown(wait=True)
+            self.storage.save_all(self.state)
+            self._storage_shut_down = True
+            self.dirty_envs.clear()
+            self.saving_envs.clear()
 
     # ----- polling socket monitor ----- #
 
