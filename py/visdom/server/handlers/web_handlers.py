@@ -2218,7 +2218,7 @@ class ActivityHandler(InternalHandler):
         """
         self._manager = getattr(app, "workspace_env_manager", None)
 
-    def gather(self):
+    def gather(self, stored=None):
         """Every workspace this instance can say anything about.
 
         Split out from get so the metrics endpoint reports the same numbers
@@ -2237,7 +2237,9 @@ class ActivityHandler(InternalHandler):
             # workspaces this instance does not serve. Reporting them is harmless
             # and it is what lets a caller see a workspace nobody has touched since
             # the last restart, which the socket pass alone cannot show.
-            for workspace_id, stored in manager.stored_workspaces().items():
+            if stored is None:
+                stored = manager.stored_workspaces()
+            for workspace_id, on_disk in stored.items():
                 entry = workspaces.setdefault(
                     workspace_id,
                     {
@@ -2258,14 +2260,19 @@ class ActivityHandler(InternalHandler):
                         "active_minutes_mask": 0,
                     },
                 )
-                entry["bytes"] = stored["bytes"]
+                entry["bytes"] = on_disk["bytes"]
                 if not entry.get("last_active_at"):
-                    entry["last_active_at"] = stored["last_active_at"]
+                    entry["last_active_at"] = on_disk["last_active_at"]
 
         return list(workspaces.values())
 
-    def get(self):
-        self.write({"workspaces": self.gather()})
+    async def stored(self):
+        if self._manager is None:
+            return {}
+        return await self._manager.stored_workspaces_off_loop()
+
+    async def get(self):
+        self.write({"workspaces": self.gather(await self.stored())})
 
 
 class MetricsHandler(ActivityHandler):
@@ -2280,8 +2287,9 @@ class MetricsHandler(ActivityHandler):
     def allowed(self):
         return internal.has_metrics_token(self.request) or super().allowed()
 
-    def get(self):
-        samples = [metrics.sample_from_activity(entry) for entry in self.gather()]
+    async def get(self):
+        stored = await self.stored()
+        samples = [metrics.sample_from_activity(entry) for entry in self.gather(stored)]
         # The version parameter is part of the format's content type. Scrapers
         # accept a bare text/plain, but tools that inspect the header expect it.
         self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -2389,9 +2397,9 @@ class RetireHandler(InternalHandler):
                 older_than_days,
                 dry_run=bool(payload.get("dry_run", True)),
             )
-        except ValueError as exc:
+        except ValueError:
             self.set_status(400)
-            self.write({"error": str(exc)})
+            self.write({"error": "invalid workspace id"})
             return
         self.write(answer)
 

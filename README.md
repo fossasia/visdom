@@ -217,7 +217,7 @@ Requires `-enable_login`.
 11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
 12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
 
-The internal port only answers signed requests. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
+The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
 
 - `VISDOM_INTERNAL_READ_KEYS`: keys that may read `/_activity` and `/_metrics`.
 - `VISDOM_INTERNAL_ADMIN_KEYS`: keys for endpoints that change or remove data.
@@ -225,7 +225,7 @@ The internal port only answers signed requests. Set the keys in the environment,
 
 Behind a proxy that spreads workspaces over several servers, set `VISDOM_PROXY_URL` and each server asks the proxy every `VISDOM_OWNERSHIP_INTERVAL` seconds (30) which server owns the workspaces it has viewers for, and closes the viewers of any that moved, so they reconnect to the new one.
 
-A signed request sends `X-Visdom-Timestamp` (Unix seconds) and `X-Visdom-Signature`, the hex HMAC-SHA256 of the method, the path with its query, the timestamp and the hex SHA-256 of the body, joined by newlines. A signature older or newer than 60 seconds is refused. With no key set, every request is refused. `visdom.server.internal.signed_headers` builds the headers.
+A signed request sends `X-Visdom-Timestamp` (Unix seconds) and `X-Visdom-Signature`, the hex HMAC-SHA256 of the method, the path with its query, the timestamp and the hex SHA-256 of the body, joined by newlines. A signature older or newer than 60 seconds is refused. With no key set, every signed request is refused, and `/_metrics` answers only a metrics token. `visdom.server.internal.signed_headers` builds the headers.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
