@@ -1883,7 +1883,9 @@ class Visdom(object):
             svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
-        svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
+        # The tag name may be followed by any whitespace (Inkscape puts each
+        # attribute on its own line) or by ">" when the tag has no attributes.
+        svg = re.search(r"<svg[\s>].*</svg>", svgstr, re.DOTALL)
         assert svg is not None, "could not parse SVG string"
         return self.text(text=svg.group(0), win=win, env=env, opts=opts)
 
