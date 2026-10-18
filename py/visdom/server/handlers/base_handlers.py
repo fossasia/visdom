@@ -96,7 +96,7 @@ class WorkspaceScopedMixin:
             return self.workspace_manager.resolve(api_key, workspace_slug)
         if session_token:
             return self.workspace_manager.resolve_session(session_token, workspace_slug)
-        return None
+        raise WorkspaceAuthError(401, "Sign in to use this workspace.")
 
     def bind_workspace(self, workspace_id, slug=None):
         if self.workspace_env_manager is None:
