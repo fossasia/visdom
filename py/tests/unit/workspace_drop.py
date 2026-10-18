@@ -134,6 +134,17 @@ class TestDrop(unittest.TestCase):
         self.assertIsNotNone(freed)
         self.assertFalse(os.path.exists(self.directory))
 
+    def test_a_workspace_loaded_under_another_spelling_is_still_forgotten(self):
+        space = self.manager.space(self.workspace.upper(), slug="alpha")
+        space.dirty_envs["main"] += 1
+
+        answer, _freed = self.drop()
+
+        self.assertTrue(answer["loaded"])
+        self.assertIsNone(self.manager.loaded_space(self.workspace.upper()))
+        self.app.flush_dirty()
+        self.assertFalse(os.path.exists(self.directory))
+
 
 if __name__ == "__main__":
     unittest.main()

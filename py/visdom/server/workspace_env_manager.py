@@ -221,6 +221,7 @@ class WorkspaceEnvManager:
         None returns the server's own (default) state."""
         if workspace_id is None:
             return self._states[None]
+        workspace_id = canonical_id(workspace_id)
         with self._lock:
             state = self._states.get(workspace_id)
             if state is None:
@@ -315,7 +316,7 @@ class WorkspaceEnvManager:
         been dormant, so a tidy-up would leave a file behind everywhere it went.
         """
         with self._lock:
-            return self._states.get(workspace_id)
+            return self._states.get(canonical_id(workspace_id))
 
     def workspace_storage(self, workspace_id):
         """A store over one workspace's directory, without building its state.
@@ -351,7 +352,7 @@ class WorkspaceEnvManager:
         if workspace_id is None:
             return None
         with self._lock:
-            state = self._states.pop(workspace_id, None)
+            state = self._states.pop(canonical_id(workspace_id), None)
         with self._disk_lock:
             self._disk_scanned_at = None
         return state
@@ -395,7 +396,7 @@ class WorkspaceEnvManager:
         return sorted(expired, key=lambda item: item["last_written"])
 
     def _workspace_path(self, workspace_id):
-        name = str(workspace_id)
+        name = canonical_id(workspace_id)
         root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
         path = os.path.join(root, name)
         if (
@@ -444,6 +445,15 @@ class WorkspaceEnvManager:
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def canonical_id(workspace_id):
+    if workspace_id is None:
+        return None
+    try:
+        return str(uuid.UUID(str(workspace_id)))
+    except ValueError:
+        return str(workspace_id)
 
 
 def remove_directory(path):

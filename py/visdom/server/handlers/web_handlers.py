@@ -2435,9 +2435,9 @@ class DropHandler(InternalHandler):
 
         try:
             answer, pending = drop(payload.get("workspace_id"))
-        except ValueError as exc:
+        except ValueError:
             self.set_status(400)
-            self.write({"error": str(exc)})
+            self.write({"error": "workspace_id is not a workspace id"})
             return
 
         freed = await asyncio.wrap_future(pending)
