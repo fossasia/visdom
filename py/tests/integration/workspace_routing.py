@@ -118,11 +118,12 @@ class TestRequestsFindTheirWorkspace(WorkspaceRoutingCase):
         self.assertEqual(self.gateway.sessions, [("browser", "alpha")])
         self.assertEqual(len(windows(self.space("ws-a"))), 1)
 
-    def test_a_workspace_without_a_credential_is_not_bound(self):
-        self.write({"X-Visdom-Workspace": "alpha"})
+    def test_a_workspace_without_a_credential_is_refused(self):
+        response = self.write({"X-Visdom-Workspace": "alpha"})
 
+        self.assertEqual(response.code, 401)
         self.assertEqual(self._app.workspace_env_manager.workspace_spaces(), [])
-        self.assertEqual(len(windows(self._app.server_state)), 1)
+        self.assertEqual(windows(self._app.server_state), {})
 
 
 class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
@@ -266,6 +267,15 @@ def test_a_refused_socket_is_closed_as_a_policy_violation(gated_app):
 
     close.assert_called_once_with(WS_POLICY_VIOLATION, "Not a member of this workspace")
     assert list(sub.messages) == []
+    assert gated_app.subs == {}
+
+
+def test_a_socket_without_a_credential_is_refused(gated_app):
+    sub = keyed_socket(SocketWrapper, gated_app, {"X-Visdom-Workspace": "alpha"})
+    with mock.patch.object(SocketWrapper, "close") as close:
+        sub.open()
+
+    close.assert_called_once_with(WS_POLICY_VIOLATION, "Sign in to use this workspace.")
     assert gated_app.subs == {}
 
 
