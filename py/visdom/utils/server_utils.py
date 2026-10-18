@@ -25,6 +25,7 @@ import os
 import errno
 from collections import OrderedDict
 
+import tornado.escape
 import tornado.ioloop
 
 MAX_ENV_NAME_LEN = 25
@@ -866,9 +867,9 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     # Every base trace was validated above, so the rename
                     # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        destWidJson["content"]["data"][dataIdx][
-                            "name"
-                        ] = "{}_{}".format(eidNums[eid], data["name"])
+                        destWidJson["content"]["data"][dataIdx]["name"] = (
+                            "{}_{}".format(eidNums[eid], data["name"])
+                        )
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
@@ -936,9 +937,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
@@ -1065,6 +1064,16 @@ def broadcast(self, msg, eid):
         record_workspace_broadcast(self, sent, msg)
 
 
+def _sent_size(msg):
+    if isinstance(msg, bytes):
+        return len(msg)
+    if isinstance(msg, dict):
+        msg = tornado.escape.json_encode(msg)
+    if isinstance(msg, str):
+        return len(msg.encode("utf-8"))
+    return 0
+
+
 def record_workspace_broadcast(handler, sent, msg):
     """Attribute a push to the workspace whose state the handler is bound to.
 
@@ -1077,7 +1086,7 @@ def record_workspace_broadcast(handler, sent, msg):
     if record is None:
         return
     try:
-        size = len(msg) if isinstance(msg, (str, bytes)) else 0
+        size = _sent_size(msg)
         record(sent, size * sent)
     except Exception:
         pass
