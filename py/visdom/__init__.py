@@ -35,6 +35,7 @@ import logging
 import warnings
 import time
 import errno
+from collections import Counter
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -130,6 +131,20 @@ logger = logging.getLogger(__name__)
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
+
+# Endpoints that change what the server holds, so replay_log() can rebuild it.
+# Reads (search, compare, get_tags, ...) stay out: replaying one only asks
+# the question again.
+LOGGED_ENDPOINTS = frozenset(
+    {
+        "events",
+        "update",
+        "experiments/log",
+        "experiments/tags",
+        "experiments/hparams",
+        "experiments/hparams/update",
+    }
+)
 
 
 def get_rand_id():
@@ -767,6 +782,27 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _is_log_scalar(value):
+    """Whether a JSON value from a replay log is a single value, not a list or object."""
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
+def _unverified(eid):
+    return RuntimeError(
+        "could not read the stored experiment for {!r}; replay stopped before "
+        "sending anything so no metric is recorded twice".format(eid)
+    )
+
+
+def _replay_key(key, value, step):
+    """Match key for a metric; keeps ``True`` apart from ``1`` (equal in Python)."""
+
+    def tag(v):
+        return (bool, v) if isinstance(v, bool) else v
+
+    return key, tag(value), tag(step)
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1145,19 +1181,22 @@ class Visdom(object):
 
     # Utils
     def _log(self, msg, endpoint):
-        if self.log_to_filename is not None:
-            if endpoint in ["events", "update"]:
-                with open(self.log_to_filename, "a+") as log_file:
-                    log_file.write(
-                        json.dumps(
-                            [
-                                endpoint,
-                                msg,
-                            ],
-                            cls=NanSafeEncoder,
-                        )
-                        + "\n"
-                    )
+        if self.log_to_filename is None or endpoint not in LOGGED_ENDPOINTS:
+            return
+        # get_tags shares its endpoint with set_tags; only the write is kept.
+        if endpoint == "experiments/tags" and msg.get("action") == "get":
+            return
+        with open(self.log_to_filename, "a+") as log_file:
+            log_file.write(
+                json.dumps(
+                    [
+                        endpoint,
+                        msg,
+                    ],
+                    cls=NanSafeEncoder,
+                )
+                + "\n"
+            )
 
     def _handle_post(self, url, data=None):
         """
@@ -1790,12 +1829,106 @@ class Visdom(object):
         """
         This function takes the contents of a visdom log and replays them to
         the current server to restore the state or handle any missing entries.
+
+        Experiment metrics are appended rather than replaced, so a metric the
+        server already holds is skipped instead of being recorded twice.
+        Replaying a log kept next to an online run, or the same log again,
+        leaves the metric history as it was. Metrics are matched by key, value
+        and step, so a stored observation identical to a logged one is taken
+        to be that logged write.
         """
+        from visdom.utils.server_utils import extract_eid
+
         with open(log_filename) as f:
-            log_entries = f.readlines()
-        for entry in log_entries:
-            endpoint, msg = json.loads(entry)
+            entries = [json.loads(line) for line in f]
+        # Check every experiment before sending anything, so a lookup that
+        # fails stops the replay with nothing half sent.
+        stored = {}
+        for endpoint, msg in entries:
+            if endpoint == "experiments/log":
+                eid = extract_eid(msg)
+                if eid not in stored:
+                    stored[eid] = self._stored_experiment(eid)
+        for endpoint, msg in entries:
+            if endpoint == "experiments/log":
+                msg = self._unreplayed(msg, stored)
+                if msg is None:
+                    continue
             self._send(msg, endpoint, from_log=True)
+
+    def _unreplayed(self, msg, stored):
+        """The part of a logged experiment call the server does not hold yet.
+
+        ``stored`` holds, per env, what the server held before the replay
+        began. Each logged metric uses up one matching stored entry, so a value
+        that really was logged twice is still sent the second time.
+        """
+        # Keyed by the id the server stores, so aliases share one count.
+        from visdom.utils.server_utils import extract_eid
+
+        eid = extract_eid(msg)
+        metrics, finished = stored[eid]
+        if finished:
+            # The server refuses any further log, metric or finish for it.
+            return None
+        if msg.get("action") != "metrics":
+            return msg
+        logged_metrics, step = msg.get("metrics"), msg.get("step")
+        if not isinstance(logged_metrics, dict) or not _is_log_scalar(step):
+            logger.warning("replay_log: skipping a malformed metrics call for %r", eid)
+            return None
+        missing = {}
+        for key, value in logged_metrics.items():
+            if not _is_log_scalar(value):
+                logger.warning(
+                    "replay_log: skipping metric %r for %r, %r is not a single value",
+                    key,
+                    eid,
+                    value,
+                )
+                continue
+            logged = _replay_key(key, value, step)
+            if metrics[logged] > 0:
+                metrics[logged] -= 1
+            else:
+                missing[key] = value
+        return dict(msg, metrics=missing) if missing else None
+
+    def _stored_experiment(self, eid):
+        """``(Counter of (key, value, step), finished)`` for ``eid`` on the server.
+
+        ``eid`` is already the id the server stores.
+        """
+        if self.offline:
+            return Counter(), False
+        reply = self.search_experiments(
+            query="env_id = " + json.dumps(eid, ensure_ascii=False)
+        )
+        # Anything short of a clear answer is refused: guessing "nothing
+        # stored" would resend, and so duplicate, every metric.
+        found = reply.get("experiments") if isinstance(reply, dict) else None
+        if not isinstance(found, list) or len(found) > 1:
+            raise _unverified(eid)
+        if not found:
+            return Counter(), False
+        experiment = found[0]
+        stored = experiment.get("metrics") if isinstance(experiment, dict) else None
+        if (
+            not isinstance(stored, list)
+            or not isinstance(experiment.get("status"), str)
+            or experiment.get("env_id", eid) != eid
+            or not all(
+                isinstance(m, dict) and {"key", "value", "step"} <= m.keys()
+                for m in stored
+            )
+        ):
+            raise _unverified(eid)
+        metrics = Counter(
+            _replay_key(m["key"], m["value"], m["step"])
+            for m in stored
+            if _is_log_scalar(m["value"]) and _is_log_scalar(m["step"])
+        )
+        return metrics, experiment["status"] != "running"
 
     # Content
 
