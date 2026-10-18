@@ -6,6 +6,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import asyncio
+import threading
 import types
 from unittest import mock
 
@@ -104,13 +106,17 @@ def test_a_remembered_refusal_runs_out(gateway):
 
 
 def test_an_unreachable_gateway_is_a_503(gateway):
-    gateway.side_effect = requests.ConnectionError("refused")
+    gateway.side_effect = requests.ConnectionError(
+        "HTTPConnectionPool(host='gateway', port=8085): refused"
+    )
     manager = WorkspaceManager(gateway_url="http://gateway:8085")
 
     with pytest.raises(WorkspaceAuthError) as refused:
         manager.resolve("key-a", "alpha")
 
     assert refused.value.status_code == 503
+    assert "gateway" not in refused.value.message
+    assert "8085" not in refused.value.message
 
 
 def unreadable():
@@ -124,6 +130,12 @@ def unreadable():
         answer(200, {"role": "member"}),
         answer(200, {"workspace_id": "ws-a"}),
         answer(200, ["ws-a", "member"]),
+        answer(200, {"workspace_id": None, "role": "member"}),
+        answer(200, {"workspace_id": ["ws-a"], "role": "member"}),
+        answer(200, {"workspace_id": "ws-a", "role": None}),
+        answer(200, {"workspace_id": "ws-a", "role": ["viewer"]}),
+        answer(200, {"workspace_id": "", "role": "member"}),
+        answer(200, {"workspace_id": 42, "role": "member"}),
     ],
 )
 def test_an_unreadable_answer_is_a_remembered_502(gateway, reply):
@@ -168,3 +180,34 @@ def test_the_caches_stay_within_their_limits(gateway, monkeypatch):
     assert len(manager._cache) <= 5
     assert len(manager._errors) <= 5
     assert any("key-19" in key for key in manager._cache)
+
+
+def test_a_miss_is_resolved_off_the_calling_thread(gateway):
+    seen = []
+
+    def post(*args, **kwargs):
+        seen.append(threading.current_thread())
+        return answer(200, {"workspace_id": "ws-a", "role": "member"})
+
+    gateway.side_effect = post
+    manager = WorkspaceManager(gateway_url="http://gateway:8085")
+
+    found = asyncio.run(manager.resolve_off_loop("resolve", "key-a", "alpha"))
+    again = asyncio.run(manager.resolve_off_loop("resolve", "key-a", "alpha"))
+
+    assert found == again == ("ws-a", "member")
+    assert seen and seen[0] is not threading.current_thread()
+    assert gateway.call_count == 1
+
+
+def test_a_remembered_refusal_is_raised_without_a_thread(gateway):
+    gateway.return_value = answer(403, {"detail": "Not a member"})
+    manager = WorkspaceManager(gateway_url="http://gateway:8085")
+    with pytest.raises(WorkspaceAuthError):
+        manager.resolve_session("token", "alpha")
+
+    with pytest.raises(WorkspaceAuthError) as refused:
+        asyncio.run(manager.resolve_off_loop("resolve_session", "token", "alpha"))
+
+    assert refused.value.status_code == 403
+    assert gateway.call_count == 1
