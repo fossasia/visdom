@@ -170,6 +170,16 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
                 self.assertNotIn("experiment", self.space("ws-a").state["main"])
                 self.assertEqual(windows(self.space("ws-a")), {})
 
+    def test_a_viewer_can_open_an_environment_named_like_a_write(self):
+        self.space("ws-a").state["save"] = {"jsons": {}, "reload": {}}
+
+        response = self.fetch(
+            "/env/save",
+            headers={"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-v"},
+        )
+
+        self.assertEqual(response.code, 200)
+
     def test_a_viewer_can_still_read(self):
         response = self.post_as("key-v", "/env_state", {})
 
