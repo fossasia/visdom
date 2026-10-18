@@ -81,6 +81,14 @@ class WorkspaceManager:
             workspace_slug,
         )
 
+    def forget(self, workspace_slug):
+        with self._lock:
+            self._cache = {
+                key: value
+                for key, value in self._cache.items()
+                if key[2] != workspace_slug
+            }
+
     async def resolve_off_loop(self, method, credential, workspace_slug):
         """Resolve as ``method`` would, without blocking the loop on a cache miss."""
         found = self._cached((_KINDS[method], credential, workspace_slug), time.time())
