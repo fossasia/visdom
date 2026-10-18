@@ -298,16 +298,44 @@ def test_images_accepts_a_list_of_pil_images(capture_send):
 
 
 def test_images_accepts_a_list_of_grayscale_pil_images(capture_send):
-    tiles = [Image.fromarray(np.full((6, 9), 40 * i, np.uint8)) for i in range(3)]
+    rng = np.random.RandomState(0)
+    gray = [rng.randint(0, 256, (6, 9), dtype=np.uint8) for _ in range(3)]
+    tiles = [Image.fromarray(g) for g in gray]
     shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
-    assert shown.shape == (6, 27, 3)
-    assert shown[0, ::9, 0].tolist() == [0, 40, 80]
+    expected = np.repeat(np.concatenate(gray, axis=1)[:, :, None], 3, axis=2)
+    np.testing.assert_array_equal(shown, expected)
 
 
 def test_image_heatmap_accepts_a_pil_image(capture_send):
-    img = Image.fromarray(np.zeros((6, 9, 3), np.uint8))
-    sent = capture_send(lambda v: v.image_heatmap(img, np.ones((6, 9))))
-    assert decode(sent)[1].shape == (6, 9, 3)
+    """The blend is the same as for the equivalent CxHxW array."""
+    rng = np.random.RandomState(0)
+    pixels = rng.randint(0, 256, (6, 9, 3), dtype=np.uint8)
+    heat = rng.rand(6, 9)
+    from_pil = capture_send(lambda v: v.image_heatmap(Image.fromarray(pixels), heat))
+    from_array = capture_send(
+        lambda v: v.image_heatmap(pixels.transpose(2, 0, 1), heat)
+    )
+    np.testing.assert_array_equal(decode(from_pil)[1], decode(from_array)[1])
+
+
+def test_image_keeps_a_float_pil_image_as_floats(capture_send):
+    """Mode F in [0, 1] is scaled like a float array, not truncated to black."""
+    values = np.random.RandomState(0).rand(6, 9).astype(np.float32)
+    shown = decode(capture_send(lambda v: v.image(Image.fromarray(values, mode="F"))))[
+        1
+    ]
+    expected = decode(capture_send(lambda v: v.image(values)))[1]
+    np.testing.assert_array_equal(shown, expected)
+    assert shown.max() > 200
+
+
+@pytest.mark.parametrize("mode", ["L", "RGB"])
+def test_image_keeps_a_colour_key_transparency(capture_send, mode):
+    img = Image.fromarray(np.zeros((6, 9, 3), np.uint8)).convert(mode)
+    img.info["transparency"] = 0 if mode == "L" else (0, 0, 0)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    assert shown.shape == (6, 9, 4)
+    assert not shown[..., 3].any()
 
 
 @pytest.mark.parametrize(

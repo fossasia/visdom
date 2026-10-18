@@ -561,7 +561,11 @@ except (ImportError, AttributeError):
 
 def _pil_to_chw(img, batch=False):
     """A PIL image as visdom's CxHxW (or HxW) array; PIL is always channels last."""
-    if img.mode not in ("L", "RGB", "RGBA"):
+    if img.mode == "F":
+        # Float pixels keep their values, so image() can scale them as floats.
+        arr = np.asarray(img, dtype=np.float32)
+        return arr[None] if batch else arr
+    if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
         alpha = "A" in img.getbands() or "transparency" in img.info
         img = img.convert("L" if img.mode == "1" else "RGBA" if alpha else "RGB")
     arr = np.asarray(img)
