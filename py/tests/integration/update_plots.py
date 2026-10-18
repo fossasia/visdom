@@ -168,6 +168,84 @@ class TestHeatmapMismatch(PlotUpdateTestCase):
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
 
+class TestHeatmapNancolorUpdates(PlotUpdateTestCase):
+    """``opts.nancolor`` adds a second, background heatmap trace -- the real
+    data trace (``showscale`` unset) plus a flat-color one (``showscale:
+    False``) -- which used to make ``len(idxs) == 1`` fail and fall through
+    to the trace-positional branch that only ever touches ``x``/``y``."""
+
+    def create_nancolor_heatmap(self, z=None, x=None, y=None):
+        z = [[1, 2], [3, 4]] if z is None else z
+        return self.create_window(
+            [
+                {
+                    "type": "heatmap",
+                    "z": [[0, 0], [0, 0]],
+                    "x": ["a", "b"] if x is None else x,
+                    "y": ["c", "d"] if y is None else y,
+                    "showscale": False,
+                    "colorscale": [[0, "gray"], [1, "gray"]],
+                },
+                {
+                    "type": "heatmap",
+                    "z": z,
+                    "x": ["a", "b"] if x is None else x,
+                    "y": ["c", "d"] if y is None else y,
+                },
+            ],
+            layout={"title": "hm"},
+        )
+
+    def update_nancolor_heatmap(self, win, z, update_dir, x=None, y=None):
+        bg_z = [[0] * len(z[0])] * len(z) if update_dir != "replace" else z
+        return self.update(
+            win,
+            [
+                {
+                    "type": "heatmap",
+                    "z": bg_z,
+                    "x": x,
+                    "y": y,
+                    "showscale": False,
+                    "colorscale": [[0, "gray"], [1, "gray"]],
+                },
+                {"type": "heatmap", "z": z, "x": x, "y": y},
+            ],
+            name=None,
+            updateDir=update_dir,
+            append=update_dir != "replace",
+        )
+
+    def data_z(self, win):
+        return self.traces(win)[1]["z"]
+
+    def test_append_row_updates_the_data_trace(self):
+        win = self.create_nancolor_heatmap()
+        self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        z = self.data_z(win)
+        self.assertEqual(len(z), 3)
+        self.assertEqual(z[2], [5, 6])
+
+    def test_append_row_extends_the_row_labels_once(self):
+        """Regression: falling through to the positional branch doubled the
+        labels instead of extending them once."""
+        win = self.create_nancolor_heatmap()
+        self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        self.assertEqual(self.traces(win)[1]["y"], ["c", "d", "e"])
+
+    def test_append_row_updates_the_background_trace_too(self):
+        win = self.create_nancolor_heatmap()
+        self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        bg_z = self.traces(win)[0]["z"]
+        self.assertEqual(len(bg_z), 3)
+        self.assertEqual(bg_z[2], [0, 0])
+
+    def test_replace_swaps_the_data_trace(self):
+        win = self.create_nancolor_heatmap()
+        self.update_nancolor_heatmap(win, [[9]], "replace", x=["only"], y=["one"])
+        self.assertEqual(self.data_z(win), [[9]])
+
+
 class TestTraceUpdates(PlotUpdateTestCase):
     """A ``name`` selects which traces the update applies to."""
 

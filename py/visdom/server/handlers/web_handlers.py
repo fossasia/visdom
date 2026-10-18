@@ -146,6 +146,94 @@ class UpdateHandler(BaseHandler):
         return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
 
     @staticmethod
+    def _validate_heatmap_update(plot, new_data, updateDir):
+        """Check one heatmap trace's update is consistent with its plot.
+
+        Returns ``(True, updateNames)`` if the update may proceed --
+        ``updateNames`` says whether the axis labels should be carried over
+        -- or ``(False, None)`` after logging why it was rejected.
+        """
+        if updateDir == "replace":
+            return True, False
+
+        dz = new_data["z"]
+        if updateDir in ("appendRow", "prependRow"):
+            checkdir = "y"
+            if len(plot["z"][0]) != len(dz[0]):
+                logging.error(
+                    "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
+                    % (len(plot["z"][0]), len(dz[0]))
+                )
+                return False, None
+        else:
+            checkdir = "x"
+            if len(plot["z"]) != len(dz):
+                logging.error(
+                    "ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')."
+                    % (len(plot["z"]), len(dz))
+                )
+                return False, None
+
+        if plot[checkdir] is not None and new_data[checkdir] is not None:
+            if any(label in plot[checkdir] for label in new_data[checkdir]):
+                logging.error(
+                    "ERROR: The new column names appear already in the plot. Please make sure to specify unique column names."
+                )
+                return False, None
+            return True, True
+        elif plot[checkdir] is not None:
+            logging.error(
+                "ERROR: The column names have been specified in plot, however the requested update does not specify column names."
+            )
+            return False, None
+        elif new_data[checkdir] is not None:
+            logging.error(
+                "ERROR: The column names have been specified for update, however the plot to update does not specify column names."
+            )
+            return False, None
+        return True, False
+
+    @staticmethod
+    def _apply_heatmap_update(plot, new_data, updateDir, updateNames, append):
+        """Apply one already-validated heatmap trace update in place."""
+        dz = new_data["z"]
+        if updateDir != "replace":
+            del new_data["z"]
+
+            if updateDir == "appendRow":
+                plot["z"] += dz
+                if updateNames:
+                    plot["y"] += new_data["y"]
+
+            elif updateDir == "prependRow":
+                plot["z"] = dz + plot["z"]
+                if updateNames:
+                    plot["y"] = new_data["y"] + plot["y"]
+
+            elif updateDir == "appendColumn":
+                for i, dzi in enumerate(dz):
+                    plot["z"][i] += dzi
+                if updateNames:
+                    plot["x"] += new_data["x"]
+
+            elif updateDir == "prependColumn":
+                for i, dzi in enumerate(dz):
+                    plot["z"][i] = dzi + plot["z"][i]
+                if updateNames:
+                    plot["x"] = new_data["x"] + plot["x"]
+
+        # update opts
+        # note: if we are appending, we do not want to modify the labels, as they have already been altered above
+        if append:
+            if "x" in new_data:
+                del new_data["x"]
+            if "y" in new_data:
+                del new_data["y"]
+        for k in new_data:
+            if new_data[k] is not None or not append:
+                plot[k] = new_data[k]
+
+    @staticmethod
     def window_args_are_noops(p, args):
         """Whether ``update_window`` would leave the pane exactly as it is.
 
@@ -552,93 +640,58 @@ class UpdateHandler(BaseHandler):
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
 
-        # add new heatmap data if plot has been deleted previously
+        # add new heatmap data if plot has been deleted previously. ``extend``,
+        # not ``append``: a nancolor heatmap carries a second background
+        # trace in new_data, which a plain append silently dropped, leaving
+        # only the grey background after a remove-then-append.
         if len(idxs) == 0 and new_data[0]["type"] == "heatmap":
-            pdata.append(new_data[0])
+            pdata.extend(new_data)
             return p
 
         # update heatmap
-        if len(idxs) == 1 and pdata[idxs[0]]["type"] == "heatmap":
-            plot = pdata[idxs[0]]
-            new_data = new_data[0]
-            dz = new_data["z"]
+        heatmap_idxs = [i for i in idxs if pdata[i]["type"] == "heatmap"]
+        if (
+            heatmap_idxs
+            and len(heatmap_idxs) == len(idxs)
+            and all(d.get("type") == "heatmap" for d in new_data)
+        ):
+            # opts.nancolor adds a second, background trace alongside the
+            # real data trace, so a plot/update pair can each be either one
+            # or two heatmap traces. Match them up by role -- the background
+            # trace is the one with showscale=False -- rather than assuming
+            # position or count line up, since an update can toggle nancolor
+            # on or off relative to how the plot was created.
+            is_background = lambda trace: trace.get("showscale") is False
+            data_plot_idx = next((i for i in idxs if not is_background(pdata[i])), None)
+            background_plot_idx = next(
+                (i for i in idxs if is_background(pdata[i])), None
+            )
+            data_new = next((d for d in new_data if not is_background(d)), None)
+            background_new = next((d for d in new_data if is_background(d)), None)
+
+            pairs = []
+            if data_plot_idx is not None and data_new is not None:
+                pairs.append((pdata[data_plot_idx], data_new))
+            if background_plot_idx is not None and background_new is not None:
+                pairs.append((pdata[background_plot_idx], background_new))
+
             updateDir = args["updateDir"]
-
-            # first check if operation is valid
-            if updateDir != "replace":
-                del new_data["z"]
-
-                if updateDir in ["appendRow", "prependRow"]:
-                    checkdir = "y"
-                    if len(plot["z"][0]) != len(dz[0]):
-                        logging.error(
-                            "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"][0]), len(dz[0]))
-                        )
-                        return p
-                else:
-                    checkdir = "x"
-                    if len(plot["z"]) != len(dz):
-                        logging.error(
-                            "ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"]), len(dz))
-                        )
-                        return p
-                updateNames = False
-                if plot[checkdir] is not None and new_data[checkdir] is not None:
-                    updateNames = True
-                    if plot[checkdir] is not None and any(
-                        label in plot[checkdir] for label in new_data[checkdir]
-                    ):
-                        logging.error(
-                            "ERROR: The new column names appear already in the plot. Please make sure to specify unique column names."
-                        )
-                        return p
-                elif plot[checkdir] is not None:
-                    logging.error(
-                        "ERROR: The column names have been specified in plot, however the requested update does not specify column names."
-                    )
+            # Validate every trace before mutating any of them, so a bad
+            # update aborts cleanly rather than leaving the data trace
+            # updated but the background trace (or vice versa) untouched.
+            validations = []
+            for plot, new_trace in pairs:
+                ok, updateNames = UpdateHandler._validate_heatmap_update(
+                    plot, new_trace, updateDir
+                )
+                if not ok:
                     return p
-                elif new_data[checkdir] is not None:
-                    logging.error(
-                        "ERROR: The column names have been specified for update, however the plot to update does not specify column names."
-                    )
-                    return p
+                validations.append(updateNames)
 
-            # append according to direction
-            if updateDir == "appendRow":
-                plot["z"] += dz
-                if updateNames:
-                    plot["y"] += new_data["y"]
-
-            elif updateDir == "prependRow":
-                plot["z"] = dz + plot["z"]
-                if updateNames:
-                    plot["y"] = new_data["y"] + plot["y"]
-
-            elif updateDir == "appendColumn":
-                for i, dzi in enumerate(dz):
-                    plot["z"][i] += dzi
-                if updateNames:
-                    plot["x"] += new_data["x"]
-
-            elif updateDir == "prependColumn":
-                for i, dzi in enumerate(dz):
-                    plot["z"][i] = dzi + plot["z"][i]
-                if updateNames:
-                    plot["x"] = new_data["x"] + plot["x"]
-
-            # update opts
-            # note: if we are appending, we do not want to modify the labels, as they have already been altered above
-            if append:
-                if "x" in new_data:
-                    del new_data["x"]
-                if "y" in new_data:
-                    del new_data["y"]
-            for k in new_data:
-                if new_data[k] is not None or not append:
-                    plot[k] = new_data[k]
-
+            for (plot, new_trace), updateNames in zip(pairs, validations):
+                UpdateHandler._apply_heatmap_update(
+                    plot, new_trace, updateDir, updateNames, append
+                )
             return p
 
         # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
