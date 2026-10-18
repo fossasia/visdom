@@ -559,8 +559,24 @@ except (ImportError, AttributeError):
     pass
 
 
+def _pil_to_numpy(img):
+    """Convert a PIL image to a CxHxW (or HxW for grayscale) numpy array,
+    the layout `image()`/`images()` expect. `P` (palette) images are
+    expanded to real colors first, since indices aren't pixel values."""
+    if img.mode == "P":
+        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+    arr = np.asarray(img)
+    if arr.ndim == 3:
+        arr = np.transpose(arr, (2, 0, 1))  # HxWxC -> CxHxW
+    return arr
+
+
 def _to_numpy(a):
+    if isinstance(a, Image.Image):
+        return _pil_to_numpy(a)
     if isinstance(a, list):
+        if a and all(isinstance(x, Image.Image) for x in a):
+            return np.stack([_pil_to_numpy(x) for x in a], 0)
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):

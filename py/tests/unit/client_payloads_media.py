@@ -282,6 +282,35 @@ def test_image_rejects_unsupported_shapes(offline_client, img, message):
         offline_client.image(img)
 
 
+@pytest.mark.parametrize(
+    "mode, expected_channels", [("RGB", 3), ("L", None), ("RGBA", 4)]
+)
+def test_image_accepts_a_pil_image(capture_send, mode, expected_channels):
+    """Regression: a PIL image has no .dtype, so it used to crash before
+    reaching the array-shape handling. PIL is always channels-last, so the
+    pixels decode straight back out with no transpose."""
+    img = Image.new(mode, (5, 4), color=0)
+    sent = capture_send(lambda v: v.image(img))
+    _, pixels = decode(sent)
+    assert pixels.shape[:2] == (4, 5)
+    if expected_channels is None:
+        assert pixels.ndim == 2
+    else:
+        assert pixels.shape[2] == expected_channels
+
+
+def test_image_accepts_a_palette_pil_image(capture_send):
+    """Regression: a 'P' mode image's raw array holds palette indices, not
+    colors, so it has to be expanded to RGB before being sent."""
+    img = Image.new("P", (5, 4))
+    img.putpalette([0, 0, 0] * 85 + [200, 100, 50])
+    img.putpixel((0, 0), 85)
+    sent = capture_send(lambda v: v.image(img))
+    _, pixels = decode(sent)
+    assert pixels.shape == (4, 5, 3)
+    assert pixels[0, 0].tolist() == [200, 100, 50]
+
+
 # ---------------------------------------------------------------- images ----
 
 
@@ -367,6 +396,16 @@ def test_images_promotes_a_grayscale_image_to_three_channels(capture_send):
     sent = capture_send(lambda v: v.images(np.zeros((4, 4), dtype=np.uint8)))
     _, pixels = decode(sent)
     assert pixels.shape == (4, 4, 3)
+
+
+def test_images_accepts_a_list_of_pil_images(capture_send):
+    """Regression: a list of PIL images used to stack to NxHxWxC, which
+    ``images()`` then misread as NxCxHxW — H and W landed in the channel
+    slot and raised 'Unsupported number of image channels'."""
+    img = Image.new("RGB", (4, 4), color=(10, 20, 30))
+    sent = capture_send(lambda v: v.images([img, img], nrow=2))
+    _, pixels = decode(sent)
+    assert pixels.shape == (4 + 4, (4 + 4) * 2, 3)
 
 
 # --------------------------------------------------------- image_heatmap ----
