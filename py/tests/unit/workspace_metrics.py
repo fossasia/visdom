@@ -123,6 +123,17 @@ class TestCounting(unittest.TestCase):
         self.assertEqual(activity["broadcasts"], 3)
         self.assertEqual(activity["broadcast_bytes"], 15)
 
+    def test_a_broadcast_counts_the_bytes_it_sent(self):
+        space = self.space("ws-a")
+        handler = types.SimpleNamespace(server_state=space, subs=space.subs)
+        space.subs["one"] = types.SimpleNamespace(
+            eid="main", write_message=lambda msg: None
+        )
+
+        broadcast(handler, "é", "main")
+
+        self.assertEqual(space.activity()["broadcast_bytes"], 2)
+
     def test_a_broadcast_nobody_is_watching_counts_nothing(self):
         space = self.space("ws-a")
         handler = types.SimpleNamespace(server_state=space, subs=space.subs)

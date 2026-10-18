@@ -109,3 +109,22 @@ def test_the_signature_matches_what_the_gateway_sends():
         )
         == "56bdd87730abd4c3a545707937679b3ad3cabc131adf186a219f737b698e3ecf"
     )
+
+
+@pytest.mark.parametrize("timestamp", ["9" * 310, "²", "1e9", " 1800000000", "-5"])
+def test_a_malformed_timestamp_is_refused(keys, timestamp):
+    headers = {"X-Visdom-Timestamp": timestamp, "X-Visdom-Signature": "ab"}
+
+    assert not internal.is_signed(request(headers), internal.READ, now=NOW)
+
+
+def test_a_signature_outside_ascii_is_refused(keys):
+    headers = {"X-Visdom-Timestamp": str(NOW), "X-Visdom-Signature": "é"}
+
+    assert not internal.is_signed(request(headers), internal.READ, now=NOW)
+
+
+def test_a_metrics_token_outside_ascii_is_refused(monkeypatch):
+    monkeypatch.setenv("VISDOM_METRICS_TOKENS", "scrape-me")
+
+    assert not internal.has_metrics_token(request({"Authorization": "Bearer é"}))
