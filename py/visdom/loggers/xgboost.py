@@ -81,6 +81,9 @@ class VisdomXGBLogger(TrainingCallback):
         # a new curve (None until before_training has seen a run).
         self._next_round = 0
         self._fresh = None
+        # Set by the autolog wrappers for a new top-level run; before_training
+        # opens new windows for it unless it continues the plotted curve.
+        self._new_windows = False
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -171,7 +174,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             callbacks = list(kwargs.get("callbacks") or [])
             if logger not in callbacks:
                 callbacks.append(logger)
@@ -200,7 +203,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             original_callbacks = self_est.callbacks
             callbacks = list(original_callbacks or [])
             if logger not in callbacks:
@@ -234,7 +237,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(self_est, *args, **kwargs)
@@ -260,7 +263,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(*args, **kwargs)
@@ -277,10 +280,16 @@ class VisdomXGBLogger(TrainingCallback):
         return rounds() if callable(rounds) else None
 
     def before_training(self, model):
-        # Only a model that picks up exactly where the plotted curve stopped
-        # continues it; any other run, pretrained or not, starts a new curve.
+        # A run continues the plotted curve when its model already holds as
+        # many rounds as were plotted, as with xgb_model= from the last run.
+        # Only the round count is compared, so an unrelated model with that
+        # many rounds is appended as well; any other run starts a new curve.
         start = self._rounds(model)
-        self._fresh = not start or start != self._next_round
+        continues = bool(start) and start == self._next_round
+        self._fresh = not continues
+        if self._new_windows and not continues:
+            self._wins = {}
+        self._new_windows = False
         return model
 
     def after_iteration(self, model, epoch, evals_log):
