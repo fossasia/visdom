@@ -76,6 +76,8 @@ class Visdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         proxies: Optional[Mapping[Text, Text]] = ...,
         offline: bool = ...,
         use_polling: bool = ...,
