@@ -2280,6 +2280,14 @@ class Visdom(object):
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
+
+            # Fix for PIL images crashing due to lack of .dtype attribute
+        if type(img).__name__ == 'Image' or hasattr(img, 'im'):
+            import numpy as np
+            img = np.array(img)
+            if img.ndim == 3:
+                img = img.transpose((2, 0, 1))
+
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
         or `HxW` tensor `img` that contains the image. The array values can be uint8 in
