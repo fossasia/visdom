@@ -81,6 +81,18 @@ class TestRetention(unittest.TestCase):
         self.assertTrue(self.settle(old))
         self.assertEqual(self.files(), ["yesterday.json"])
 
+    def test_a_long_environment_name_is_reported_by_its_real_id(self):
+        eid = "run-" + "x" * 300
+        path = os.path.join(self.directory, "hash_%s.json" % ("a" * 64))
+        with open(path, "w") as handle:
+            json.dump({"jsons": {}, "reload": {}, "name": eid}, handle)
+        when = time.time() - (30 * DAY)
+        os.utime(path, (when, when))
+
+        answer = self.app.retire_workspace(self.workspace, 7, dry_run=True)
+
+        self.assertEqual(answer["envs"], [eid])
+
     def test_main_is_kept_however_old_it_is(self):
         main = self.write_env("main", days_old=400)
 

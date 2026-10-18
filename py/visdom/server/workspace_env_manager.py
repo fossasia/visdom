@@ -22,13 +22,14 @@ local visdom behaves exactly as before.
 """
 
 import asyncio
+import json
 import os
 import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from visdom.data_model.json_store import JSONStore
+from visdom.data_model.json_store import HASHED_ENV_RE, JSONStore
 from visdom.server.server_state import ServerState
 from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
@@ -350,14 +351,14 @@ class WorkspaceEnvManager:
         for entry in entries:
             if not entry.is_file() or not entry.name.endswith(".json"):
                 continue
-            eid = entry.name[: -len(".json")]
-            if eid in keep:
-                continue
             try:
                 stat = entry.stat()
             except OSError:
                 continue
-            if stat.st_mtime < cutoff:
+            if stat.st_mtime >= cutoff:
+                continue
+            eid = _stored_eid(entry)
+            if eid is not None and eid not in keep:
                 expired.append(
                     {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
                 )
@@ -413,3 +414,17 @@ class WorkspaceEnvManager:
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def _stored_eid(entry):
+    stem = entry.name[: -len(".json")]
+    if not HASHED_ENV_RE.match(entry.name):
+        return stem
+    try:
+        with open(entry.path, "r", encoding="utf-8") as fn:
+            data = json.load(fn)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("name"), str):
+        return data["name"]
+    return stem

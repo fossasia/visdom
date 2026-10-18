@@ -2396,8 +2396,8 @@ class RetireHandler(InternalHandler):
                 older_than_days,
                 dry_run=bool(payload.get("dry_run", True)),
             )
-        except ValueError as exc:
+        except ValueError:
             self.set_status(400)
-            self.write({"error": str(exc)})
+            self.write({"error": "invalid workspace id"})
             return
         self.write(answer)
