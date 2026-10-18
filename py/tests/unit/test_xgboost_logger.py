@@ -321,10 +321,6 @@ class TestContinuationIsMatchedByRoundCount(unittest.TestCase):
         self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestContinuedTraining(unittest.TestCase):
     """Training on from xgb_model extends the curve instead of wiping it."""
 
@@ -401,3 +397,7 @@ class TestContinuedTraining(unittest.TestCase):
         self.assertEqual(
             rounds, [(0, None), (1, "append"), (0, "replace"), (1, "append")]
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
