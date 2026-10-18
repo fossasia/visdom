@@ -20,6 +20,7 @@ import hmac
 import json
 import jsonpatch
 import logging
+import math
 import os
 import uuid
 from collections import OrderedDict
@@ -2380,7 +2381,7 @@ class RetireHandler(InternalHandler):
             self.set_status(400)
             self.write({"error": "older_than_days must be a number"})
             return
-        if older_than_days <= 0:
+        if not math.isfinite(older_than_days) or older_than_days <= 0:
             self.set_status(400)
             self.write({"error": "older_than_days must be greater than zero"})
             return

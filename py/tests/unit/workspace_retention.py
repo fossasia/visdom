@@ -93,6 +93,19 @@ class TestRetention(unittest.TestCase):
 
         self.assertEqual(answer["envs"], [eid])
 
+    def test_an_env_with_unsaved_writes_is_kept(self):
+        path = self.write_env("january", days_old=30)
+        space = self.app.workspace_env_manager.space(self.workspace)
+        space.state["january"] = {"jsons": {}, "reload": {}}
+        space.dirty_envs["january"] += 1
+
+        answer = self.app.retire_workspace(self.workspace, 7, dry_run=False)
+
+        self.assertEqual(answer["envs"], [])
+        self.assertEqual(answer["removed"], 0)
+        self.assertIn("january", space.state)
+        self.assertTrue(os.path.exists(path))
+
     def test_main_is_kept_however_old_it_is(self):
         main = self.write_env("main", days_old=400)
 

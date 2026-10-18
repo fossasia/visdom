@@ -109,6 +109,8 @@ class TestTheInternalPort(InternalPortCase):
             {"older_than_days": 7},
             {"workspace_id": "ws-a", "older_than_days": "soon"},
             {"workspace_id": "ws-a", "older_than_days": 0},
+            {"workspace_id": "ws-a", "older_than_days": "nan"},
+            {"workspace_id": "ws-a", "older_than_days": "inf"},
             {"workspace_id": "../outside", "older_than_days": 7},
         ]:
             with self.subTest(body=body):
@@ -215,6 +217,9 @@ def test_the_server_serves_the_internal_endpoints_on_their_own_port(
             )
         )
         while not stops:
+            if serving.done():
+                serving.result()
+                raise AssertionError("the server stopped before it started")
             await asyncio.sleep(0.01)
         client = tornado.httpclient.AsyncHTTPClient()
         try:
