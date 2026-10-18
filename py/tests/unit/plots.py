@@ -639,6 +639,29 @@ def test_boxplot_2d_x_one_box_per_column(capture_send):
     assert len(sent["payload"]["data"]) == 2
 
 
+@pytest.mark.parametrize("values", [[[1.0, 2.0, 3.0]], np.array([[1.0, 2.0, 3.0]])])
+@pytest.mark.parametrize("legend", [None, ["train", "validation", "test"]])
+def test_boxplot_single_row_keeps_separate_columns(capture_send, values, legend):
+    opts = None if legend is None else {"legend": legend}
+    sent = capture_send(lambda v: v.boxplot(values, opts=opts))
+    traces = sent["payload"]["data"]
+    assert len(traces) == 3
+    assert [trace["y"] for trace in traces] == [[1.0], [2.0], [3.0]]
+    assert [trace["name"] for trace in traces] == (
+        legend if legend is not None else ["column 0", "column 1", "column 2"]
+    )
+    np.testing.assert_array_equal(values, [[1.0, 2.0, 3.0]])
+
+
+@pytest.mark.parametrize("values", [[1.0, 2.0], [[1.0], [2.0]]])
+def test_boxplot_single_series_keeps_all_samples(capture_send, values):
+    sent = capture_send(lambda v: v.boxplot(values, opts={"legend": ["train"]}))
+    traces = sent["payload"]["data"]
+    assert len(traces) == 1
+    assert traces[0]["y"] == [1.0, 2.0]
+    assert traces[0]["name"] == "train"
+
+
 def test_boxplot_3d_x_raises(offline_client):
     """3D X raises on the ndim check."""
     with pytest.raises(AssertionError):

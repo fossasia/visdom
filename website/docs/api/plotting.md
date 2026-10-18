@@ -268,6 +268,7 @@ vis.boxplot(X, win=None, env=None, opts=None)
 ```
 
 This function draws boxplots. It takes as input an `N` or an `NxM` tensor `X`.
+Each column is a separate boxplot, including when `X` contains only one row.
 
 ```python
 import numpy as np
@@ -276,6 +277,18 @@ vis.boxplot(
     X=np.random.randn(100, 3),
     opts=dict(legend=['Exp A', 'Exp B', 'Exp C'], title='Boxplots'),
 )
+
+# One observation in each of three separate series:
+vis.boxplot(
+    X=np.array([[1.0, 2.0, 3.0]]),
+    opts=dict(legend=['Exp A', 'Exp B', 'Exp C'], title='Single-observation boxplots'),
+)
+```
+
+To try two single-observation series against a running server:
+
+```bash
+python example/demo.py -run plot_special_boxplot -args "Single observations" 1
 ```
 
 **Supported opts:**
