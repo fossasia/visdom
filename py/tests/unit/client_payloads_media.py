@@ -329,10 +329,10 @@ def test_image_keeps_a_float_pil_image_as_floats(capture_send):
     assert shown.max() > 200
 
 
-@pytest.mark.parametrize("mode", ["L", "RGB"])
+@pytest.mark.parametrize("mode", ["1", "L", "RGB"])
 def test_image_keeps_a_colour_key_transparency(capture_send, mode):
     img = Image.fromarray(np.zeros((6, 9, 3), np.uint8)).convert(mode)
-    img.info["transparency"] = 0 if mode == "L" else (0, 0, 0)
+    img.info["transparency"] = (0, 0, 0) if mode == "RGB" else 0
     shown = decode(capture_send(lambda v: v.image(img)))[1]
     assert shown.shape == (6, 9, 4)
     assert not shown[..., 3].any()

@@ -567,7 +567,7 @@ def _pil_to_chw(img, batch=False):
         return arr[None] if batch else arr
     if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
         alpha = "A" in img.getbands() or "transparency" in img.info
-        img = img.convert("L" if img.mode == "1" else "RGBA" if alpha else "RGB")
+        img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
     arr = np.asarray(img)
     if arr.ndim == 2:
         return arr[None] if batch else arr
