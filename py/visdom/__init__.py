@@ -559,8 +559,23 @@ except (ImportError, AttributeError):
     pass
 
 
+def _pil_to_chw(img, batch=False):
+    """A PIL image as visdom's CxHxW (or HxW) array; PIL is always channels last."""
+    if img.mode not in ("L", "RGB", "RGBA"):
+        alpha = "A" in img.getbands() or "transparency" in img.info
+        img = img.convert("L" if img.mode == "1" else "RGBA" if alpha else "RGB")
+    arr = np.asarray(img)
+    if arr.ndim == 2:
+        return arr[None] if batch else arr
+    return arr.transpose(2, 0, 1)
+
+
 def _to_numpy(a):
+    if isinstance(a, Image.Image):
+        return _pil_to_chw(a)
     if isinstance(a, list):
+        if a and all(isinstance(x, Image.Image) for x in a):
+            return np.stack([_pil_to_chw(x, batch=True) for x in a])
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):
@@ -2282,7 +2297,7 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        or `HxW` tensor `img` that contains the image, or a PIL image. The array values can be uint8 in
         [0, 255] or float. Float arrays are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from

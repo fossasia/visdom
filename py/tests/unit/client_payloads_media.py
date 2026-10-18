@@ -267,6 +267,50 @@ def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
 
 
 @pytest.mark.parametrize(
+    "mode, shown_as",
+    [
+        ("RGB", "RGB"),
+        ("L", "L"),
+        ("RGBA", "RGBA"),
+        ("P", "RGB"),
+        ("1", "L"),
+        ("LA", "RGBA"),
+    ],
+)
+def test_image_accepts_a_pil_image(capture_send, mode, shown_as):
+    """Image.open() gives a PIL image, which crashed on .dtype before."""
+    pixels = np.random.RandomState(0).randint(0, 256, (6, 9, 3), dtype=np.uint8)
+    img = Image.fromarray(pixels).convert(mode)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    np.testing.assert_array_equal(shown, np.asarray(img.convert(shown_as)))
+
+
+def test_images_accepts_a_list_of_pil_images(capture_send):
+    """A list of PIL images used to become NxHxWxC and was read as NxCxHxW."""
+    rng = np.random.RandomState(0)
+    tiles = [
+        Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+        for _ in range(2)
+    ]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    np.testing.assert_array_equal(shown[:, :9], np.asarray(tiles[0]))
+    np.testing.assert_array_equal(shown[:, 9:], np.asarray(tiles[1]))
+
+
+def test_images_accepts_a_list_of_grayscale_pil_images(capture_send):
+    tiles = [Image.fromarray(np.full((6, 9), 40 * i, np.uint8)) for i in range(3)]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    assert shown.shape == (6, 27, 3)
+    assert shown[0, ::9, 0].tolist() == [0, 40, 80]
+
+
+def test_image_heatmap_accepts_a_pil_image(capture_send):
+    img = Image.fromarray(np.zeros((6, 9, 3), np.uint8))
+    sent = capture_send(lambda v: v.image_heatmap(img, np.ones((6, 9))))
+    assert decode(sent)[1].shape == (6, 9, 3)
+
+
+@pytest.mark.parametrize(
     "img, message",
     [
         (
