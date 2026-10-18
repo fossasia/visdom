@@ -242,7 +242,7 @@ async def _serve(
     stop = asyncio.Event()
     _install_stop_handlers(stop)
 
-    app.server_state.start_autosave()
+    app.start_autosave()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
