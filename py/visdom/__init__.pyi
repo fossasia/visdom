@@ -47,6 +47,14 @@ _EventHandler = Callable[[_Event], Any]
 # 'env' is None for a handler registered for every environment.
 _EventKey = Tuple[_OptStr, Text]
 
+class ServerError(Exception):
+    # The server's HTTP status and the reason from its status line; 'body' is
+    # the error page a client without 'raise_exceptions' returns instead.
+    status: int
+    reason: Text
+    body: Text
+    def __init__(self, status: int, reason: Text = ..., body: Text = ...) -> None: ...
+
 class Visdom:
     # Public attributes. Callers read 'env' to see the environment new windows
     # land in and assign it to change that; the rest are the connection state the

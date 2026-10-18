@@ -24,6 +24,7 @@ import time
 import pytest
 from tornado.testing import gen_test
 
+from visdom import ServerError
 from visdom.async_client import AsyncVisdom
 
 from testutils.http import VisdomHTTPTestCase
@@ -242,10 +243,20 @@ class TestAsyncVisdomAgainstReadonlyServer(AsyncClientTestCase):
     app_kwargs = {"readonly": True}
 
     @gen_test
-    async def test_error_status_returns_the_body_instead_of_raising(self):
-        """``requests`` does not raise on 4xx, so neither may the transport:
-        ``_send`` is written to hand the response text back to the caller."""
-        client = await self.connect()
+    async def test_error_status_returns_the_body_without_raise_exceptions(self):
+        """Without ``raise_exceptions`` the refusal is handed back as text, as
+        the synchronous client has always done."""
+        client = await self.connect(raise_exceptions=False)
         result = await client.text("hello", win="w1")
         assert "read" in result.lower()
+        assert "w1" not in self._app.state.get("main", {}).get("jsons", {})
+
+    @gen_test
+    async def test_error_status_raises_with_raise_exceptions(self):
+        """The server was reached and said no, so it is a ``ServerError`` and
+        not a ``ConnectionError``."""
+        client = await self.connect()
+        with pytest.raises(ServerError) as caught:
+            await client.text("hello", win="w1")
+        assert caught.value.status == 403
         assert "w1" not in self._app.state.get("main", {}).get("jsons", {})

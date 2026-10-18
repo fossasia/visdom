@@ -132,6 +132,29 @@ SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
 
+class ServerError(Exception):
+    """The server answered with an HTTP error status.
+
+    Raised by a client created with ``raise_exceptions=True``. ``status`` and
+    ``reason`` are the server's own, and ``body`` is the error page a client
+    without ``raise_exceptions`` returns instead.
+    """
+
+    def __init__(self, status, reason="", body=""):
+        message = "{} {}".format(status, reason) if reason else str(status)
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.body = body
+
+
+def _response_text(status, reason, body):
+    """Return ``body``, or raise :class:`ServerError` for an error status."""
+    if status >= 400:
+        raise ServerError(status, reason, body)
+    return body
+
+
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
 
@@ -1171,7 +1194,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
-            return r.text
+            return _response_text(r.status_code, r.reason, r.text)
         except requests.exceptions.SSLError:
             raise
         except (requests.ConnectionError, requests.Timeout):
@@ -1186,7 +1209,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
-            return r.text
+            return _response_text(r.status_code, r.reason, r.text)
 
     def _send(
         self,
@@ -1236,6 +1259,12 @@ class Visdom(object):
                 ),
                 data=json.dumps(msg, cls=NanSafeEncoder),
             )
+        except ServerError as e:
+            # The server answered and refused. Without raise_exceptions the
+            # error page is still returned, as it always has been.
+            if self.raise_exceptions:
+                raise
+            return e.body
         except requests.exceptions.SSLError as e:
             ssl_msg = (
                 "SSL certificate verification failed for {}:{}. "
