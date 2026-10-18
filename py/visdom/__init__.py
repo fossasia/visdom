@@ -3960,7 +3960,13 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.atleast_1d(np.squeeze(X))
+        X = np.asarray(X)
+        if X.ndim == 0:
+            # Preserve the scalar-input fix from #1821: a bare scalar still
+            # means a single series with one observation.
+            X = np.atleast_1d(X)
+        elif X.ndim > 2:
+            X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]

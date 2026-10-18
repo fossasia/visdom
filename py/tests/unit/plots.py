@@ -684,6 +684,43 @@ def test_boxplot_size_one_x_renders(capture_send):
     assert sent["payload"]["data"][0]["y"] == [10.5]
 
 
+def test_boxplot_single_row_matrix_one_box_per_column(capture_send):
+    """Regression test: an unconditional np.squeeze() used to collapse a
+    single-row (1, M) matrix to a 1D vector, merging its columns into one
+    box. A single-row matrix should still produce M one-observation boxes."""
+    X = np.array([[1.0, 2.0, 3.0]])
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert len(sent["payload"]["data"]) == 3
+    assert [trace["y"] for trace in sent["payload"]["data"]] == [[1.0], [2.0], [3.0]]
+
+
+def test_boxplot_single_row_matrix_with_legend(capture_send):
+    """A single-row matrix with a legend assigns one label per column,
+    rather than raising a length mismatch against a collapsed vector."""
+    X = np.array([[1.0, 2.0, 3.0]])
+    sent = capture_send(
+        lambda v: v.boxplot(X, opts={"legend": ["train", "validation", "test"]})
+    )
+    names = [trace["name"] for trace in sent["payload"]["data"]]
+    assert names == ["train", "validation", "test"]
+
+
+def test_boxplot_single_column_matrix_one_box(capture_send):
+    """A single-column (N, 1) matrix still produces one box with all N
+    observations."""
+    X = np.array([[1.0], [2.0], [3.0]])
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0, 3.0]
+
+
+def test_boxplot_scalar_x_one_box(capture_send):
+    """A bare scalar still means one series with a single observation."""
+    sent = capture_send(lambda v: v.boxplot(np.float64(42.0)))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [42.0]
+
+
 # ---------------------------------------------------------------------- surf ----
 
 
