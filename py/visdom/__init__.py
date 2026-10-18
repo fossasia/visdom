@@ -2780,9 +2780,12 @@ class Visdom(object):
             )
 
         opts = {} if opts is None else dict(opts)
-        opts.setdefault("title", "Learning Curve")
-        opts.setdefault("xlabel", "step")
-        opts.setdefault("ylabel", "metric")
+        if update is None:
+            # Only a new window gets the defaults; on an update they would
+            # replace the title and labels the window was created with.
+            opts.setdefault("title", "Learning Curve")
+            opts.setdefault("xlabel", "step")
+            opts.setdefault("ylabel", "metric")
         if opts.get("legend") is None:
             legend = names
             opts["legend"] = legend

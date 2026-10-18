@@ -393,6 +393,32 @@ def test_learning_curve_sends_one_named_update_per_metric(offline_client):
     assert all(m["win"] == "w1" for m in updates)
 
 
+@pytest.mark.parametrize("update", ["append", "replace"])
+def test_learning_curve_update_keeps_the_window_title_and_labels(
+    offline_client, update
+):
+    """The defaults are for new windows; an update must not rename the pane."""
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0], "b": [2.0]}, step=[2], win="w1", update=update
+        )
+
+    for msg in sends_to(send, "update"):
+        assert not {"title", "xlabel", "ylabel"} & set(msg["opts"])
+        assert "title" not in msg["layout"]
+        assert "title" not in msg["layout"].get("yaxis", {})
+
+
+def test_learning_curve_update_sends_opts_the_caller_passed(offline_client):
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0]}, step=[2], win="w1", update="append", opts={"title": "Loss"}
+        )
+
+    (msg,) = sends_to(send, "update")
+    assert msg["opts"]["title"] == "Loss"
+
+
 def test_learning_curve_remove_deletes_the_named_trace(offline_client):
     with patch.object(offline_client, "_send", return_value="w1") as send:
         offline_client.learning_curve({"a": [1.0]}, win="w1", update="remove")
