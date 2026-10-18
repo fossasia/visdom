@@ -12,15 +12,19 @@ calling the visdom-cloud gateway, with a short-lived in-process cache so repeate
 requests from the same caller do not hit the gateway each time. Two callers: the
 write path (programmatic API key) and the browser read path (session token).
 
-The gateway call is synchronous and runs on Tornado's event loop, so its timeout
-is the worst case every other client waits behind on a cache miss. Failures are
-cached for the same reason: without that, an unreachable gateway costs a full
-stall on every request instead of one per error_cache_ttl.
+The gateway call itself is synchronous. Handlers answer a cache hit on the event
+loop and send a miss through ``resolve_off_loop``, which runs the call on a small
+thread pool, so a slow or unreachable gateway delays only the requests waiting on
+it. Failures are cached so an unreachable gateway is asked once per
+error_cache_ttl rather than on every request.
 """
 
+import asyncio
+import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -36,6 +40,10 @@ class WorkspaceAuthError(Exception):
 
 MAX_ERROR_ENTRIES = 1024
 MAX_CACHE_ENTRIES = 4096
+RESOLVE_THREADS = 4
+UNAVAILABLE = "Workspace sign-in is unavailable right now. Try again shortly."
+
+_KINDS = {"resolve": "key", "resolve_session": "session"}
 
 
 class WorkspaceManager:
@@ -51,6 +59,9 @@ class WorkspaceManager:
         self._cache = {}
         self._errors = {}
         self._lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(
+            max_workers=RESOLVE_THREADS, thread_name_prefix="workspace-resolve"
+        )
 
     def resolve(self, api_key, workspace_slug):
         """Write path: resolve an API key + slug to (workspace_id, role)."""
@@ -70,8 +81,16 @@ class WorkspaceManager:
             workspace_slug,
         )
 
-    def _resolve_cached(self, cache_key, endpoint, headers, workspace_slug):
-        now = time.time()
+    async def resolve_off_loop(self, method, credential, workspace_slug):
+        """Resolve as ``method`` would, without blocking the loop on a cache miss."""
+        found = self._cached((_KINDS[method], credential, workspace_slug), time.time())
+        if found is not None:
+            return found
+        return await asyncio.get_running_loop().run_in_executor(
+            self._pool, getattr(self, method), credential, workspace_slug
+        )
+
+    def _cached(self, cache_key, now):
         with self._lock:
             cached = self._cache.get(cache_key)
             if cached is not None and cached[2] > now:
@@ -79,6 +98,13 @@ class WorkspaceManager:
             failure = self._errors.get(cache_key)
             if failure is not None and failure[2] > now:
                 raise WorkspaceAuthError(failure[0], failure[1])
+        return None
+
+    def _resolve_cached(self, cache_key, endpoint, headers, workspace_slug):
+        now = time.time()
+        found = self._cached(cache_key, now)
+        if found is not None:
+            return found
 
         try:
             workspace_id, role = self._fetch(endpoint, headers, workspace_slug)
@@ -111,16 +137,21 @@ class WorkspaceManager:
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:
-            raise WorkspaceAuthError(503, f"workspace resolve unavailable: {exc}")
+            logging.warning("workspace resolve unavailable: %s", exc)
+            raise WorkspaceAuthError(503, UNAVAILABLE)
 
         if resp.status_code == 200:
             try:
                 data = resp.json()
+            except ValueError:
+                data = None
+            if (
+                isinstance(data, dict)
+                and _filled(data.get("workspace_id"))
+                and _filled(data.get("role"))
+            ):
                 return data["workspace_id"], data["role"]
-            except (ValueError, KeyError, TypeError):
-                raise WorkspaceAuthError(
-                    502, "workspace resolve gave an unreadable answer"
-                )
+            raise WorkspaceAuthError(502, "workspace resolve gave an unreadable answer")
 
         detail = "workspace resolution denied"
         try:
@@ -130,6 +161,10 @@ class WorkspaceManager:
         if isinstance(data, dict) and isinstance(data.get("detail"), str):
             detail = data["detail"]
         raise WorkspaceAuthError(resp.status_code, detail)
+
+
+def _filled(value):
+    return isinstance(value, str) and value != ""
 
 
 def _make_room(entries, limit, now):

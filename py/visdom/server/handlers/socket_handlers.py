@@ -48,6 +48,7 @@ from visdom.experiments import retarget_experiment
 # RFC 6455 close codes, so a denied client can tell refusal from a dropped link.
 WS_POLICY_VIOLATION = 1008
 WS_TRY_AGAIN_LATER = 1013
+WS_REASON_BYTES = 123
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -71,6 +72,10 @@ WS_TRY_AGAIN_LATER = 1013
 #   Write access is limited to data and view organization (i.e. layout settings, env removal and env saving)
 
 
+def close_reason(message):
+    return message.encode("utf-8")[:WS_REASON_BYTES].decode("utf-8", "ignore")
+
+
 class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
@@ -84,7 +89,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             resolved = self.resolve_workspace()
         except WorkspaceAuthError as exc:
             code = WS_TRY_AGAIN_LATER if exc.status_code >= 500 else WS_POLICY_VIOLATION
-            self.close(code, exc.message)
+            self.refusal = exc.message
+            self.close(code, close_reason(exc.message))
             return False
         if resolved is not None:
             workspace_id, self.workspace_role = resolved
@@ -845,6 +851,13 @@ def _spawn_socket(cls, server_state, request):
     return wrapper
 
 
+def _spawned(wrapper):
+    refusal = getattr(wrapper, "refusal", None)
+    if refusal is not None:
+        return SocketFailureReason.CONNECTION_CLOSED.to_failure_response(refusal)
+    return {"success": True, "sid": wrapper.sid}
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         @check_auth
@@ -869,7 +882,7 @@ def WrapSocketWrapper(BaseWrapper):
                 new_sub = _spawn_socket(
                     VisSocketWrapper, self.server_state, self.request
                 )
-                self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+                self.write(json.dumps(_spawned(new_sub)))
                 return
 
             socket_wrap = (
@@ -915,7 +928,7 @@ def WrapSocketWrapper(BaseWrapper):
         def _get(self):
             """Create a new socket wrapper for this requester, return the id"""
             new_sub = _spawn_socket(SocketWrapper, self.server_state, self.request)
-            self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+            self.write(json.dumps(_spawned(new_sub)))
 
         WrappedSocketWrap.get = _get
 

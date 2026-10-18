@@ -80,6 +80,19 @@ class WorkspaceScopedMixin:
         return getattr(self, "server_state", None)
 
     def resolve_workspace(self):
+        asked = self._workspace_credential()
+        if asked is None:
+            return None
+        method, credential, workspace_slug = asked
+        return getattr(self.workspace_manager, method)(credential, workspace_slug)
+
+    async def resolve_workspace_off_loop(self):
+        asked = self._workspace_credential()
+        if asked is None:
+            return None
+        return await self.workspace_manager.resolve_off_loop(*asked)
+
+    def _workspace_credential(self):
         if self.workspace_manager is None:
             return None
         # Socket test doubles stand in a bare object for the request, and a
@@ -93,9 +106,9 @@ class WorkspaceScopedMixin:
         api_key = headers.get("X-API-KEY")
         session_token = self.get_cookie("session_token")
         if api_key:
-            return self.workspace_manager.resolve(api_key, workspace_slug)
+            return "resolve", api_key, workspace_slug
         if session_token:
-            return self.workspace_manager.resolve_session(session_token, workspace_slug)
+            return "resolve_session", session_token, workspace_slug
         raise WorkspaceAuthError(401, "Sign in to use this workspace.")
 
     def bind_workspace(self, workspace_id):
@@ -127,6 +140,13 @@ class BaseWebSocketHandler(
         if not app or not app.settings.get("cookie_secret"):
             return None
         return self.get_secure_cookie("user_password")
+
+    async def get(self, *args, **kwargs):
+        try:
+            await self.resolve_workspace_off_loop()
+        except WorkspaceAuthError:
+            pass
+        return await super().get(*args, **kwargs)
 
 
 class BaseHandler(
@@ -202,7 +222,7 @@ class BaseHandler(
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
 
-    def prepare(self):
+    async def prepare(self):
         """Bind a workspace-authenticated request to its workspace's state slice.
 
         Engages only when the request carries the X-Visdom-Workspace header (set
@@ -215,7 +235,7 @@ class BaseHandler(
         all subsequent handler logic operates on that workspace's environments.
         """
         try:
-            resolved = self.resolve_workspace()
+            resolved = await self.resolve_workspace_off_loop()
         except WorkspaceAuthError as exc:
             self.set_status(exc.status_code)
             self.finish({"error": exc.message})
@@ -275,8 +295,6 @@ class BaseHandler(
             except Exception as e:
                 logging.error(e)
             self.set_status(status_code)
-            self.write(
-                f"""
+            self.write(f"""
                 <h1>{status_code} - {title}</h1>
-                """
-            )
+                """)

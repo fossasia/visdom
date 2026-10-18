@@ -18,6 +18,8 @@ from visdom.server.app import Application
 from visdom.server.handlers.socket_handlers import (
     WS_POLICY_VIOLATION,
     WS_TRY_AGAIN_LATER,
+    SocketFailureReason,
+    _spawned,
     SocketWrapper,
     VisSocketWrapper,
 )
@@ -50,6 +52,9 @@ class Gateway:
     def resolve_session(self, token, slug):
         self.sessions.append((token, slug))
         return ("ws-a", "member")
+
+    async def resolve_off_loop(self, method, credential, slug):
+        return getattr(self, method)(credential, slug)
 
 
 def with_gateway(app, gateway):
@@ -286,6 +291,33 @@ def test_a_socket_refused_by_an_unreachable_gateway_is_told_to_retry(gated_app):
     close.assert_called_once_with(WS_TRY_AGAIN_LATER, "unavailable")
     assert list(source.messages) == []
     assert gated_app.sources == {}
+
+
+def test_a_long_refusal_fits_in_a_close_frame(gated_app):
+    gated_app.workspace_manager.refusal = WorkspaceAuthError(403, "é" * 100)
+    source = keyed_socket(
+        VisSocketWrapper,
+        gated_app,
+        {"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"},
+    )
+    with mock.patch.object(VisSocketWrapper, "close") as close:
+        source.open()
+
+    reason = close.call_args.args[1]
+    assert len(reason.encode("utf-8")) <= 123
+    assert reason == "é" * 61
+
+
+def test_a_refused_polling_socket_is_not_reported_as_opened(gated_app):
+    sub = keyed_socket(SocketWrapper, gated_app, {"X-Visdom-Workspace": "alpha"})
+    sub.open()
+
+    assert _spawned(sub) == {
+        "success": False,
+        "reason": "closed",
+        "detail": SocketFailureReason.CONNECTION_CLOSED.detail,
+        "message": "Sign in to use this workspace.",
+    }
 
 
 @pytest.mark.parametrize("key, kept", [("key-v", True), ("key-a", False)])
