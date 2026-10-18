@@ -175,6 +175,13 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
         self.assertEqual(response.code, 403)
         self.assertNotIn("new", self.space("ws-a").state)
 
+    def test_a_viewer_can_load_an_environment_that_exists(self):
+        self.space("ws-a").state["old"] = {"jsons": {}, "reload": {}}
+
+        response = self.post_as("key-v", "/env/old", {"eid": "old"})
+
+        self.assertEqual(response.code, 200)
+
     def test_a_member_can_still_create_an_environment(self):
         response = self.post_as("key-a", "/env/new", {"eid": "new"})
 
