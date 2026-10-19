@@ -58,6 +58,7 @@ class WorkspaceManager:
         self.error_cache_ttl = error_cache_ttl
         self._cache = {}
         self._errors = {}
+        self._full = {}
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(
             max_workers=RESOLVE_THREADS, thread_name_prefix="workspace-resolve"
@@ -135,6 +136,17 @@ class WorkspaceManager:
                 now + self.error_cache_ttl,
             )
 
+    def storage_refusal(self, workspace_id):
+        with self._lock:
+            return self._full.get(workspace_id)
+
+    def _note_storage(self, workspace_id, refusal):
+        with self._lock:
+            if _filled(refusal):
+                self._full[workspace_id] = refusal
+            else:
+                self._full.pop(workspace_id, None)
+
     def _fetch(self, endpoint, headers, workspace_slug):
         url = f"{self.gateway_url}/api/v1/visdom/{endpoint}"
         try:
@@ -158,6 +170,7 @@ class WorkspaceManager:
                 and _filled(data.get("workspace_id"))
                 and _filled(data.get("role"))
             ):
+                self._note_storage(data["workspace_id"], data.get("storage_full"))
                 return data["workspace_id"], data["role"]
             raise WorkspaceAuthError(502, "workspace resolve gave an unreadable answer")
 
