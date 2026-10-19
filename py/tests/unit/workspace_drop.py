@@ -16,6 +16,7 @@ id it is given must never reach outside the workspaces directory.
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 import uuid
@@ -166,13 +167,20 @@ class TestDrop(unittest.TestCase):
 
     def test_a_directory_removed_by_another_instance_is_not_an_error(self):
         self.write_env("main")
+        remove = shutil.rmtree
+
+        def taken_first(path):
+            remove(path)
+            raise FileNotFoundError(path)
+
         with mock.patch(
             "visdom.server.workspace_env_manager.shutil.rmtree",
-            side_effect=FileNotFoundError,
+            side_effect=taken_first,
         ):
-            answer, freed = self.drop()
+            _answer, freed = self.drop()
 
         self.assertIsNone(freed)
+        self.assertFalse(os.path.exists(self.directory))
 
 
 if __name__ == "__main__":
