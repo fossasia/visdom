@@ -570,7 +570,15 @@ def _pil_to_chw(img, batch=False):
         arr = np.asarray(img, dtype=np.float64)
         return arr[None] if batch else arr
     if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
-        alpha = "A" in img.getbands() or "transparency" in img.info
+        # Alpha comes from an alpha mode, a transparency key or an RGBA
+        # palette. Band names can't be used: LAB's "A" is a colour band.
+        alpha = (
+            img.mode in ("RGBA", "LA", "PA", "RGBa", "La")
+            or "transparency" in img.info
+            or (img.mode == "P" and getattr(img.palette, "mode", "") == "RGBA")
+        )
+        if img.mode == "La":
+            img = img.convert("LA")  # Pillow can't turn La into RGBA directly
         img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
     arr = np.asarray(img)
     if arr.ndim == 2:

@@ -358,6 +358,39 @@ def test_image_keeps_a_32_bit_integer_pil_image_as_floats(capture_send):
     assert shown.min() == 0 and shown.max() == 255
 
 
+def _half_transparent_rgba():
+    alpha = np.tile([0, 255], 27).reshape(6, 9).astype(np.uint8)
+    return Image.fromarray(
+        np.dstack([np.full((6, 9, 3), 200, np.uint8), alpha]), "RGBA"
+    )
+
+
+def test_image_keeps_the_alpha_of_an_rgba_palette(capture_send):
+    """A palette can carry alpha with no transparency key."""
+    img = Image.new("P", (9, 6))
+    img.putpalette([255, 0, 0, 0] + [0, 255, 0, 255] * 255, rawmode="RGBA")
+    img.putdata([0, 1] * 27)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    np.testing.assert_array_equal(shown, np.asarray(img.convert("RGBA")))
+    assert sorted(np.unique(shown[..., 3]).tolist()) == [0, 255]
+
+
+@pytest.mark.parametrize("mode", ["RGBa", "La", "PA"])
+def test_image_keeps_premultiplied_and_palette_alpha(capture_send, mode):
+    """RGBa and La name their alpha band 'a'; La can't be converted to RGBA directly."""
+    source = _half_transparent_rgba()
+    img = source.convert("LA").convert("La") if mode == "La" else source.convert(mode)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    assert shown.shape == (6, 9, 4)
+    np.testing.assert_array_equal(shown[..., 3], np.asarray(source)[..., 3])
+
+
+def test_image_shows_a_lab_image_without_an_alpha_channel(capture_send):
+    """LAB's "a" band is a colour channel, not alpha."""
+    img = _half_transparent_rgba().convert("RGB").convert("LAB")
+    assert decode(capture_send(lambda v: v.image(img)))[1].shape == (6, 9, 3)
+
+
 @pytest.mark.parametrize("mode", ["1", "L", "RGB"])
 def test_image_keeps_a_colour_key_transparency(capture_send, mode):
     img = Image.fromarray(np.zeros((6, 9, 3), np.uint8)).convert(mode)
