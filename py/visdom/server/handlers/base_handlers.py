@@ -34,7 +34,7 @@ WRITE_ENDPOINTS = {
     "upload_env",
 }
 
-FILL_ENDPOINTS = WRITE_ENDPOINTS - {"close", "delete_env"}
+FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
 
 
 class WorkspaceScopedMixin:
@@ -51,6 +51,7 @@ class WorkspaceScopedMixin:
     which leaves the server's own state in place.
     """
 
+    workspace_id = None
     workspace_slug = None
     workspace_role = None
 
@@ -113,7 +114,13 @@ class WorkspaceScopedMixin:
             return "resolve_session", session_token, workspace_slug
         raise WorkspaceAuthError(401, "Sign in to use this workspace.")
 
+    def storage_refusal(self):
+        if self.workspace_id is None or self.workspace_manager is None:
+            return None
+        return self.workspace_manager.storage_refusal(self.workspace_id)
+
     def bind_workspace(self, workspace_id):
+        self.workspace_id = workspace_id
         if self.workspace_env_manager is None:
             return
         self.server_state = self.workspace_env_manager.space(workspace_id)
