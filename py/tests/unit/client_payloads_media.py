@@ -310,6 +310,36 @@ def test_images_accepts_pil_images_mixed_with_arrays(capture_send, order):
     np.testing.assert_array_equal(shown, np.concatenate(as_hwc, axis=1))
 
 
+@pytest.mark.parametrize(
+    "float_tile, shown_value",
+    [(0.5, 127), (-0.5, 63), (200.0, 200)],
+    ids=["unit_range", "minus_one_to_one", "byte_range"],
+)
+def test_images_scales_a_float_tile_next_to_a_pil_tile(
+    capture_send, float_tile, shown_value
+):
+    """Each tile keeps its own range; a [0, 1] tile isn't read as 0..255."""
+    pil = Image.fromarray(np.full((6, 9, 3), 200, np.uint8))
+    tile = np.full((3, 6, 9), float_tile, np.float32)
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert (shown[:, :9] == 200).all()
+    assert (shown[:, 9:] == shown_value).all()
+
+
+def test_images_normalizes_a_list_of_16_bit_pngs_together(capture_send, tmp_path):
+    """All-float tiles keep one scale, so opts.normalize spans the whole grid."""
+    path = tmp_path / "depth.png"
+    Image.fromarray(np.linspace(500, 60000, 54).reshape(6, 9).astype(np.uint16)).save(
+        path
+    )
+    tiles = [Image.open(path), Image.open(path)]
+    shown = decode(
+        capture_send(lambda v: v.images(tiles, padding=0, opts={"normalize": True}))
+    )[1]
+    assert shown.min() == 0 and shown.max() == 255
+    np.testing.assert_array_equal(shown[:, :9], shown[:, 9:])
+
+
 def test_images_accepts_a_pil_image_next_to_a_torch_tensor(capture_send):
     torch = pytest.importorskip("torch")
     rng = np.random.RandomState(0)

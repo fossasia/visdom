@@ -586,6 +586,19 @@ def _pil_to_chw(img, batch=False):
     return arr.transpose(2, 0, 1)
 
 
+def _float_tile_to_bytes(x):
+    """A float tile in 0..255 by image()'s float rules, so tiles share a range."""
+    finite = x[np.isfinite(x)]
+    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0, 0)
+    if lo >= -1e-5 and hi <= 1.0 + 1e-5:
+        x = x * 255.0
+    elif lo >= -1.0 - 1e-5 and hi <= 1.0 + 1e-5:
+        x = (x + 1.0) / 2.0 * 255.0
+    return np.uint8(
+        np.clip(np.nan_to_num(x, nan=0.0, posinf=255.0, neginf=0.0), 0, 255)
+    )
+
+
 def _list_image_to_chw(x):
     """One item of an image list as CxHxW (a grayscale one as 1xHxW)."""
     if isinstance(x, Image.Image):
@@ -594,13 +607,27 @@ def _list_image_to_chw(x):
     return x[None] if x.ndim == 2 else x
 
 
+def _stack_image_list(items):
+    """Stack an image list that holds PIL images.
+
+    When 8-bit and float tiles are mixed, each float tile is brought to 0..255
+    first; otherwise a [0, 1] tile is read as 0..255 next to the 8-bit ones
+    and looks black. All-float lists keep one scale, so opts.normalize works.
+    """
+    tiles = [_list_image_to_chw(x) for x in items]
+    floats = [np.issubdtype(t.dtype, np.floating) for t in tiles]
+    if any(floats) and not all(floats):
+        tiles = [_float_tile_to_bytes(t) if f else t for t, f in zip(tiles, floats)]
+    return np.stack(tiles)
+
+
 def _to_numpy(a):
     if isinstance(a, Image.Image):
         return _pil_to_chw(a)
     if isinstance(a, list):
         if any(isinstance(x, Image.Image) for x in a):
             # Each item on its own, so PIL images can sit next to arrays.
-            return np.stack([_list_image_to_chw(x) for x in a])
+            return _stack_image_list(a)
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):
