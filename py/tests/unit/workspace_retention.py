@@ -22,10 +22,12 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 import pytest
 
 from visdom.server.app import Application
+from visdom.utils.server_utils import purge_env as purge
 
 pytestmark = pytest.mark.unit
 
@@ -184,6 +186,49 @@ class TestRetention(unittest.TestCase):
         self.assertEqual(answer["removed"], 1)
         self.assertNotIn("january", space.state)
         self.assertTrue(self.settle(old))
+
+    def load_during_purge(self, touch=None):
+        manager = self.app.workspace_env_manager
+        loaded = {}
+
+        def purge_env(storage, eid):
+            if not loaded:
+                loaded["first"] = eid
+                space = manager.space(self.workspace, slug="ws")
+                if touch is not None:
+                    space.state[eid] = touch
+            purge(storage, eid)
+
+        with mock.patch("visdom.server.app.purge_env", purge_env):
+            answer, _ = self.retire_off_loop()
+        return answer, loaded["first"], manager.loaded_space(self.workspace)
+
+    def test_a_load_during_the_purge_stops_it(self):
+        self.write_env("january", days_old=30)
+        self.write_env("february", days_old=30)
+
+        answer, first, _ = self.load_during_purge()
+
+        self.assertEqual(answer["removed"], 1)
+        self.assertNotIn("%s.json" % first, self.files())
+        self.assertEqual(len([f for f in self.files() if f != "main.json"]), 1)
+
+    def test_an_env_written_after_a_late_load_is_kept_and_saved_again(self):
+        self.write_env("january", days_old=30)
+        fresh = {"jsons": {"w": {}}, "reload": {}}
+
+        _, first, space = self.load_during_purge(touch=fresh)
+
+        self.assertIs(space.state[first], fresh)
+        self.assertTrue(space.dirty_envs[first])
+
+    def test_an_untouched_env_left_by_a_late_load_is_dropped(self):
+        self.write_env("january", days_old=30)
+
+        _, first, space = self.load_during_purge()
+
+        self.assertNotIn(first, space.state)
+        self.assertFalse(space.dirty_envs.get(first))
 
     def test_a_workspace_with_no_directory_is_not_an_error(self):
         answer = self.app.retire_workspace("never-seen", 7, dry_run=False)
