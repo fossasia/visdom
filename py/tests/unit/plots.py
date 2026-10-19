@@ -721,6 +721,27 @@ def test_boxplot_scalar_x_one_box(capture_send):
     assert sent["payload"]["data"][0]["y"] == [42.0]
 
 
+def test_boxplot_all_singleton_shape_one_box(capture_send):
+    """Regression: an all-singleton shape like (1, 1, 1) squeezes straight
+    to 0-D, which used to fail the ndim assert instead of rendering one box
+    with one observation."""
+    sent = capture_send(lambda v: v.boxplot(np.array([[[7.0]]])))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [7.0]
+
+
+def test_boxplot_masked_array_excludes_masked_observations(capture_send):
+    """Regression: np.asarray() used to silently drop a masked array's mask,
+    so masked-out observations were serialized as if they were real data."""
+    X = np.ma.MaskedArray(
+        np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]),
+        mask=[[False, True], [False, False], [True, False]],
+    )
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0]
+    assert sent["payload"]["data"][1]["y"] == [20.0, 30.0]
+
+
 # ---------------------------------------------------------------------- surf ----
 
 

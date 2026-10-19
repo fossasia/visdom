@@ -3960,13 +3960,20 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.asarray(X)
+        # np.ma.asarray, not np.asarray: a masked array's mask marks entries
+        # the caller wants excluded from a box's observations, and plain
+        # np.asarray silently drops it.
+        X = np.ma.asarray(X)
         if X.ndim == 0:
             # Preserve the scalar-input fix from #1821: a bare scalar still
             # means a single series with one observation.
-            X = np.atleast_1d(X)
+            X = np.ma.atleast_1d(X)
         elif X.ndim > 2:
             X = np.squeeze(X)
+            if X.ndim == 0:
+                # An all-singleton shape like (1, 1, 1) squeezes straight
+                # through to 0-D; that's still one series, one observation.
+                X = np.ma.atleast_1d(X)
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -3982,8 +3989,13 @@ class Visdom(object):
 
         data = []
         for k in range(X.shape[1]):
+            column = X.take(k, 1)
             _data = {
-                "y": X.take(k, 1).tolist(),
+                "y": (
+                    column.compressed().tolist()
+                    if np.ma.is_masked(column)
+                    else column.tolist()
+                ),
                 "type": "box",
             }
             if opts.get("legend"):
