@@ -623,6 +623,38 @@ def test_audio_rejects_malformed_input(offline_client, kwargs, message):
         offline_client.audio(**kwargs)
 
 
+def _wav_rate(sent):
+    """The sample rate in the header of the WAV that audio() embedded."""
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[0]
+
+
+@pytest.mark.parametrize(
+    "rate", [16000, 16e3, 22050.0, np.float32(16000), np.int64(8000)]
+)
+def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
+    """16e3 or a rate read from a config is a float, which used to crash."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == int(rate)
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize(
+    "rate", [22050.5, 0, -16000, float("nan"), float("inf"), True, "16000"]
+)
+def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
+    with pytest.raises(ValueError, match="positive whole number"):
+        offline_client.audio(
+            tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate}
+        )
+
+
 # ----------------------------------------------------------------- video ----
 
 

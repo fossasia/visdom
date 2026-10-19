@@ -167,6 +167,21 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
+def _audio_sample_rate(rate):
+    """``rate`` as an int; a WAV header can only hold a positive whole number."""
+    if (
+        isinstance(rate, (bool, np.bool_))
+        or not isinstance(rate, numbers.Real)
+        or not math.isfinite(rate)
+        or rate <= 0
+        or rate != int(rate)
+    ):
+        raise ValueError(
+            "sample_frequency should be a positive whole number, got {!r}".format(rate)
+        )
+    return int(rate)
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -2631,11 +2646,13 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.sample_frequency`: sample frequency (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
+        if tensor is not None:
+            opts["sample_frequency"] = _audio_sample_rate(opts["sample_frequency"])
         _title2str(opts)
         _assert_opts(opts)
         assert (
