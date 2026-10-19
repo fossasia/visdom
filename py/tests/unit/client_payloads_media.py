@@ -311,6 +311,29 @@ def test_image_accepts_a_palette_pil_image(capture_send):
     assert pixels[0, 0].tolist() == [200, 100, 50]
 
 
+def test_image_preserves_rgb_transparency_info(capture_send):
+    """Regression: an RGB image can carry an alpha channel via
+    img.info['transparency'] alone, which a plain RGB conversion would drop
+    since 'RGB' is already in the supported-mode set."""
+    img = Image.new("RGB", (5, 4), color=(10, 20, 30))
+    img.info["transparency"] = (10, 20, 30)
+    sent = capture_send(lambda v: v.image(img))
+    _, pixels = decode(sent)
+    assert pixels.shape == (4, 5, 4)
+
+
+def test_image_preserves_palette_rgba_without_transparency_key(capture_send):
+    """Regression: a 'P' image can have an RGBA palette with no
+    'transparency' key at all, which the transparency-key-only check missed
+    and silently dropped the alpha channel."""
+    img = Image.new("RGBA", (5, 4), (10, 20, 30, 128)).convert("P")
+    assert "transparency" not in img.info
+    assert img.palette.mode == "RGBA"
+    sent = capture_send(lambda v: v.image(img))
+    _, pixels = decode(sent)
+    assert pixels.shape == (4, 5, 4)
+
+
 @pytest.mark.parametrize(
     "mode, expected_channels",
     [

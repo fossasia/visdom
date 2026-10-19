@@ -566,6 +566,20 @@ except (ImportError, AttributeError):
 _SUPPORTED_PIL_MODES = {"L", "RGB", "RGBA"}
 
 
+def _pil_image_has_alpha(img):
+    """Whether `img` carries transparency that a plain RGB/L array would drop.
+
+    A mode's own band letters aren't the whole story: an RGB or L image can
+    still carry an alpha channel via `img.info["transparency"]`, and a `P`
+    image can have an RGBA palette with no `transparency` key at all.
+    """
+    if "A" in img.mode:
+        return True
+    if "transparency" in img.info:
+        return True
+    return img.mode == "P" and img.palette is not None and img.palette.mode == "RGBA"
+
+
 def _pil_to_numpy(img):
     """Convert a PIL image to a CxHxW (or HxW for grayscale) numpy array,
     the layout `image()`/`images()` expect. A mode outside `L`/`RGB`/`RGBA`
@@ -573,11 +587,12 @@ def _pil_to_numpy(img):
     RGBA (if it carries alpha) or RGB first -- its raw array either holds
     indices rather than pixel values (`P`), has a channel count `image()`
     doesn't support (`CMYK`, `LA`), or a dtype/scale it doesn't expect
-    (`I`, `I;16`, `F`, `1`)."""
-    if img.mode not in _SUPPORTED_PIL_MODES:
-        img = img.convert(
-            "RGBA" if "A" in img.mode or "transparency" in img.info else "RGB"
-        )
+    (`I`, `I;16`, `F`, `1`). A mode already in that set still converts if it
+    carries transparency `image()` wouldn't otherwise see, unless it's
+    already `RGBA`."""
+    has_alpha = _pil_image_has_alpha(img)
+    if img.mode not in _SUPPORTED_PIL_MODES or (has_alpha and img.mode != "RGBA"):
+        img = img.convert("RGBA" if has_alpha else "RGB")
     arr = np.asarray(img)
     if arr.ndim == 3:
         arr = np.transpose(arr, (2, 0, 1))  # HxWxC -> CxHxW
