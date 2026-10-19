@@ -229,6 +229,14 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
         self.assertEqual(json.loads(response.body), {"error": "out of storage"})
         self.assertEqual(windows(self.space("ws-a")), {})
 
+    def test_a_full_workspace_refuses_experiment_logs(self):
+        self.gateway.full["ws-a"] = "out of storage"
+
+        response = self.post_as("key-a", "/experiments/log", {"eid": "main"})
+
+        self.assertEqual(response.code, 402)
+        self.assertEqual(json.loads(response.body), {"error": "out of storage"})
+
     def test_a_full_workspace_can_still_be_read_and_cleared(self):
         self.space("ws-a").state["old"] = {"jsons": {"w": {}}, "reload": {}}
         self.gateway.full["ws-a"] = "out of storage"
@@ -403,3 +411,26 @@ def test_a_viewer_socket_cannot_change_its_workspace(
 
     assert register["readonly"] is kept
     assert ("doomed" in space.state) is kept
+
+
+@pytest.mark.parametrize("full, copied", [(None, True), ("out of storage", False)])
+def test_a_full_workspace_refuses_a_socket_save(
+    gated_app, inline_executor, full, copied
+):
+    gated_app.workspace_manager.full["ws-a"] = full
+    space = gated_app.workspace_env_manager.space("ws-a")
+    space.state["main"] = {"jsons": {}, "reload": {}}
+    sub = keyed_socket(
+        SocketWrapper, gated_app, {"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"}
+    )
+    sub.open()
+    sub.messages.clear()
+
+    save = {"cmd": "save", "data": {}, "eid": "copy", "prev_eid": "main"}
+    asyncio.run(sub.on_message(json.dumps(save)))
+
+    assert ("copy" in space.state) is copied
+    told = [
+        json.loads(m)["data"]["message"] for m in sub.messages if "notification" in m
+    ]
+    assert told == ([] if copied else ["out of storage"])
