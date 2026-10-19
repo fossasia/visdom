@@ -818,17 +818,24 @@ def test_experiment_read_sees_a_save_through_the_store(store, parses):
 
 
 def test_experiment_read_sees_an_out_of_band_rewrite(store, env_path):
-    """A file rewritten by someone else is re-read, even at the same size.
+    """A same-size rewrite by someone else is re-read once its mtime moves.
 
-    The size is held constant deliberately: this is what a cache keyed on
-    ``st_mtime`` alone would miss, because whole-second timestamps cannot
-    separate a rewrite from the read that preceded it.
+    The size is held constant deliberately, so nothing but the timestamps can
+    tell the two versions apart. The modification time is then set explicitly
+    rather than left to the clock: on a filesystem with coarse timestamps an
+    in-place rewrite can land in the same tick as the read before it, which is
+    the one window the stat key cannot close, and the test would flake on it.
     """
+    path = os.path.join(env_path, "run.json")
     store.save_env("run", _experiment_env(lr="0.10"))
     assert store.load_experiment("run")["params"]["lr"] == "0.10"
+    before = os.stat(path)
 
-    with open(os.path.join(env_path, "run.json"), "w") as fn:
+    with open(path, "w") as fn:
         fn.write(json.dumps(_experiment_env(lr="0.20")))
+    after = os.stat(path)
+    assert after.st_size == before.st_size
+    os.utime(path, ns=(after.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
 
     assert store.load_experiment("run")["params"]["lr"] == "0.20"
 
