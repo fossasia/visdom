@@ -137,6 +137,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         cmd = msg.get("cmd")
         if self.readonly:
             return
+        refusal = self.storage_refusal() if cmd == "save" else None
+        if refusal:
+            notify(self, refusal, type="error", target_subs=[self])
+            return
 
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
