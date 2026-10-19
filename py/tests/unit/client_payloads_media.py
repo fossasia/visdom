@@ -646,7 +646,8 @@ def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
 
 
 @pytest.mark.parametrize(
-    "rate", [22050.5, 0, -16000, float("nan"), float("inf"), True, "16000"]
+    "rate",
+    [22050.5, 0, -16000, 2**32, float("nan"), float("inf"), True, "16000"],
 )
 def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
     with pytest.raises(ValueError, match="positive whole number"):

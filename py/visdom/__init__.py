@@ -174,10 +174,12 @@ def _audio_sample_rate(rate):
         or not isinstance(rate, numbers.Real)
         or not math.isfinite(rate)
         or rate <= 0
+        or rate > 0xFFFFFFFF  # the WAV header stores it in 32 bits
         or rate != int(rate)
     ):
         raise ValueError(
-            "sample_frequency should be a positive whole number, got {!r}".format(rate)
+            "sample_frequency should be a positive whole number up to "
+            "4294967295, got {!r}".format(rate)
         )
     return int(rate)
 
