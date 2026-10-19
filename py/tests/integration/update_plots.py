@@ -168,11 +168,12 @@ class TestHeatmapMismatch(PlotUpdateTestCase):
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
 
-class TestHeatmapNancolorUpdates(PlotUpdateTestCase):
-    """``opts.nancolor`` adds a second, background heatmap trace -- the real
-    data trace (``showscale`` unset) plus a flat-color one (``showscale:
-    False``) -- which used to make ``len(idxs) == 1`` fail and fall through
-    to the trace-positional branch that only ever touches ``x``/``y``."""
+class NancolorHeatmapMixin:
+    """Shared builders for a plot holding a background + data trace pair.
+
+    A mixin, not a test case: inheriting a ``TestCase`` subclass to reuse its
+    helpers would also re-collect and re-run every test method it defines.
+    """
 
     def create_nancolor_heatmap(self, z=None, x=None, y=None):
         z = [[1, 2], [3, 4]] if z is None else z
@@ -219,6 +220,13 @@ class TestHeatmapNancolorUpdates(PlotUpdateTestCase):
     def data_z(self, win):
         return self.traces(win)[1]["z"]
 
+
+class TestHeatmapNancolorUpdates(NancolorHeatmapMixin, PlotUpdateTestCase):
+    """``opts.nancolor`` adds a second, background heatmap trace -- the real
+    data trace (``showscale`` unset) plus a flat-color one (``showscale:
+    False``) -- which used to make ``len(idxs) == 1`` fail and fall through
+    to the trace-positional branch that only ever touches ``x``/``y``."""
+
     def test_append_row_updates_the_data_trace(self):
         win = self.create_nancolor_heatmap()
         self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
@@ -244,6 +252,37 @@ class TestHeatmapNancolorUpdates(PlotUpdateTestCase):
         win = self.create_nancolor_heatmap()
         self.update_nancolor_heatmap(win, [[9]], "replace", x=["only"], y=["one"])
         self.assertEqual(self.data_z(win), [[9]])
+
+
+class TestHeatmapNancolorToggled(NancolorHeatmapMixin, PlotUpdateTestCase):
+    """``nancolor`` can differ between a plot's creation and its update.
+
+    Pairing the two traces up and dropping whichever side has no match used
+    to leave a stale background (toggled off) or never create one at all
+    (toggled on), even though the data trace itself updated correctly.
+    """
+
+    def test_update_without_nancolor_still_grows_the_existing_background(self):
+        """An update that drops nancolor still has to keep the existing
+        background trace in sync, or it goes stale relative to the data."""
+        win = self.create_nancolor_heatmap()
+        self.update_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        bg_z = self.traces(win)[0]["z"]
+        data_z = self.traces(win)[1]["z"]
+        self.assertEqual(len(bg_z), len(data_z))
+        self.assertEqual(bg_z[2], [0, 0])
+
+    def test_update_adding_nancolor_creates_the_background(self):
+        """An update that turns nancolor on for a plot that was created
+        without it has to create the background trace, not drop it."""
+        win = self.create_heatmap()
+        self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        traces = self.traces(win)
+        self.assertEqual(len(traces), 2)
+        background = next(t for t in traces if t.get("showscale") is False)
+        data = next(t for t in traces if t.get("showscale") is not False)
+        self.assertEqual(data["z"], [[1, 2], [3, 4], [5, 6]])
+        self.assertEqual(background["z"], [[0, 0], [0, 0], [0, 0]])
 
 
 class TestTraceUpdates(PlotUpdateTestCase):

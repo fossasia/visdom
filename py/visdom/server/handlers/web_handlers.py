@@ -668,6 +668,52 @@ class UpdateHandler(BaseHandler):
             )
             data_new = next((d for d in new_data if not is_background(d)), None)
             background_new = next((d for d in new_data if is_background(d)), None)
+            updateDir = args["updateDir"]
+
+            # A background trace can also appear on only one side of the
+            # update: toggling nancolor off for one call leaves an existing
+            # background with no incoming update (it would otherwise go
+            # stale), and toggling it on leaves an incoming background with
+            # no existing trace to update (it would otherwise never render).
+            # Synthesize whichever side is missing instead of just dropping
+            # the mismatched trace.
+            inserted_background_idx = None
+            if (
+                background_plot_idx is not None
+                and background_new is None
+                and data_new is not None
+            ):
+                background_new = {
+                    "z": [[0] * len(row) for row in data_new["z"]],
+                    "x": data_new.get("x"),
+                    "y": data_new.get("y"),
+                }
+            elif (
+                background_plot_idx is None
+                and background_new is not None
+                and data_plot_idx is not None
+            ):
+                existing = pdata[data_plot_idx]
+                pdata.append(
+                    {
+                        "type": "heatmap",
+                        "showscale": False,
+                        "colorscale": background_new.get("colorscale"),
+                        "z": [[0] * len(row) for row in existing["z"]],
+                        "x": (
+                            list(existing["x"])
+                            if existing.get("x") is not None
+                            else None
+                        ),
+                        "y": (
+                            list(existing["y"])
+                            if existing.get("y") is not None
+                            else None
+                        ),
+                    }
+                )
+                inserted_background_idx = len(pdata) - 1
+                background_plot_idx = inserted_background_idx
 
             pairs = []
             if data_plot_idx is not None and data_new is not None:
@@ -675,7 +721,6 @@ class UpdateHandler(BaseHandler):
             if background_plot_idx is not None and background_new is not None:
                 pairs.append((pdata[background_plot_idx], background_new))
 
-            updateDir = args["updateDir"]
             # Validate every trace before mutating any of them, so a bad
             # update aborts cleanly rather than leaving the data trace
             # updated but the background trace (or vice versa) untouched.
@@ -685,6 +730,8 @@ class UpdateHandler(BaseHandler):
                     plot, new_trace, updateDir
                 )
                 if not ok:
+                    if inserted_background_idx is not None:
+                        pdata.pop(inserted_background_idx)
                     return p
                 validations.append(updateNames)
 
