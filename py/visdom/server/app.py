@@ -37,7 +37,7 @@ from visdom.server.ownership import (
     WITHDRAWN_REASON,
     WS_POLICY_VIOLATION,
     WS_TRY_AGAIN_LATER,
-    local_address,
+    local_addresses,
 )
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
@@ -401,7 +401,8 @@ class Application(tornado.web.Application):
 
     def start_ownership_monitor(self):
         """Begin checking whether this instance still owns the workspaces it holds
-        sockets for. A no-op unless VISDOM_PROXY_URL names the proxy to ask."""
+        sockets for. A no-op unless VISDOM_PROXY_URL names the proxy to ask, and
+        off when this instance cannot find its own address."""
         proxy_url = os.environ.get("VISDOM_PROXY_URL")
         if not proxy_url or self.ownership_monitor is not None:
             return self.ownership_monitor
@@ -409,19 +410,26 @@ class Application(tornado.web.Application):
             interval = int(os.environ.get("VISDOM_OWNERSHIP_INTERVAL", "30"))
         except ValueError:
             interval = 30
+        addresses = local_addresses(self.port)
+        if not addresses:
+            logging.warning(
+                "ownership monitor off: this instance's own address could not be "
+                "found, so moved workspaces cannot be told from local ones"
+            )
+            return None
         self.ownership_monitor = OwnershipMonitor(
             self,
             proxy_url,
             "%s/_shard" % self.base_url,
             interval,
-            local_address(self.port),
+            addresses,
         )
         self.ownership_monitor.start()
         logging.info(
             "ownership monitor on, asking %s every %ds as %s",
             proxy_url,
             interval,
-            self.ownership_monitor.self_address,
+            ", ".join(sorted(self.ownership_monitor.self_addresses)),
         )
         return self.ownership_monitor
 
