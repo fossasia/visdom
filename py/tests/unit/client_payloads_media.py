@@ -297,6 +297,38 @@ def test_images_accepts_a_list_of_pil_images(capture_send):
     np.testing.assert_array_equal(shown[:, 9:], np.asarray(tiles[1]))
 
 
+@pytest.mark.parametrize("order", ["pil_first", "array_first"])
+def test_images_accepts_pil_images_mixed_with_arrays(capture_send, order):
+    rng = np.random.RandomState(0)
+    pil = Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+    array = rng.randint(0, 256, (3, 6, 9), dtype=np.uint8)
+    tiles = [pil, array] if order == "pil_first" else [array, pil]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    as_hwc = [np.asarray(pil), array.transpose(1, 2, 0)]
+    if order == "array_first":
+        as_hwc.reverse()
+    np.testing.assert_array_equal(shown, np.concatenate(as_hwc, axis=1))
+
+
+def test_images_accepts_a_pil_image_next_to_a_torch_tensor(capture_send):
+    torch = pytest.importorskip("torch")
+    rng = np.random.RandomState(0)
+    pil = Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+    tensor = torch.tensor(np.asarray(pil).transpose(2, 0, 1))
+    shown = decode(capture_send(lambda v: v.images([pil, tensor], padding=0)))[1]
+    np.testing.assert_array_equal(shown, np.concatenate([np.asarray(pil)] * 2, axis=1))
+
+
+def test_images_accepts_grayscale_pil_next_to_a_2d_array(capture_send):
+    rng = np.random.RandomState(0)
+    gray = rng.randint(0, 256, (6, 9), dtype=np.uint8)
+    shown = decode(
+        capture_send(lambda v: v.images([Image.fromarray(gray), gray], padding=0))
+    )[1]
+    expected = np.repeat(np.concatenate([gray, gray], axis=1)[:, :, None], 3, axis=2)
+    np.testing.assert_array_equal(shown, expected)
+
+
 def test_images_accepts_a_list_of_grayscale_pil_images(capture_send):
     rng = np.random.RandomState(0)
     gray = [rng.randint(0, 256, (6, 9), dtype=np.uint8) for _ in range(3)]

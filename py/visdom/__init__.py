@@ -586,12 +586,21 @@ def _pil_to_chw(img, batch=False):
     return arr.transpose(2, 0, 1)
 
 
+def _list_image_to_chw(x):
+    """One item of an image list as CxHxW (a grayscale one as 1xHxW)."""
+    if isinstance(x, Image.Image):
+        return _pil_to_chw(x, batch=True)
+    x = np.asarray(_to_numpy(x))
+    return x[None] if x.ndim == 2 else x
+
+
 def _to_numpy(a):
     if isinstance(a, Image.Image):
         return _pil_to_chw(a)
     if isinstance(a, list):
-        if a and all(isinstance(x, Image.Image) for x in a):
-            return np.stack([_pil_to_chw(x, batch=True) for x in a])
+        if any(isinstance(x, Image.Image) for x in a):
+            # Each item on its own, so PIL images can sit next to arrays.
+            return np.stack([_list_image_to_chw(x) for x in a])
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):
