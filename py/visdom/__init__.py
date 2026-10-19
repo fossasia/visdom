@@ -561,9 +561,10 @@ except (ImportError, AttributeError):
 
 def _pil_to_chw(img, batch=False):
     """A PIL image as visdom's CxHxW (or HxW) array; PIL is always channels last."""
-    if img.mode == "F":
-        # Float pixels keep their values, so image() can scale them as floats.
-        arr = np.asarray(img, dtype=np.float32)
+    if img.mode == "F" or img.mode == "I" or img.mode.startswith("I;"):
+        # Float and 16/32-bit integer pixels keep their values as floats, so
+        # image() can scale them (opts.normalize) instead of clipping to 255.
+        arr = np.asarray(img, dtype=np.float64)
         return arr[None] if batch else arr
     if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
         alpha = "A" in img.getbands() or "transparency" in img.info
@@ -2301,7 +2302,9 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image, or a PIL image. The array values can be uint8 in
+        or `HxW` tensor `img` that contains the image, or a PIL image. A 16 or
+        32-bit integer PIL image (mode `I;16` / `I`) keeps its values as floats;
+        use `opts.normalize=True` to scale it to the visible range. The array values can be uint8 in
         [0, 255] or float. Float arrays are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
