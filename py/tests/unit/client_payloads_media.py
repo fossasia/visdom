@@ -329,19 +329,31 @@ def test_image_keeps_a_float_pil_image_as_floats(capture_send):
     assert shown.max() > 200
 
 
-@pytest.mark.parametrize("mode", ["I;16", "I"])
-def test_image_keeps_a_16_bit_pil_image_as_floats(capture_send, tmp_path, mode):
-    """A 16-bit PNG used to be clipped to plain white, even with normalize."""
-    depth = np.linspace(500, 60000, 6 * 9).reshape(6, 9)
+def _shown_normalized(capture_send, img):
+    """The decoded pixels for a PIL image and for its values as a float array."""
+    expected = np.asarray(img, dtype=float)
+    shown = capture_send(lambda v: v.image(img, opts={"normalize": True}))
+    reference = capture_send(lambda v: v.image(expected, opts={"normalize": True}))
+    return decode(shown)[1], decode(reference)[1]
+
+
+def test_image_keeps_a_16_bit_png_as_floats(capture_send, tmp_path):
+    """A 16-bit PNG (mode I;16) used to be clipped to plain white, even with normalize."""
+    depth = np.linspace(500, 60000, 6 * 9).reshape(6, 9).astype(np.uint16)
     path = tmp_path / "depth.png"
-    Image.fromarray(depth.astype(np.uint16)).convert(mode).save(path)
+    Image.fromarray(depth).save(path)
     img = Image.open(path)
-    shown = decode(capture_send(lambda v: v.image(img, opts={"normalize": True})))[1]
-    expected = decode(
-        capture_send(
-            lambda v: v.image(np.asarray(img, dtype=float), opts={"normalize": True})
-        )
-    )[1]
+    assert img.mode == "I;16"
+    shown, expected = _shown_normalized(capture_send, img)
+    np.testing.assert_array_equal(shown, expected)
+    assert shown.min() == 0 and shown.max() == 255
+
+
+def test_image_keeps_a_32_bit_integer_pil_image_as_floats(capture_send):
+    """Mode I is built in memory: recent Pillow can't write it as PNG."""
+    img = Image.fromarray(np.linspace(0, 100000, 6 * 9).reshape(6, 9).astype(np.int32))
+    assert img.mode == "I"
+    shown, expected = _shown_normalized(capture_send, img)
     np.testing.assert_array_equal(shown, expected)
     assert shown.min() == 0 and shown.max() == 255
 
