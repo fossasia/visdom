@@ -21,6 +21,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
+import ipaddress
 
 import math
 import re
@@ -131,6 +132,28 @@ logger = logging.getLogger(__name__)
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
+
+
+def _is_loopback(host):
+    """Whether ``host`` names this machine, and so never reaches a network."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class _KeySession(requests.Session):
+    def rebuild_auth(self, prepared_request, response):
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            for name in KEY_HEADERS:
+                prepared_request.headers.pop(name, None)
+        super().rebuild_auth(prepared_request, response)
+
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -175,14 +198,17 @@ def _title2str(opts):
 
 
 def _scrub_dict(d):
+    """Recursively drop the keys whose value is None; Plotly rejects nulls.
+
+    A key survives on ``v is not None`` alone. The test used to also require
+    ``_scrub_dict(v) is not None``, which can never fail -- a dict comes back a
+    dict (an emptied one included) and anything else comes back itself -- so it
+    only bought a second full recursion per key, doubling the work at every
+    level of nesting.
+    """
     if isinstance(d, dict):
-        return {
-            k: _scrub_dict(v)
-            for k, v in list(d.items())
-            if v is not None and _scrub_dict(v) is not None
-        }
-    else:
-        return d
+        return {k: _scrub_dict(v) for k, v in d.items() if v is not None}
+    return d
 
 
 TICK_FIELD_SUFFIXES = (
@@ -734,6 +760,11 @@ def _normalize_title_strings(layout):
     raw figure layout untouched, so a plain string can appear at any depth
     (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
     and fixes every occurrence in place, returning a new structure.
+
+    It belongs to the layout: it descends into lists -- a title can hide in a
+    list of dicts such as layout['annotations'] -- so handing it a trace makes
+    one call per plotted coordinate, and a list of numbers can hold no title to
+    find. Normalize whatever a caller merges into a trace, not the trace.
     """
     if isinstance(layout, dict):
         fixed = {}
@@ -784,6 +815,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
+        api_key=None,
+        workspace=None,
         proxies=None,
         offline=False,
         use_polling=False,
@@ -861,6 +894,21 @@ class Visdom(object):
             assert password, "no password given for authentication"
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+        self.api_key = api_key
+        self.workspace = workspace
+        if self.api_key:
+            assert self.workspace, "workspace is required when api_key is given"
+            parsed_server = urlparse(self.server)
+            if parsed_server.scheme != "https" and not _is_loopback(
+                parsed_server.hostname
+            ):
+                logger.warning(
+                    "Sending an API key to %s over an unencrypted connection: "
+                    "it can be read in transit. Use an https:// server url to "
+                    "protect it.",
+                    parsed_server.hostname,
+                )
+
         self.win_data = {}
         if self.offline:
             self.use_socket = False
@@ -927,13 +975,17 @@ class Visdom(object):
                     pass
             self._pid = current_pid
             logger.warning("Setting up a new session...")
-            sess = requests.Session()
+            sess = _KeySession()
             if self.proxies:
                 sess.proxies.update(self.proxies)
             if isinstance(self.ssl_verify, str):
                 sess.verify = self.ssl_verify
             elif not self.ssl_verify:
                 sess.verify = False
+            if self.api_key:
+                sess.headers.update(
+                    {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
+                )
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -1099,37 +1151,79 @@ class Visdom(object):
                 sock_addr = "{}://{}:{}{}/vis_socket".format(
                     ws_scheme, self.server_base_name, self.port, self.base_url
                 )
-                ws = websocket.WebSocketApp(
-                    sock_addr,
-                    on_message=on_message,
-                    on_error=on_error,
-                    on_close=on_close,
-                    header={
-                        "Cookie": "user_password="
-                        + self.session.cookies.get("user_password", "")
-                    },
-                )
-                run_forever_kwargs = {
+                ws_header = {
+                    "Cookie": "user_password="
+                    + self.session.cookies.get("user_password", "")
+                }
+                connect_kwargs = {
                     "http_proxy_host": self.http_proxy_host,
                     "http_proxy_port": self.http_proxy_port,
-                    "ping_timeout": 100.0,
                 }
                 if ws_scheme == "wss":
                     if isinstance(self.ssl_verify, str):
-                        run_forever_kwargs["sslopt"] = {
+                        connect_kwargs["sslopt"] = {
                             "cert_reqs": ssl.CERT_REQUIRED,
                             "ca_certs": self.ssl_verify,
                         }
                     elif not self.ssl_verify:
-                        run_forever_kwargs["sslopt"] = {
+                        connect_kwargs["sslopt"] = {
                             "cert_reqs": ssl.CERT_NONE,
                         }
-                ws.run_forever(**run_forever_kwargs)
-                ws.close()
+                if self.api_key:
+                    ws_header["X-API-KEY"] = self.api_key
+                    ws_header["X-Visdom-Workspace"] = self.workspace
+                    self._run_keyed_websocket(
+                        sock_addr,
+                        ws_header,
+                        connect_kwargs,
+                        on_message,
+                        on_error,
+                        on_close,
+                    )
+                else:
+                    ws = websocket.WebSocketApp(
+                        sock_addr,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close,
+                        header=ws_header,
+                    )
+                    ws.run_forever(ping_timeout=100.0, **connect_kwargs)
+                    ws.close()
             except Exception as e:
                 logger.error("Socket had error {}, attempting restart".format(e))
             if self.use_socket:
                 time.sleep(3)
+
+    def _run_keyed_websocket(
+        self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
+    ):
+        ws = None
+        try:
+            ws = websocket.create_connection(
+                sock_addr, header=header, redirect_limit=0, **connect_kwargs
+            )
+            if ws.getstatus() != 101:
+                location = (ws.getheaders() or {}).get("location")
+                raise websocket.WebSocketException(
+                    "Refused to follow the socket to {}, which would hand it "
+                    "the API key".format(location)
+                )
+            while self.use_socket:
+                message = ws.recv()
+                if not message:
+                    break
+                on_message(ws, message)
+        except websocket.WebSocketConnectionClosedException:
+            pass
+        except Exception as error:
+            if ws is None:
+                ws = websocket.WebSocket()
+            on_error(ws, error)
+        finally:
+            if ws is not None:
+                ws.close()
+            on_close(ws)
 
     def setup_polling(self):
         self.setup_socket(polling=True)
@@ -1880,7 +1974,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = str(loadfile(svgfile))
+            svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
@@ -2211,7 +2305,7 @@ class Visdom(object):
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
@@ -2608,7 +2702,7 @@ class Visdom(object):
         # backward-compatibility with OpenCV.
         if np.issubdtype(tensor.dtype, np.floating):
             tensor = 255 * tensor
-        tensor = tensor.astype(np.uint8).clip(0, 255)
+        tensor = tensor.clip(0, 255).astype(np.uint8)
 
         # Use BGR for backward-compatibility with OpenCV
         pixelformats = {1: "gray", 3: "bgr24"}
@@ -2921,7 +3015,7 @@ class Visdom(object):
 
         is3d = X.shape[1] == 3
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         if opts.get("textlabels") is None:
             opts["mode"] = opts.get("mode", "markers")
         else:
@@ -3018,9 +3112,14 @@ class Visdom(object):
                     _data["z"] = X.take(2, 1)[ind].tolist()
 
                 if trace_name in trace_opts:
-                    _data.update(trace_opts[trace_name])
+                    # Normalized here rather than over the finished trace below:
+                    # these options are the only part of ``_data`` that can carry
+                    # a title, and the helper walks into lists, so pointing it at
+                    # the trace cost one call per plotted point to rewrite
+                    # nothing.
+                    _data.update(_normalize_title_strings(trace_opts[trace_name]))
 
-                data.append(_scrub_dict(_normalize_title_strings(_data)))
+                data.append(_scrub_dict(_data))
 
         if opts:
             for marker_prop in ["markercolor"]:
@@ -3175,7 +3274,7 @@ class Visdom(object):
         if Z is not None:
             assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         if Z is not None and opts["fillarea"]:
@@ -3719,7 +3818,12 @@ class Visdom(object):
         - `opts.stacked` : stack multiple columns in `X`
             - `opts.legend`  : `list` containing legend labels
         """
-        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        X = np.asarray(X)
+        if X.ndim != 2 or opts is None or opts.get("legend") is None:
+            X = np.atleast_1d(np.squeeze(X))
+        elif X.shape[1] == 1 and X.shape[0] > 1 and len(opts["legend"]) == X.shape[0]:
+            # A label per row retains the legacy column-vector series layout.
+            X = X[:, 0]
 
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
@@ -3789,8 +3893,8 @@ class Visdom(object):
         X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1, "X should be one-dimensional"
 
-        opts = {} if opts is None else opts
-        opts["numbins"] = opts.get("numbins", min(30, len(X)))
+        opts = {} if opts is None else dict(opts)
+        opts["numbins"] = opts.get("numbins", max(1, min(30, len(X))))
         _title2str(opts)
         _assert_opts(opts)
 
@@ -3824,8 +3928,8 @@ class Visdom(object):
                            `'probability density'`
         """
 
-        X = np.squeeze(np.asarray(X))
-        Y = np.squeeze(np.asarray(Y))
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
@@ -3869,7 +3973,7 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -3920,8 +4024,14 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
-        X = np.squeeze(X)
-        assert X.ndim == 2, "X should be two-dimensional"
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 2, (
+            "X should be two-dimensional; got ndim=%d after squeeze. "
+            "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
+        )
 
         opts = {} if opts is None else opts
         opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
@@ -4108,13 +4218,14 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
 
         if Y is None:
             Y = np.arange(1, X.shape[0] + 1)
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         if Y.ndim == 1:
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
@@ -4262,7 +4373,7 @@ class Visdom(object):
         - `opts.legend`: `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1, "X should be one-dimensional"
         assert np.all(np.greater_equal(X, 0)), "X cannot contain negative values"
 

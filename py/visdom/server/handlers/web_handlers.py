@@ -49,7 +49,6 @@ from visdom.utils.server_utils import (
     warm_env,
     window,
     register_window,
-    gather_envs,
     broadcast_envs,
     broadcast_tags,
     escape_eid,
@@ -58,8 +57,8 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    stringify,
-    push_deleted,
+    push_deleted_many_off_loop,
+    forget_closed_panes,
     notify,
     LazyEnvData,
 )
@@ -124,6 +123,168 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
+    #: Trace types whose append is a plain push onto the end of each axis.
+    #: ``heatmap`` is not one of them: its own branch rewrites ``z`` and the
+    #: axis labels rather than extending a series.
+    APPENDABLE_TRACE_TYPES = frozenset(("scatter", "scatter3d", "scattergl", "custom"))
+
+    #: Marker properties ``update`` appends to, rather than replaces. Shared
+    #: with ``appendable`` so the question it asks about them cannot drift from
+    #: what the append actually does.
+    APPENDABLE_MARKER_PROPS = ("color",)
+
+    @staticmethod
+    def resolve_trace_idxs(pdata, name):
+        """Which traces of ``pdata`` an update naming ``name`` applies to.
+
+        An unnamed update applies to every trace in order, a named one to the
+        traces carrying that name. O(traces) either way, so the append fast
+        path can ask the question before anything has been mutated.
+        """
+        if name is None:
+            return list(range(len(pdata)))
+        return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
+
+    @staticmethod
+    def window_args_are_noops(p, args):
+        """Whether ``update_window`` would leave the pane exactly as it is.
+
+        It writes every non-``None`` ``opts`` entry onto the pane and every
+        non-``None`` ``layout`` entry into the pane's layout, and ``legend``
+        renames traces on top of that. A value already equal to what the pane
+        holds writes the same bytes back, so it produces no patch operation --
+        which is the case every append after the first one hits, because the
+        client resends the same ``opts`` each time. ``legend`` has to clear
+        both halves of what it does, so it is asked about separately.
+        """
+        content = p.get("content")
+        if isinstance(content, dict) and isinstance(content.get("layout"), dict):
+            current = content["layout"]
+            for key, val in (args.get("layout") or {}).items():
+                if val is not None and current.get(key) != val:
+                    return False
+        for key, val in (args.get("opts") or {}).items():
+            if val is None:
+                continue
+            if key == "caption":
+                if not isinstance(content, dict) or content.get("caption") != val:
+                    return False
+                continue
+            if p.get(key) != val:
+                return False
+            if key == "legend" and not UpdateHandler.legend_renames_nothing(p, args):
+                return False
+        return True
+
+    @staticmethod
+    def legend_renames_nothing(p, args):
+        """Whether ``update_window``'s ``legend`` pass leaves every name as it is.
+
+        A legend equal to the one already on the pane still has to be walked
+        against the traces: the two are written at different times -- the opts
+        loop stores ``legend`` on the pane, the pass below copies its entries
+        onto ``name`` -- so a pane can carry the legend while a trace added
+        since does not carry its name. Only when the pass would write back the
+        names already there is the append still a pure append.
+
+        Mirrors ``update_window`` exactly, including the named form's "rename
+        the traces called ``name``", so the answer cannot drift from what the
+        rename actually does.
+        """
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return True
+        pdata = content.get("data")
+        if not isinstance(pdata, list):
+            return True
+        legend = args["opts"]["legend"]
+        name = args.get("name")
+        if name is not None:
+            if not legend:
+                return True
+            return all(
+                d.get("name") == legend[0] for d in pdata if d.get("name") == name
+            )
+        return all(
+            d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
+        )
+
+    @staticmethod
+    def appendable(p, args):
+        """Whether ``args`` appends to ``p`` in a way whose patch is predictable.
+
+        True only for a pure append: new points pushed onto the end of traces
+        that already exist, with nothing else about the pane changing. Every
+        check is O(traces), never O(points), so asking costs nothing against
+        the deepcopy and the diff it saves.
+
+        An update that also changes an opt, a layout entry or a trace name
+        takes the general path below. The first append after a plot is created
+        is one of those -- the client's ``opts`` carry keys the fresh pane does
+        not have yet -- and every append after it is not, which is the case
+        that matters for a plot being appended to in a loop.
+        """
+        if not args.get("append") or args.get("delete"):
+            return False
+        new_data = args.get("data")
+        if not isinstance(new_data, list) or not new_data:
+            return False
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return False
+        pdata = content.get("data")
+        if not isinstance(pdata, list) or not pdata:
+            return False
+        if not UpdateHandler.window_args_are_noops(p, args):
+            return False
+        name = args.get("name")
+        if name is not None and len(new_data) != 1:
+            # ``update`` answers this with a 400; leave the rejecting to it.
+            return False
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
+        if not idxs:
+            # Nothing matched, so ``update`` injects a new trace rather than
+            # appending to an existing one.
+            return False
+        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
+        # actually touched.
+        for i, new_trace in zip(idxs, new_data):
+            target = pdata[i]
+            if not isinstance(target, dict) or not isinstance(new_trace, dict):
+                return False
+            if target.get("type") not in UpdateHandler.APPENDABLE_TRACE_TYPES:
+                return False
+            if not UpdateHandler.marker_is_appendable(target, new_trace):
+                return False
+        return True
+
+    @staticmethod
+    def marker_is_appendable(target, new_trace):
+        """Whether appending ``new_trace``'s marker only extends what is there.
+
+        ``update`` creates ``target["marker"]`` and the property list inside it
+        when they are missing, and those are structural changes an index-form
+        ``add`` cannot describe: the client's copy has no ``marker`` object, so
+        ``add /content/data/0/marker/color/0`` has nothing to land on and the
+        whole patch fails to apply. The diffed path did not have this problem,
+        because ``make_patch`` emits the parent ``add`` carrying the container.
+
+        So an append that has to create one takes the general path, exactly as
+        the first append after a plot is created does. The one after it, with
+        the container now in place, is a plain extend and takes the fast path.
+        """
+        if "marker" not in new_trace:
+            return True
+        new_marker = new_trace["marker"]
+        target_marker = target.get("marker")
+        if not isinstance(new_marker, dict) or not isinstance(target_marker, dict):
+            return False
+        return all(
+            prop in target_marker
+            for prop in UpdateHandler.APPENDABLE_MARKER_PROPS
+            if prop in new_marker
+        )
+
     @staticmethod
     def bump_version(p):
         """Advance the pane's broadcast sequence number and return the new value.
@@ -152,6 +313,55 @@ class UpdateHandler(BaseHandler):
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        # A pure append's patch is known before the append happens: it adds the
+        # new points at the end of the traces they belong to. Building it
+        # directly skips both the deepcopy of the pane and the diff of the two
+        # copies, which are the two costs in #1805 that grow with the data
+        # already plotted. Everything else keeps the general path below.
+        if UpdateHandler.appendable(p, args):
+            ops = []
+            p = UpdateHandler.update(
+                p,
+                args,
+                max_text_lines,
+                max_old_content,
+                max_image_history,
+                max_plot_history,
+                record_ops=ops,
+            )
+            # An append whose axis lists are empty, or hold nothing but missing
+            # values, appends no points: ``update`` skips the trace and records
+            # no op. Nothing about the pane changed, so there is no revision to
+            # announce -- bumping the version and rerolling ``contentID`` for
+            # one makes the frontend redraw a pane it already has, and marks the
+            # environment dirty for a write that would save nothing. The diffed
+            # path below says nothing at all for an update it applied nothing
+            # of; this one has to agree, or ``vis.line(X=[], Y=[],
+            # update="append")`` in a loop repaints on every empty batch.
+            if not ops:
+                return p, []
+            # ``update_window`` does not advance the version; ``update_packet``
+            # does it once per accepted update, so the fast path has to as well
+            # -- and the patch has to carry the new value, or the frontend
+            # discards it and reloads the whole environment (``bump_version``).
+            # ``bump_version`` creates the field on a pane persisted before
+            # panes carried one, and JSON Patch ``replace`` requires the path to
+            # already exist on the client's copy -- so that pane needs the
+            # ``add`` the diffed path would have emitted, or its first append
+            # arrives as a patch that cannot be applied.
+            version_existed = "version" in p
+            version = UpdateHandler.bump_version(p)
+            p["contentID"] = get_rand_id()
+            ops.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
+            ops.append(
+                {
+                    "op": "replace" if version_existed else "add",
+                    "path": "/version",
+                    "value": version,
+                }
+            )
+            return p, ops
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -169,6 +379,18 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
         # Bumped before the patch is computed so the diff carries the new
         # version to the client, keeping its copy in step for the next update.
         UpdateHandler.bump_version(p)
@@ -223,8 +445,21 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(
-        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+        p,
+        args,
+        max_text_lines,
+        max_old_content,
+        max_image_history,
+        max_plot_history,
+        *,
+        record_ops=None,
     ):
+        """Apply ``args`` to pane ``p`` in place.
+
+        ``record_ops``, when given a list, collects the JSON Patch operations
+        describing an append as it is performed -- see ``appendable``, which is
+        what decides whether the caller may ask for them.
+        """
         if not args.get("data") and not args.get("delete") and args.get("name") is None:
             # opts/layout-only update (e.g. update_window_opts): works for
             # any pane type. A delete/named update also carries no data but
@@ -305,14 +540,11 @@ class UpdateHandler(BaseHandler):
             return p  # we only updated the opts or layout
         append = args.get("append")
 
-        idxs = list(range(len(pdata)))
-
-        if name is not None:
-            if not delete and len(new_data) != 1:
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
-            idxs = [i for i in idxs if pdata[i]["name"] == name]
+        if name is not None and not delete and len(new_data) != 1:
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
 
         # Delete a trace
         if delete:
@@ -430,9 +662,26 @@ class UpdateHandler(BaseHandler):
             if pdata[idx]["type"] == "scatter3d":
                 axes.append("z")
             for axis in axes:
-                pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
-                )
+                if not append:
+                    pdata[idx][axis] = new_trace[axis]
+                    continue
+                series = pdata[idx][axis]
+                if record_ops is not None:
+                    path = "/content/data/%d/%s" % (idx, axis)
+                    for at, value in enumerate(new_trace[axis], len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                # ``series = series + new_trace[axis]`` reallocated the whole
+                # series and copied every existing point on every append, an
+                # O(n^2) of its own on top of the diff #1805 measured. ``+=``
+                # extends a list in place, and still rebinds anything else
+                # exactly as the concatenation did.
+                series += new_trace[axis]
 
             # handle marker properties
             if "marker" not in new_trace:
@@ -440,21 +689,38 @@ class UpdateHandler(BaseHandler):
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
-            for marker_prop in ["color"]:
+            for marker_prop in UpdateHandler.APPENDABLE_MARKER_PROPS:
                 if marker_prop not in new_trace["marker"]:
                     continue
-                if marker_prop not in pdata[idx]["marker"]:
-                    pdata[idx]["marker"][marker_prop] = []
-                pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
-                    if append
-                    else new_trace["marker"][marker_prop]
-                )
+                if marker_prop not in pdata_marker:
+                    pdata_marker[marker_prop] = []
+                new_marker = new_trace["marker"][marker_prop]
+                if not append:
+                    pdata_marker[marker_prop] = new_marker
+                    continue
+                series = pdata_marker[marker_prop]
+                if record_ops is not None:
+                    path = "/content/data/%d/marker/%s" % (idx, marker_prop)
+                    for at, value in enumerate(new_marker, len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                series += new_marker
 
         return p
 
     @staticmethod
-    def broadcast_window_update(handler, args, eid, p, diff_packet):
+    def window_update_message(args, eid, p, diff_packet):
+        """Encode the patch broadcast for ``p``, ready to put on the wire.
+
+        Split out from ``broadcast_window_update`` so a caller that has to know
+        how large the patch is can measure the string it is about to send
+        instead of serialising the pane a second time to estimate it.
+        """
         broadcast_packet = {
             "command": "window_update",
             "win": args["win"],
@@ -462,7 +728,56 @@ class UpdateHandler(BaseHandler):
             "content": diff_packet,
             "version": p.get("version", 1),
         }
-        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+        return json.dumps(broadcast_packet, cls=NanSafeEncoder)
+
+    @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast(
+            handler,
+            UpdateHandler.window_update_message(args, eid, p, diff_packet),
+            eid,
+        )
+
+    @staticmethod
+    def pane_min_bytes(p):
+        """A lower bound on the encoded size of ``p``, without encoding it.
+
+        In a ``json.dumps`` array every element costs at least one character
+        and every element after the first also carries a separator. That
+        separator is ``", "`` -- two characters, the default whenever no
+        ``separators`` argument is passed, which is how both broadcast encodes
+        call it -- so a trace array of ``k`` values cannot encode to fewer than
+        ``3k - 2`` characters. That bounds the pane from below in O(traces)
+        where encoding it is O(points). Every element type clears the one-char
+        floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
+        keys, layout and envelope are ignored, so the bound only ever
+        understates -- which costs an exact comparison that could have been
+        skipped, never a wrong answer.
+
+        The one-character elements an array of small integers is made of --
+        ``[0, 1, 2]`` encodes to ``3k - 2`` characters between the brackets --
+        are where the bound is exactly tight rather than loose. Compact
+        separators would make it an overestimate instead, and an overestimate
+        here is a real bug: it would skip the encode of a pane that was in fact
+        smaller than the patch. ``test_pane_min_bytes_is_tight_for_one_char_values``
+        pins that, so the assumption fails loudly rather than silently.
+
+        A pane with no trace arrays to count -- text, HTML, an image, anything
+        whose ``content`` is not a dict of traces -- bounds to zero, which is
+        the same understatement and simply leaves the comparison exact.
+        """
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        if not isinstance(traces, (list, tuple)):
+            return 0
+        total = 0
+        for trace in traces:
+            if not isinstance(trace, dict):
+                continue
+            for value in trace.values():
+                if isinstance(value, (list, tuple)) and value:
+                    total += 3 * len(value) - 2
+        return total
 
     @staticmethod
     def wrap_func(handler, args):
@@ -549,7 +864,7 @@ class UpdateHandler(BaseHandler):
                     handler, args, eid, p, diff_packet
                 )
                 handler.mark_dirty(eid)
-            handler.write(p["id"])
+            handler.write_text(p["id"])
             return
 
         try:
@@ -567,15 +882,29 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-        handler.mark_dirty(eid)
-        handler.write(p["id"])
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # Send the smaller of the patch and the updated pane. The pane is
+            # only encoded when it could actually win: pane_min_bytes bounds its
+            # encoded size from below, so a patch already shorter than that
+            # bound cannot be beaten and the encode -- the one whose cost grows
+            # with the data already plotted -- is skipped. Every other update
+            # compares for real.
+            msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
+            if UpdateHandler.pane_min_bytes(p) < len(msg):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
+                if len(pane_msg) <= len(msg):
+                    msg = pane_msg
+            broadcast(handler, msg, eid)
+            handler.mark_dirty(eid)
+        handler.write_text(p["id"])
 
     @check_auth
     @check_readonly
@@ -592,17 +921,97 @@ class UpdateHandler(BaseHandler):
 
 class CloseHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
+        """Close one pane, or every pane in an env, recording the undo off the loop.
+
+        The panes leave ``state`` here, on the loop, before anything is
+        awaited, so a close is still all-or-nothing as far as any other request
+        can tell -- and a pane that was already gone is still announced, as it
+        always was. Their undo entries then go to the storage worker as one
+        write rather than one per pane: closing an env with many panes used to
+        read and rewrite its undo file once per pane, inline.
+
+        If that write fails the panes go back where they came from: the only
+        copy of a closed pane between the pop and the write is the one this
+        call is holding, so a close that cannot be recorded has to be a close
+        that did not happen rather than one nothing can undo. A close that did
+        not happen also leaves no undo entry, so whatever the write may still
+        manage to record for the panes that came back is taken out again.
+
+        What is announced is decided after that write, against the env as it
+        stands then: the loop kept serving while the undo stack was written, so
+        a pane id this close popped may have been written again in the
+        meantime. Announcing its close would take that new pane off every
+        client while the server still holds it.
+        """
         eid = extract_eid(args)
+        if eid not in handler.state:
+            return
         win = args.get("win")
 
-        keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
-        for win in keys:
-            p_data = handler.state[eid]["jsons"].pop(win, None)
+        env = handler.state[eid]
+        keys = list(env["jsons"].keys()) if win is None else [win]
+        closed = []
+        for key in keys:
+            p_data = env["jsons"].pop(key, None)
+            closed.append((key, p_data))
             if p_data is not None:
-                push_deleted(handler.storage, eid, win, p_data)
                 handler.mark_dirty(eid)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+
+        panes = [(key, p_data) for key, p_data in closed if p_data is not None]
+        if panes:
+            try:
+                await push_deleted_many_off_loop(handler, eid, panes)
+            except BaseException:
+                # ``BaseException`` because a cancelled request loses the panes
+                # exactly as a failed write does: the await is where the close
+                # is interrupted either way, and the handler is the only thing
+                # holding them. Nothing is swallowed -- every one is re-raised.
+                #
+                # The panes are already out of ``state``: the only copy of
+                # them left is the one in this frame. Dropping it loses them
+                # for good -- the close is not announced, so clients keep
+                # showing panes the server no longer has, and the next autosave
+                # writes the env without them. They go back instead, and the
+                # env is marked so that save records the env as it still is.
+                #
+                # Only ids that are still missing are restored. A pane written
+                # back under one of them while this write was out is newer than
+                # what the close popped, and overwriting it here would undo a
+                # live window. If the env itself is gone, there is nothing to
+                # restore it into.
+                restored = []
+                if handler.state.get(eid) is env:
+                    for key, p_data in panes:
+                        if env["jsons"].setdefault(key, p_data) is p_data:
+                            restored.append((key, p_data))
+                    handler.mark_dirty(eid)
+                if restored:
+                    # Cancelling the future above does not stop the worker: the
+                    # push can still be queued, or running, and land after this
+                    # -- leaving the pane back in the env and recorded as
+                    # closed both, for an undo to restore over whatever holds
+                    # its id by then. The entries go back out behind the write
+                    # that may yet make them, which the single worker orders
+                    # for us. Only for the panes that actually came back: an id
+                    # taken by a newer window keeps the close that took it,
+                    # because the undo stack is then the one place the pane it
+                    # closed still exists.
+                    forget_closed_panes(handler, eid, restored)
+                raise
+            if handler.state.get(eid) is not env:
+                # A delete_env landed while the undo stack was being written:
+                # the env these panes belonged to is gone, along with the file
+                # just written, so there is nothing left to announce.
+                return
+
+        for key, _p_data in closed:
+            if key in env["jsons"]:
+                # A pane was written back under this id while the undo stack
+                # was: the window there now is a new one, not the one this
+                # close popped, and it is not this close's to announce.
+                continue
+            broadcast(handler, json.dumps({"command": "close", "data": key}), eid)
 
     @check_auth
     @check_readonly
@@ -611,7 +1020,7 @@ class CloseHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         await ensure_env_loaded(self, extract_eid(args))
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DeleteEnvHandler(BaseHandler):
@@ -676,8 +1085,20 @@ class EnvStateHandler(BaseHandler):
 class ForkEnvHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
-        prev_eid = escape_eid(args.get("prev_eid"))
-        eid = escape_eid(args.get("eid"))
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        prev_eid = args.get("prev_eid")
+        eid = args.get("eid")
+        if not isinstance(prev_eid, str) or not isinstance(eid, str):
+            raise tornado.web.HTTPError(
+                400, reason="both 'prev_eid' and 'eid' must be strings"
+            )
+        prev_eid = escape_eid(prev_eid)
+        eid = escape_eid(eid)
+        if not eid:
+            raise tornado.web.HTTPError(400, reason="'eid' must not be empty")
+        if not prev_eid:
+            raise tornado.web.HTTPError(400, reason="'prev_eid' must not be empty")
 
         if prev_eid not in handler.state:
             # the eid stays out of the reason: it is echoed on the status line,
@@ -707,9 +1128,14 @@ class ForkEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, TypeError):
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
@@ -760,7 +1186,8 @@ class EnvHandler(BaseHandler):
 class CompareHandler(BaseHandler):
     @check_auth
     def get(self, eids):
-        for eid in eids.split("+"):
+        for raw_eid in eids.split("+"):
+            eid = escape_eid(raw_eid)
             if eid not in self.state:
                 raise tornado.web.HTTPError(
                     404, reason=f"Environment '{eid}' not found"
@@ -772,13 +1199,35 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
-        body = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Send environment comparison data to a subscriber socket.
+
+        Expects a JSON object with a ``sid`` string identifying the target
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
+        """
+        try:
+            body = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+
+        if not isinstance(body, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+
+        if "sid" not in body:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
+
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
-        if sid in self.subs:
-            eids = args.split("+")
+        if sid and sid in self.subs:
+            eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
@@ -878,6 +1327,14 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                if "win" in args and args["win"] is None:
+                    handler.write(json.dumps({}, cls=NanSafeEncoder))
+                    return
+                raise tornado.web.HTTPError(
+                    404, reason=f"environment '{eid}' not found"
+                )
+
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
@@ -924,12 +1381,12 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, self.storage)
+            # No env listing is passed: ``login.html`` has never rendered one,
+            # and building it here read the environment directory on the loop
+            # for every unauthenticated request that reached the server.
             self.render(
                 "login.html",
                 user=getpass.getuser(),
-                items=items,
-                active_item="",
                 base_url=self.base_url,
             )
 
