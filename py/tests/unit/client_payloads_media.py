@@ -672,8 +672,9 @@ def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
     [
         (np.sin(np.arange(64)), 2**31 - 1),
         (np.sin(np.arange(128)).reshape(64, 2), 2**30 - 1),
+        (np.array([[0.5, -0.5]]), 2**30 - 1),
     ],
-    ids=["mono", "stereo"],
+    ids=["mono", "stereo", "one_stereo_frame"],
 )
 def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
     """Bytes per second (rate * channels * 2) must fit the 32-bit header too."""

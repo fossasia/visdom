@@ -2658,8 +2658,8 @@ class Visdom(object):
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         if tensor is not None:
-            # (N, 2) or (2, N) is stereo; the smaller side is the channel count.
-            channels = max(1, min(tensor.shape)) if tensor.ndim >= 2 else 1
+            # A 2-D tensor with a side of 2 is stereo, (1, 2) included.
+            channels = 2 if tensor.ndim == 2 and 2 in tensor.shape else 1
             opts["sample_frequency"] = _audio_sample_rate(
                 opts["sample_frequency"], channels
             )
