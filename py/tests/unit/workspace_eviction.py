@@ -29,6 +29,7 @@ from visdom.server.ownership import (
     WS_POLICY_VIOLATION,
     WS_TRY_AGAIN_LATER,
     OwnershipMonitor,
+    local_addresses,
 )
 
 pytestmark = pytest.mark.unit
@@ -146,7 +147,11 @@ class TestOwnership(unittest.TestCase):
 
     def check(self, owner):
         monitor = OwnershipMonitor(
-            self.app, "http://proxy", "/vis/_shard", 30, "10.0.0.1:8097"
+            self.app,
+            "http://proxy",
+            "/vis/_shard",
+            30,
+            {"10.0.0.1:8097", "172.18.0.4:8097"},
         )
 
         async def owner_of(slug):
@@ -165,6 +170,20 @@ class TestOwnership(unittest.TestCase):
 
     def test_a_workspace_still_here_is_left_alone(self):
         self.assertEqual(self.check("10.0.0.1:8097"), 0)
+        self.assertIsNone(self.viewer.closed_with)
+
+    def test_a_workspace_on_any_of_its_own_addresses_is_left_alone(self):
+        self.assertEqual(self.check("172.18.0.4:8097"), 0)
+        self.assertIsNone(self.viewer.closed_with)
+
+    def test_a_monitor_without_its_own_address_closes_nothing(self):
+        monitor = OwnershipMonitor(self.app, "http://proxy", "/vis/_shard", 30, ())
+
+        async def owner_of(slug):
+            return "10.0.0.2:8097"
+
+        monitor.owner_of = owner_of
+        self.assertEqual(asyncio.run(monitor.check()), 0)
         self.assertIsNone(self.viewer.closed_with)
 
     def test_no_answer_from_the_proxy_closes_nothing(self):
@@ -197,12 +216,53 @@ class TestOwnership(unittest.TestCase):
         with mock.patch.dict(
             "os.environ",
             {"VISDOM_PROXY_URL": "http://proxy", "VISDOM_OWNERSHIP_INTERVAL": "15"},
-        ), mock.patch.object(OwnershipMonitor, "start") as start:
+        ), mock.patch.object(OwnershipMonitor, "start") as start, mock.patch(
+            "visdom.server.app.local_addresses", return_value={"10.0.0.1:8097"}
+        ):
             monitor = self.app.start_ownership_monitor()
 
         start.assert_called_once()
         self.assertEqual(monitor.interval, 15)
         self.assertEqual(monitor.probe_path, "/_shard")
+
+    def test_the_monitor_stays_off_without_its_own_address(self):
+        with mock.patch.dict(
+            "os.environ", {"VISDOM_PROXY_URL": "http://proxy"}
+        ), mock.patch.object(OwnershipMonitor, "start") as start, mock.patch(
+            "visdom.server.app.local_addresses", return_value=frozenset()
+        ):
+            self.assertIsNone(self.app.start_ownership_monitor())
+        start.assert_not_called()
+
+
+def _resolving(*hosts):
+    return [(None, None, None, "", (host, 8097)) for host in hosts]
+
+
+class TestLocalAddresses(unittest.TestCase):
+    def addresses(self, found):
+        with mock.patch(
+            "visdom.server.ownership.socket_module.getaddrinfo", **found
+        ), mock.patch(
+            "visdom.server.ownership.socket_module.gethostname", return_value="box"
+        ):
+            return local_addresses(8097)
+
+    def test_every_address_of_the_host_is_its_own(self):
+        found = self.addresses({"return_value": _resolving("172.18.0.4", "10.0.0.1")})
+        self.assertEqual(found, {"172.18.0.4:8097", "10.0.0.1:8097"})
+
+    def test_loopback_is_never_its_own(self):
+        found = self.addresses({"return_value": _resolving("127.0.1.1", "::1")})
+        self.assertEqual(found, frozenset())
+
+    def test_an_ipv6_address_is_named_as_nginx_names_it(self):
+        found = self.addresses({"return_value": _resolving("fd00::4")})
+        self.assertEqual(found, {"[fd00::4]:8097"})
+
+    def test_a_hostname_that_does_not_resolve_gives_nothing(self):
+        found = self.addresses({"side_effect": OSError("no such host")})
+        self.assertEqual(found, frozenset())
 
 
 class TestDrain(unittest.TestCase):
