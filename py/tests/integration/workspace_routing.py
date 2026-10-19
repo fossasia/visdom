@@ -41,6 +41,7 @@ class Gateway:
     def __init__(self, refusal=None):
         self.refusal = refusal
         self.sessions = []
+        self.full = {}
 
     def resolve(self, api_key, slug):
         if self.refusal is not None:
@@ -55,6 +56,9 @@ class Gateway:
 
     async def resolve_off_loop(self, method, credential, slug):
         return getattr(self, method)(credential, slug)
+
+    def storage_refusal(self, workspace_id):
+        return self.full.get(workspace_id)
 
 
 def with_gateway(app, gateway):
@@ -184,6 +188,28 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
         response = self.post_as("key-v", "/env_state", {})
 
         self.assertEqual(response.code, 200)
+
+    def test_a_full_workspace_refuses_new_plots_and_says_why(self):
+        self.gateway.full["ws-a"] = "out of storage"
+
+        response = self.write({"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"})
+
+        self.assertEqual(response.code, 402)
+        self.assertEqual(json.loads(response.body), {"error": "out of storage"})
+        self.assertEqual(windows(self.space("ws-a")), {})
+
+    def test_a_full_workspace_can_still_be_read_and_cleared(self):
+        self.space("ws-a").state["old"] = {"jsons": {"w": {}}, "reload": {}}
+        self.gateway.full["ws-a"] = "out of storage"
+
+        read = self.post_as("key-a", "/env_state", {})
+        closed = self.post_as("key-a", "/close", {"eid": "old", "win": "w"})
+        deleted = self.post_as("key-a", "/delete_env", {"eid": "old"})
+
+        self.assertEqual(read.code, 200)
+        self.assertEqual(closed.code, 200)
+        self.assertEqual(deleted.code, 200)
+        self.assertNotIn("old", self.space("ws-a").state)
 
     def test_a_key_from_another_workspace_gets_the_gateways_answer(self):
         response = self.write({"X-Visdom-Workspace": "beta", "X-API-KEY": "key-a"})
