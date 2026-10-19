@@ -20,6 +20,7 @@ place: this asks the component that owns the routing decision rather than
 reimplementing it.
 """
 
+import ipaddress
 import logging
 import socket as socket_module
 
@@ -39,24 +40,39 @@ WITHDRAWN_REASON = "this workspace is no longer available, contact an administra
 UPSTREAM_HEADER = "X-Visdom-Upstream"
 
 
-def local_address(port):
-    """This instance's address as the proxy would name it in an upstream."""
+def local_addresses(port):
+    """Every address the proxy might name this instance by in an upstream.
+
+    Empty when the hostname does not resolve, or resolves only to loopback,
+    which the proxy never names. The monitor then stays off: without its own
+    address it would take every workspace for moved and close every viewer.
+    """
     try:
-        return "%s:%d" % (
-            socket_module.gethostbyname(socket_module.gethostname()),
-            port,
+        found = socket_module.getaddrinfo(
+            socket_module.gethostname(), port, proto=socket_module.IPPROTO_TCP
         )
     except OSError:
-        return None
+        return frozenset()
+    addresses = set()
+    for info in found:
+        host = info[4][0].split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_unspecified:
+            continue
+        addresses.add(("[%s]:%d" if ip.version == 6 else "%s:%d") % (host, port))
+    return frozenset(addresses)
 
 
 class OwnershipMonitor:
-    def __init__(self, app, proxy_url, probe_path, interval, self_address):
+    def __init__(self, app, proxy_url, probe_path, interval, self_addresses):
         self.app = app
         self.proxy_url = proxy_url.rstrip("/")
         self.probe_path = probe_path
         self.interval = interval
-        self.self_address = self_address
+        self.self_addresses = frozenset(self_addresses or ())
         self.callback = None
         self.client = AsyncHTTPClient()
 
@@ -94,14 +110,14 @@ class OwnershipMonitor:
 
     async def check(self):
         manager = getattr(self.app, "workspace_env_manager", None)
-        if manager is None or not self.self_address:
+        if manager is None or not self.self_addresses:
             return 0
         closed = 0
         for _workspace_id, space in manager.workspace_spaces():
             if not space.subs or not space.slug:
                 continue
             owner = await self.owner_of(space.slug)
-            if owner is None or owner == self.self_address:
+            if owner is None or owner in self.self_addresses:
                 continue
             closed += self.evict(space, owner)
         return closed
