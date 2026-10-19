@@ -148,9 +148,11 @@ def _combine_written(futures):
     return combined
 
 
-def _purge_all(storage, workspace_id, expired):
-    removed = 0
+def _purge_all(storage, workspace_id, expired, stop=None):
+    purged = []
     for item in expired:
+        if stop is not None and stop():
+            break
         try:
             purge_env(storage, item["eid"])
         except Exception as exc:
@@ -158,8 +160,8 @@ def _purge_all(storage, workspace_id, expired):
                 "could not retire %s in %s: %s", item["eid"], workspace_id, exc
             )
             continue
-        removed += 1
-    return removed
+        purged.append(item["eid"])
+    return purged
 
 
 class Application(tornado.web.Application):
@@ -493,6 +495,9 @@ class Application(tornado.web.Application):
         ``retire_workspace_off_loop`` is the same for the internal endpoint, with
         the disk scan and a dormant workspace's file removals on the scan thread,
         so a large workspace does not hold up every other request meanwhile.
+        If the workspace is loaded while those removals run, they stop, and an
+        environment already removed that something has since read or written is
+        saved again rather than dropped.
         """
         manager = self.workspace_env_manager
         expired = manager.expired_envs(workspace_id, older_than_days)
@@ -502,7 +507,7 @@ class Application(tornado.web.Application):
         if space is not None:
             return self._retire_loaded(space, workspace_id, expired, answer)
         storage = manager.workspace_storage(workspace_id)
-        answer["removed"] = _purge_all(storage, workspace_id, expired)
+        answer["removed"] = len(_purge_all(storage, workspace_id, expired))
         return answer
 
     async def retire_workspace_off_loop(
@@ -518,14 +523,32 @@ class Application(tornado.web.Application):
         if space is not None:
             return self._retire_loaded(space, workspace_id, expired, answer)
         storage = manager.workspace_storage(workspace_id)
-        answer["removed"] = await manager.on_scan_thread(
-            _purge_all, storage, workspace_id, expired
+        purged = await manager.on_scan_thread(
+            _purge_all,
+            storage,
+            workspace_id,
+            expired,
+            lambda: manager.loaded_space(workspace_id) is not None,
         )
+        answer["removed"] = len(purged)
         space = manager.loaded_space(workspace_id)
         if space is not None:
-            late = [item for item in expired if item["eid"] in space.state]
-            self._retire_loaded(space, workspace_id, late, {"removed": 0})
+            self._settle_late_load(space, workspace_id, purged)
         return answer
+
+    def _settle_late_load(self, space, workspace_id, purged):
+        stale = []
+        for eid in purged:
+            env = space.state.get(eid)
+            if env is None:
+                continue
+            untouched = isinstance(env, LazyEnvData) and not env.is_loaded
+            busy = space.dirty_envs.get(eid) or eid in space.saving_envs
+            if untouched and not busy:
+                stale.append({"eid": eid})
+            else:
+                space.mark_dirty(eid)
+        self._retire_loaded(space, workspace_id, stale, {"removed": 0})
 
     def _retirement(self, workspace_id, expired, dry_run):
         space = self.workspace_env_manager.loaded_space(workspace_id)
