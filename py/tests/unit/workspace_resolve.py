@@ -72,6 +72,20 @@ def test_the_cache_is_per_key_and_workspace(gateway):
     assert gateway.call_count == 3
 
 
+def test_a_full_workspace_is_remembered_until_the_gateway_says_otherwise(gateway):
+    manager = WorkspaceManager(gateway_url="http://gateway:8085", cache_ttl=0)
+    full = {"workspace_id": "ws-a", "role": "member", "storage_full": "out of room"}
+    gateway.return_value = answer(200, full)
+
+    manager.resolve("key-a", "alpha")
+    assert manager.storage_refusal("ws-a") == "out of room"
+    assert manager.storage_refusal("ws-b") is None
+
+    gateway.return_value = answer(200, {"workspace_id": "ws-a", "role": "member"})
+    manager.resolve_session("token", "alpha")
+    assert manager.storage_refusal("ws-a") is None
+
+
 def test_a_refusal_carries_the_gateways_status_and_reason(gateway):
     gateway.return_value = answer(403, {"detail": "Not a member of this workspace"})
     manager = WorkspaceManager(gateway_url="http://gateway:8085")

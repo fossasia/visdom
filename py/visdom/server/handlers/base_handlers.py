@@ -34,6 +34,8 @@ WRITE_ENDPOINTS = {
     "upload_env",
 }
 
+FILL_ENDPOINTS = WRITE_ENDPOINTS - {"close", "delete_env"}
+
 
 class WorkspaceScopedMixin:
     """Shared workspace resolution and state-binding for HTTP and socket handlers.
@@ -236,7 +238,8 @@ class BaseHandler(
         ``/vis/w/<slug>/`` path on the browser read path), so ordinary visdom
         traffic (health checks, keyless clients) is unaffected. Authenticates via
         either the X-API-KEY header (write path) or the ``session_token`` cookie
-        (browser read path), denies writes for the viewer role, and re-points this
+        (browser read path), denies writes for the viewer role, denies new data
+        while the gateway says the workspace is out of storage, and re-points this
         handler's state/storage/subs/sources at that workspace's isolated space so
         all subsequent handler logic operates on that workspace's environments.
         """
@@ -256,15 +259,20 @@ class BaseHandler(
             self.set_status(403)
             self.finish({"error": "Your role is read-only in this workspace."})
             return
+        refusal = self.workspace_manager.storage_refusal(workspace_id)
+        if refusal and self._writes(FILL_ENDPOINTS):
+            self.set_status(402)
+            self.finish({"error": refusal})
+            return
 
         self.bind_workspace(workspace_id)
 
-    def _writes(self):
+    def _writes(self, endpoints=WRITE_ENDPOINTS):
         endpoint = self.request.path.rstrip("/").rsplit("/", 1)[-1]
         return (
             self.request.method == "POST"
             and not self.path_args
-            and endpoint in WRITE_ENDPOINTS
+            and endpoint in endpoints
         )
 
     def get_current_user(self):
