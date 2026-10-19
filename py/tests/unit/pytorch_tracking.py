@@ -331,6 +331,79 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual([seq for _, seq in by_name["Train Loss"]], [1, 2])
         self.assertEqual([seq for _, seq in by_name["Val Loss"]], [1])
 
+    def test_failed_send_is_retried_through_full_create_append_lifecycle(self):
+        """End-to-end regression test requested in review: exercises the
+        real Visdom.line() -> scatter() -> _send() path (only the lowest-
+        level _send transport is mocked, never viz.line() itself) across
+        window creation and several appends, for two interleaved metrics,
+        with one append genuinely failing (a non-raising False return) and
+        later succeeding on retry.
+
+        Verifies, together:
+          - real Visdom plotting behaviour: each metric's window is
+            created once and every later call (including the retried one)
+            reuses that exact same win id, across both metrics
+            independently;
+          - RunTracker per-window sequencing stays correct: the failed
+            append is never recorded, the metric it belongs to still ends
+            up with a gap-free [1, 2, 3] sequence once the retry succeeds,
+            and the unrelated metric's own sequence is untouched by the
+            other metric's failure.
+        """
+        call_count = {"n": 0}
+        win_ids = {"n": 0}
+
+        def _send_with_one_failure(msg, **kw):
+            call_count["n"] += 1
+            if call_count["n"] == 3:  # Train Loss's first append
+                return False
+            if msg.get("win"):
+                return msg["win"]
+            win_ids["n"] += 1
+            return "win_{}".format(win_ids["n"])
+
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", side_effect=_send_with_one_failure):
+            with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                tracker.log("Train Loss", 1.0)  # call 1: create TL -> win_1
+                tracker.log("Val Loss", 2.0)  # call 2: create VL -> win_2
+                tracker.log("Train Loss", 0.9)  # call 3: append TL -> FAILS
+                # (a non-raising False return from _send -- unlike an
+                # exception -- is not itself warning-worthy; see
+                # test_failed_create_send_is_not_tracked)
+                tracker.log("Val Loss", 1.8)  # call 4: append VL -> win_2, ok
+                # call 5: retries the failed 0.9 append (succeeds) then
+                # call 6: sends this call's own 0.8 (also succeeds)
+                tracker.log("Train Loss", 0.8)
+                tracker.log("Val Loss", 1.7)  # call 7: append VL -> win_2, ok
+        run.finish()
+
+        # Visdom plotting behaviour: each metric stayed on exactly one
+        # window throughout, including across the failure+retry.
+        self.assertEqual(tracker._wins["Train Loss"], "win_1")
+        self.assertEqual(tracker._wins["Val Loss"], "win_2")
+        self.assertNotIn("Train Loss", tracker._pending)
+        self.assertNotIn("Val Loss", tracker._pending)
+
+        # RunTracker sequencing: the failed append never got recorded, so
+        # Train Loss ends up with exactly its 3 genuinely-sent values, in
+        # order, numbered without a gap -- and Val Loss's own sequence was
+        # never touched by Train Loss's unrelated failure.
+        updates = self._plot_update_events(run)
+        by_name = {}
+        for e in updates:
+            by_name.setdefault(e["data"]["name"], []).append(
+                (e["data"]["win"], e["data"]["value"], e["data"]["window_update_seq"])
+            )
+        self.assertEqual(
+            by_name["Train Loss"],
+            [("win_1", 1.0, 1), ("win_1", 0.9, 2), ("win_1", 0.8, 3)],
+        )
+        self.assertEqual(
+            by_name["Val Loss"],
+            [("win_2", 2.0, 1), ("win_2", 1.8, 2), ("win_2", 1.7, 3)],
+        )
+
     def test_failed_create_send_is_not_tracked(self):
         """Regression test for a flagged review issue ("failed sends can
         still be recorded as successful"): a client built with

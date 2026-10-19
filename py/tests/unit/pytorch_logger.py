@@ -132,13 +132,29 @@ class TestPlotting(unittest.TestCase):
         self.assertNotIn("loss", self.logger._wins)
 
     def test_window_is_created_again_once_the_server_recovers(self):
+        """Recovery must retry the point that actually failed (0.9), not
+        silently drop it in favor of whatever value arrives next (0.8) --
+        both end up sent, in order, once the server is back."""
         self.logger.viz.line.side_effect = lambda *a, **kw: False
         self.logger.log("loss", 0.9)
         self.logger.viz.line.side_effect = lambda *a, **kw: Mock()
+        self.logger.viz.line.reset_mock()
         self.logger.log("loss", 0.8)
-        kwargs = self.logger.viz.line.call_args.kwargs
-        self.assertNotIn("win", kwargs)
+        calls = self.logger.viz.line.call_args_list
+        self.assertEqual(len(calls), 2)
+        # First: the originally-failed creation is retried as-is.
+        retry_kwargs = calls[0].kwargs
+        self.assertNotIn("win", retry_kwargs)
+        self.assertEqual(retry_kwargs["X"], [1])
+        self.assertEqual(retry_kwargs["Y"], [0.9])
         self.assertIn("loss", self.logger._wins)
+        # Then: this call's own (newer) value is sent too, as an append.
+        append_kwargs = calls[1].kwargs
+        self.assertEqual(append_kwargs["win"], self.logger._wins["loss"])
+        self.assertEqual(append_kwargs["update"], "append")
+        self.assertEqual(append_kwargs["X"], [2])
+        self.assertEqual(append_kwargs["Y"], [0.8])
+        self.assertNotIn("loss", self.logger._pending)
 
     def test_distinct_metrics_get_distinct_windows(self):
         self.logger.log("loss", 0.9)
@@ -181,17 +197,22 @@ class TestContextManager(unittest.TestCase):
 
     def test_failed_interval_send_is_kept_for_the_exit_flush(self):
         """A failed send must not clear the buffer, or the value is lost
-        even when the server is back by the time the block exits."""
+        even when the server is back by the time the block exits. The
+        point that actually failed (call 1, the only one that was ever
+        attempted while the server was down -- calls 2-4 are off-interval
+        and never attempt a send, and call 5's due-call retry of call 1
+        also fails) is the one that must survive and eventually get
+        flushed -- not whatever value happened to arrive last."""
         logger = _logger(log_every=5)
         logger.viz.line.side_effect = lambda *a, **kw: False
         with logger as tracker:
             for i in range(1, 6):
                 tracker.log("loss", float(i))
-            self.assertEqual(tracker._pending["loss"], (5, 5.0, "epoch"))
+            self.assertEqual(tracker._pending["loss"], (1, 1.0, "epoch"))
             logger.viz.line.side_effect = lambda *a, **kw: Mock()
             logger.viz.line.reset_mock()
         logger.viz.line.assert_called_once()
-        self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [5.0])
+        self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [1.0])
 
 
 class TestLogEvery(unittest.TestCase):
@@ -234,6 +255,54 @@ class TestLogEvery(unittest.TestCase):
         logger.log("loss", 3.0)
         logger.viz.line.assert_not_called()
         self.assertIn("loss", logger._pending)
+
+    def test_failed_due_point_is_not_overwritten_by_later_throttled_calls(self):
+        """Regression test for the exact silent-data-loss scenario flagged
+        in review: a point that fails on its due call must survive every
+        off-interval call that follows (which must not overwrite it, nor
+        attempt their own send), and must be the point that is eventually
+        retried -- not replaced by -- once the server recovers.
+
+            log_every = 5
+            call 1 -> plotted (1.0)
+            call 2..4 -> buffered (2.0, 3.0, 4.0 -- each just overwrites
+                         the one before, ordinary throttling)
+            call 5 -> due, send fails -> pending = 5.0
+            call 6 -> throttled: must NOT overwrite pending with 6.0
+            call 7 -> throttled: must NOT overwrite pending with 7.0
+            call 8 -> throttled: must NOT overwrite pending with 8.0
+            call 9 -> throttled: must NOT overwrite pending with 9.0
+            call 10 -> due, server recovered: retries 5.0 (not 10.0)
+        """
+        logger = _logger(log_every=5)
+        for i in range(1, 5):
+            logger.log("loss", float(i))  # 1 plotted, 2/3/4 buffered
+
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        logger.log("loss", 5.0)  # due call 5 -> fails
+        self.assertEqual(logger._pending["loss"], (5, 5.0, "epoch"))
+
+        logger.viz.line.reset_mock()
+        for i in range(6, 10):
+            logger.log("loss", float(i))  # off-interval, must not send
+        logger.viz.line.assert_not_called()
+        self.assertEqual(
+            logger._pending["loss"],
+            (5, 5.0, "epoch"),
+            "a failed due-call point must not be replaced by newer, "
+            "never-attempted throttled values",
+        )
+
+        logger.viz.line.side_effect = lambda *a, **kw: Mock()
+        logger.viz.line.reset_mock()
+        logger.log("loss", 10.0)  # due call 10, server recovered
+        calls = logger.viz.line.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].kwargs["X"], [5])
+        self.assertEqual(calls[0].kwargs["Y"], [5.0])
+        self.assertEqual(calls[1].kwargs["X"], [10])
+        self.assertEqual(calls[1].kwargs["Y"], [10.0])
+        self.assertNotIn("loss", logger._pending)
 
     def test_plotted_value_after_buffered_one_drops_the_buffer(self):
         logger = _logger(log_every=2)

@@ -153,6 +153,12 @@ class VisdomLogger:
         self._step = {}
         self._counter = {}
         self._pending = {}
+        # Names whose _pending entry is a point that was actually attempted
+        # and failed (as opposed to a value merely withheld by log_every
+        # throttling and never sent at all). log() uses this to decide
+        # whether a metric's single pending slot may be overwritten by a
+        # newer value or must first be retried -- see log() below.
+        self._pending_failed = set()
 
     @staticmethod
     def _check_experiment_reply(reply, action):
@@ -214,8 +220,9 @@ class VisdomLogger:
 
         Returns True if the point was actually plotted, False if the send
         failed (or raised) -- log() uses this to decide whether to clear
-        the metric's pending buffer or keep the value there for a retry
-        on the metric's next call, or at the context manager's exit flush.
+        the metric's pending buffer or keep the value there for a retry on
+        the metric's next *due* call (see log()'s own handling of
+        self._pending_failed), or at the context manager's exit flush.
         """
         win = None
         try:
@@ -383,6 +390,16 @@ class VisdomLogger:
             plotted immediately, and any value still waiting on log_every
             when the context manager exits is flushed automatically — no
             metric is ever silently dropped.
+
+            This also holds for a point that was actually attempted and
+            failed (as opposed to one merely withheld by throttling): it is
+            retried on the metric's next due call (the next call where
+            log_every would otherwise trigger a send) rather than being
+            silently replaced by whatever newer value happens to arrive in
+            the meantime. Off-interval calls that arrive while a failed
+            point is still waiting leave it untouched -- they neither
+            attempt a send nor overwrite it -- so it survives, unmodified,
+            until a due call can actually retry it.
         """
         if not isinstance(name, str) or not name:
             raise TypeError("name must be a non-empty string, got {!r}".format(name))
@@ -401,10 +418,47 @@ class VisdomLogger:
         x_val = x if x is not None else self._step.get(name, 1) - 1
 
         if self._counter[name] > 1 and self._counter[name] % self.log_every != 0:
-            self._pending[name] = (x_val, value, xlabel)
+            # Off-interval ("throttled") call: ordinarily just buffer this
+            # value for the next due call, same as always. But if the
+            # pending slot already holds a point whose *send was actually
+            # attempted and failed*, it must not be silently replaced here
+            # -- that would mean it never gets retried at all (see the
+            # bottom of this method, and _plot()'s docstring, for where the
+            # retry happens). A value that was merely buffered-and-never-
+            # sent is fine to overwrite, same as before.
+            if name not in self._pending_failed:
+                self._pending[name] = (x_val, value, xlabel)
             return
+
+        # This call is "due": either the first call ever made for this
+        # metric, or the log_every-th call since its last send attempt. If
+        # an earlier send for this metric failed, that failed point is
+        # retried first, before this call's own value is considered at all
+        # -- it is the oldest point still owed to the server, and letting a
+        # newer value jump ahead of it is exactly the silent-data-loss bug
+        # this retry exists to prevent.
+        if name in self._pending_failed:
+            failed_x, failed_value, failed_xlabel = self._pending[name]
+            if self._plot(name, failed_x, failed_value, failed_xlabel):
+                self._pending.pop(name, None)
+                self._pending_failed.discard(name)
+                # Fall through: the retry succeeded, so this call's own
+                # value still gets its normal due-call treatment below,
+                # rather than being parked until some future call (which,
+                # with log_every == 1, might never arrive via the
+                # throttling branch above and would otherwise strand it in
+                # _pending indefinitely).
+            else:
+                # Still failing: keep retrying this exact point on every
+                # subsequent due call and leave it as the sole occupant of
+                # the pending slot. This call's own (newer, never-sent)
+                # value is intentionally not queued anywhere -- there is
+                # only one pending slot per metric, and letting the new
+                # value take it would reproduce the exact bug being fixed.
+                return
 
         if self._plot(name, x_val, value, xlabel):
             self._pending.pop(name, None)
         else:
             self._pending[name] = (x_val, value, xlabel)
+            self._pending_failed.add(name)
