@@ -135,7 +135,7 @@ vis.audio(waveform, opts=dict(sample_frequency=44100))
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `opts.sample_frequency` | `44100` | Sample frequency (`integer` > 0) |
+| `opts.sample_frequency` | `44100` | Sample frequency (`integer` > 0; a whole-number float such as `16e3` is accepted) |
 
 :::note
 Visdom uses scipy to convert tensor inputs to wave files. Some versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
