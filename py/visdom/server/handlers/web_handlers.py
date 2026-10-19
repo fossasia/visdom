@@ -2360,7 +2360,7 @@ class RetireHandler(InternalHandler):
     def initialize(self, app=None):
         self._app = app
 
-    def post(self):
+    async def post(self):
         try:
             payload = tornado.escape.json_decode(self.request.body or b"{}")
         except ValueError:
@@ -2386,14 +2386,14 @@ class RetireHandler(InternalHandler):
             self.write({"error": "older_than_days must be greater than zero"})
             return
 
-        retire = getattr(self._app, "retire_workspace", None)
+        retire = getattr(self._app, "retire_workspace_off_loop", None)
         if retire is None:
             self.set_status(503)
             self.write({"error": "this server has no workspace manager"})
             return
 
         try:
-            answer = retire(
+            answer = await retire(
                 workspace_id,
                 older_than_days,
                 dry_run=bool(payload.get("dry_run", True)),

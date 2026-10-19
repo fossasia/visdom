@@ -250,6 +250,11 @@ class WorkspaceEnvManager:
                 (wid, state) for wid, state in self._states.items() if wid is not None
             ]
 
+    async def on_scan_thread(self, fn, *args):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, fn, *args
+        )
+
     async def stored_workspaces_off_loop(self):
         return await asyncio.get_running_loop().run_in_executor(
             self._scan_pool, self.stored_workspaces

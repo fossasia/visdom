@@ -15,9 +15,11 @@ the environment behind in memory, because the next autosave would write it
 straight back to disk.
 """
 
+import asyncio
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 
@@ -136,6 +138,52 @@ class TestRetention(unittest.TestCase):
         self.app.workspace_env_manager.space(self.workspace, slug="ws")
         warm = self.app.retire_workspace(self.workspace, 7, dry_run=True)
         self.assertTrue(warm["loaded"])
+
+    def retire_off_loop(self, dry_run=False):
+        manager = self.app.workspace_env_manager
+        scanned_on = []
+        scan = manager.expired_envs
+
+        def expired_envs(*args):
+            scanned_on.append(threading.current_thread().name)
+            return scan(*args)
+
+        manager.expired_envs = expired_envs
+        answer = asyncio.run(
+            self.app.retire_workspace_off_loop(self.workspace, 7, dry_run=dry_run)
+        )
+        return answer, scanned_on
+
+    def test_the_endpoint_scans_the_disk_off_the_loop(self):
+        self.write_env("january", days_old=30)
+
+        answer, scanned_on = self.retire_off_loop(dry_run=True)
+
+        self.assertEqual(answer["envs"], ["january"])
+        self.assertEqual(len(scanned_on), 1)
+        self.assertNotEqual(scanned_on[0], threading.current_thread().name)
+
+    def test_the_endpoint_removes_a_dormant_workspaces_files_off_the_loop(self):
+        old = self.write_env("january", days_old=30)
+        self.write_env("yesterday", days_old=1)
+
+        answer, _ = self.retire_off_loop()
+
+        self.assertEqual(answer["removed"], 1)
+        self.assertFalse(answer["loaded"])
+        self.assertEqual(self.files(), ["yesterday.json"])
+        self.assertFalse(os.path.exists(old))
+
+    def test_the_endpoint_removes_a_loaded_env_from_memory_too(self):
+        old = self.write_env("january", days_old=30)
+        space = self.app.workspace_env_manager.space(self.workspace, slug="ws")
+        space.state["january"] = {"jsons": {}, "reload": {}}
+
+        answer, _ = self.retire_off_loop()
+
+        self.assertEqual(answer["removed"], 1)
+        self.assertNotIn("january", space.state)
+        self.assertTrue(self.settle(old))
 
     def test_a_workspace_with_no_directory_is_not_an_error(self):
         answer = self.app.retire_workspace("never-seen", 7, dry_run=False)

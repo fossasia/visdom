@@ -151,6 +151,20 @@ def _combine_written(futures):
     return combined
 
 
+def _purge_all(storage, workspace_id, expired):
+    removed = 0
+    for item in expired:
+        try:
+            purge_env(storage, item["eid"])
+        except Exception as exc:
+            logging.warning(
+                "could not retire %s in %s: %s", item["eid"], workspace_id, exc
+            )
+            continue
+        removed += 1
+    return removed
+
+
 class Application(tornado.web.Application):
     def __init__(
         self,
@@ -479,10 +493,46 @@ class Application(tornado.web.Application):
         is meant to be run first on a deployment holding real work. The count is
         what was handed to the storage worker, which runs the removals in order
         behind any write already queued.
+
+        ``retire_workspace_off_loop`` is the same for the internal endpoint, with
+        the disk scan and a dormant workspace's file removals on the scan thread,
+        so a large workspace does not hold up every other request meanwhile.
         """
         manager = self.workspace_env_manager
-        space = manager.loaded_space(workspace_id)
         expired = manager.expired_envs(workspace_id, older_than_days)
+        answer, space, expired = self._retirement(workspace_id, expired, dry_run)
+        if dry_run or not expired:
+            return answer
+        if space is not None:
+            return self._retire_loaded(space, workspace_id, expired, answer)
+        storage = manager.workspace_storage(workspace_id)
+        answer["removed"] = _purge_all(storage, workspace_id, expired)
+        return answer
+
+    async def retire_workspace_off_loop(
+        self, workspace_id, older_than_days, dry_run=True
+    ):
+        manager = self.workspace_env_manager
+        expired = await manager.on_scan_thread(
+            manager.expired_envs, workspace_id, older_than_days
+        )
+        answer, space, expired = self._retirement(workspace_id, expired, dry_run)
+        if dry_run or not expired:
+            return answer
+        if space is not None:
+            return self._retire_loaded(space, workspace_id, expired, answer)
+        storage = manager.workspace_storage(workspace_id)
+        answer["removed"] = await manager.on_scan_thread(
+            _purge_all, storage, workspace_id, expired
+        )
+        space = manager.loaded_space(workspace_id)
+        if space is not None:
+            late = [item for item in expired if item["eid"] in space.state]
+            self._retire_loaded(space, workspace_id, late, {"removed": 0})
+        return answer
+
+    def _retirement(self, workspace_id, expired, dry_run):
+        space = self.workspace_env_manager.loaded_space(workspace_id)
         if space is not None:
             expired = [
                 item
@@ -498,27 +548,19 @@ class Application(tornado.web.Application):
             "bytes": sum(item["bytes"] for item in expired),
             "removed": 0,
         }
-        if dry_run or not expired:
-            return answer
+        return answer, space, expired
 
-        if space is not None:
-            storage = space.storage
-        else:
-            storage = manager.workspace_storage(workspace_id)
+    def _retire_loaded(self, space, workspace_id, expired, answer):
         for item in expired:
             eid = item["eid"]
             try:
-                if space is not None:
-                    space.state.pop(eid, None)
-                    delete_env_off_loop(space, eid)
-                else:
-                    purge_env(storage, eid)
+                space.state.pop(eid, None)
+                delete_env_off_loop(space, eid)
             except Exception as exc:
                 logging.warning("could not retire %s in %s: %s", eid, workspace_id, exc)
                 continue
             answer["removed"] += 1
-
-        if answer["removed"] and space is not None:
+        if answer["removed"]:
             broadcast_envs(space)
             logging.info(
                 "retired %d env(s) from workspace %s", answer["removed"], workspace_id
