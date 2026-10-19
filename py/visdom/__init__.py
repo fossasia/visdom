@@ -559,12 +559,25 @@ except (ImportError, AttributeError):
     pass
 
 
+#: The only modes `image()`/`images()` natively understand: 8-bit grayscale,
+#: RGB, and RGBA. Everything else (P, LA, PA, CMYK, I, I;16, F, 1, ...) is
+#: converted into one of these rather than handed over as whatever raw array
+#: `np.asarray` happens to produce for it.
+_SUPPORTED_PIL_MODES = {"L", "RGB", "RGBA"}
+
+
 def _pil_to_numpy(img):
     """Convert a PIL image to a CxHxW (or HxW for grayscale) numpy array,
-    the layout `image()`/`images()` expect. `P` (palette) images are
-    expanded to real colors first, since indices aren't pixel values."""
-    if img.mode == "P":
-        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+    the layout `image()`/`images()` expect. A mode outside `L`/`RGB`/`RGBA`
+    (palette, CMYK, high-bit-depth grayscale, 1-bit, ...) is converted to
+    RGBA (if it carries alpha) or RGB first -- its raw array either holds
+    indices rather than pixel values (`P`), has a channel count `image()`
+    doesn't support (`CMYK`, `LA`), or a dtype/scale it doesn't expect
+    (`I`, `I;16`, `F`, `1`)."""
+    if img.mode not in _SUPPORTED_PIL_MODES:
+        img = img.convert(
+            "RGBA" if "A" in img.mode or "transparency" in img.info else "RGB"
+        )
     arr = np.asarray(img)
     if arr.ndim == 3:
         arr = np.transpose(arr, (2, 0, 1))  # HxWxC -> CxHxW

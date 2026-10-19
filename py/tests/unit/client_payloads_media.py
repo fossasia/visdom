@@ -311,6 +311,30 @@ def test_image_accepts_a_palette_pil_image(capture_send):
     assert pixels[0, 0].tolist() == [200, 100, 50]
 
 
+@pytest.mark.parametrize(
+    "mode, expected_channels",
+    [
+        ("LA", 4),  # grayscale + alpha -> 2 raw channels, unsupported as-is
+        ("CMYK", 3),  # 4 raw channels, but not RGBA
+        ("1", 3),  # 1-bit bitmap, wrong dtype for the uint8 path
+        ("I", 3),  # 32-bit int grayscale, wrong dtype for the uint8 path
+    ],
+)
+def test_image_accepts_pil_modes_outside_l_rgb_rgba(
+    capture_send, mode, expected_channels
+):
+    """Regression: only 'P' was converted before reaching np.asarray, so
+    other unsupported modes either raised 'Unsupported number of image
+    channels' (LA, CMYK) or hit the float/int dtype branch with the wrong
+    scale (1, I). They now fall back to RGB(A) like any other unsupported
+    mode."""
+    img = Image.new(mode, (5, 4))
+    sent = capture_send(lambda v: v.image(img))
+    _, pixels = decode(sent)
+    assert pixels.shape[:2] == (4, 5)
+    assert pixels.shape[2] == expected_channels
+
+
 # ---------------------------------------------------------------- images ----
 
 
