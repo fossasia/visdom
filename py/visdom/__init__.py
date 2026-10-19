@@ -167,19 +167,23 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
-def _audio_sample_rate(rate):
-    """``rate`` as an int; a WAV header can only hold a positive whole number."""
+def _audio_sample_rate(rate, channels=1):
+    """``rate`` as an int that fits the WAV header of 16-bit audio.
+
+    The header stores the rate and the bytes per second (rate * channels * 2)
+    in 32 bits each. The range is checked before anything turns ``rate`` into
+    a float, so a huge int, NaN and inf are all rejected.
+    """
+    limit = 0xFFFFFFFF // (2 * channels)
     if (
         isinstance(rate, (bool, np.bool_))
         or not isinstance(rate, numbers.Real)
-        or not math.isfinite(rate)
-        or rate <= 0
-        or rate > 0xFFFFFFFF  # the WAV header stores it in 32 bits
+        or not 0 < rate <= limit
         or rate != int(rate)
     ):
         raise ValueError(
-            "sample_frequency should be a positive whole number up to "
-            "4294967295, got {!r}".format(rate)
+            "sample_frequency should be a positive whole number up to {} for "
+            "{}-channel audio, got {!r}".format(limit, channels, rate)
         )
     return int(rate)
 
@@ -2654,7 +2658,11 @@ class Visdom(object):
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         if tensor is not None:
-            opts["sample_frequency"] = _audio_sample_rate(opts["sample_frequency"])
+            # (N, 2) or (2, N) is stereo; the smaller side is the channel count.
+            channels = max(1, min(tensor.shape)) if tensor.ndim >= 2 else 1
+            opts["sample_frequency"] = _audio_sample_rate(
+                opts["sample_frequency"], channels
+            )
         _title2str(opts)
         _assert_opts(opts)
         assert (

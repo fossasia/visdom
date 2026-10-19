@@ -647,12 +647,43 @@ def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
 
 @pytest.mark.parametrize(
     "rate",
-    [22050.5, 0, -16000, 2**32, float("nan"), float("inf"), True, "16000"],
+    [22050.5, 0, -16000, 2**32, 10**400, float("nan"), float("inf"), True, "16000"],
+    ids=[
+        "fraction",
+        "zero",
+        "negative",
+        "2**32",
+        "huge_int",
+        "nan",
+        "inf",
+        "bool",
+        "str",
+    ],
 )
 def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
     with pytest.raises(ValueError, match="positive whole number"):
         offline_client.audio(
             tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate}
+        )
+
+
+@pytest.mark.parametrize(
+    "wave, limit",
+    [
+        (np.sin(np.arange(64)), 2**31 - 1),
+        (np.sin(np.arange(128)).reshape(64, 2), 2**30 - 1),
+    ],
+    ids=["mono", "stereo"],
+)
+def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
+    """Bytes per second (rate * channels * 2) must fit the 32-bit header too."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit})
+    )
+    assert _wav_rate(sent) == limit
+    with pytest.raises(ValueError, match="up to {}".format(limit)):
+        capture_send(
+            lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit + 1})
         )
 
 
