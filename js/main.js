@@ -212,6 +212,7 @@ const App = () => {
   const savedStateRecoveryToastShown = useRef(false);
   const serverLayoutErrorToastShown = useRef(false);
   const latestRef = useRef({});
+  const closingDetail = useRef(false);
   latestRef.current = {
     selection,
     sessionInfo,
@@ -249,11 +250,14 @@ const App = () => {
   };
 
   const closeDetail = () => {
+    // back() is async; a held key would call it again before popstate fires
+    if (closingDetail.current) return;
     if (
       latestRef.current.expandedPaneID != null &&
       window.history.state &&
       window.history.state.visdomDetail
     ) {
+      closingDetail.current = true;
       window.history.back();
     } else {
       setExpandedPaneID(null);
@@ -262,6 +266,7 @@ const App = () => {
 
   useEffect(() => {
     const onPop = () => {
+      closingDetail.current = false;
       const state = window.history.state;
       // only restore if still in the same env the entry was pushed from
       const valid =
