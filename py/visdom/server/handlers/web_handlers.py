@@ -1692,26 +1692,26 @@ class ExperimentLogHandler(BaseHandler):
                 def apply_metrics(store):
                     """Apply the request's observations, holding back a rejection.
 
-                    Each is applied in turn, as it was when every observation
-                    was its own read-append-write, so a metric the store
-                    refuses still leaves the ones before it recorded. The
-                    refusal is held rather than raised so that what did apply
-                    is persisted before the request reports it.
+                    The whole batch shares one read-append-write. Nothing can
+                    refuse a single observation -- an experiment that will not
+                    read, or one already finished, refuses the request before
+                    any of them is appended -- so either every observation in
+                    it is recorded or none is and nothing is written.
+
+                    The refusal is held rather than raised out of the mutation
+                    so that a refused request leaves the environment exactly
+                    as every other refused write leaves it: unfiled, unqueued,
+                    and answered from the one place that chooses a status.
                     """
-                    experiment = None
-                    for key, value in metrics.items():
-                        try:
-                            experiment = store.log_metric(
-                                eid, key, value, args.get("step")
-                            )
-                        except (
-                            ExperimentFinishedError,
-                            TypeError,
-                            ValueError,
-                        ) as error:
-                            rejected.append(error)
-                            break
-                    return experiment
+                    try:
+                        return store.log_metrics(eid, metrics, args.get("step"))
+                    except (
+                        ExperimentFinishedError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
+                        rejected.append(error)
+                        return None
 
                 experiment, is_new_env = await _write_experiment_metadata(
                     handler, eid, apply_metrics
