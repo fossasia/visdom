@@ -26,9 +26,11 @@ race a thread pool.
 
 import asyncio
 import json
+from unittest import mock
 
 import pytest
 
+from visdom.server.handlers import socket_handlers
 from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
 from visdom.utils.server_utils import count_deleted, push_deleted
 
@@ -849,6 +851,29 @@ def test_echo_reaches_every_source(env):
     send(first, cmd="echo", data="ping")
 
     assert sent(second)[-1]["data"] == "ping"
+
+
+def test_echo_encodes_once_for_every_source(env):
+    """Two sources, one encode of the echoed payload -- not one per source."""
+    first = open_source(env)
+    second = open_source(env)
+
+    calls = []
+    real = socket_handlers.json.dumps
+
+    def counted(*args, **kwargs):
+        calls.append(args[0] if args else None)
+        return real(*args, **kwargs)
+
+    # Encoded before the patch goes up: ``send`` would otherwise be counted
+    # too, since it builds its frame with the same ``json`` module.
+    frame = json.dumps({"cmd": "echo", "data": "ping"})
+    with mock.patch.object(socket_handlers.json, "dumps", counted):
+        send_raw(first, frame)
+
+    assert len(calls) == 1
+    assert first.messages[-1] == second.messages[-1]
+    assert sent(second)[-1] == {"cmd": "echo", "data": "ping"}
 
 
 def test_echo_does_not_fall_through_to_the_base_commands(env):
