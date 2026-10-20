@@ -92,3 +92,40 @@ def test_uncapped_or_short_matrix_preserves_input_order(capture_send, cap):
     trace = sent["payload"]["data"][0]
     assert trace["dimensions"][0]["values"] == list(range(4))
     np.testing.assert_array_equal(trace["line"]["color"], scores)
+
+
+@pytest.mark.parametrize("cap", [1, 2, 3])
+@pytest.mark.parametrize("optimized", [False, True])
+def test_capped_coordinates_require_scores_before_sending(cap, optimized):
+    command = [sys.executable]
+    if optimized:
+        command.append("-O")
+    command.extend(
+        [
+            "-c",
+            """
+from unittest.mock import Mock
+import numpy as np
+from visdom import Visdom
+
+client = Visdom.__new__(Visdom)
+client._send = Mock()
+try:
+    client.parallel_coordinates(
+        np.array([[1., 2.], [3., 4.]]),
+        opts={"max_experiments": %d},
+    )
+except ValueError as error:
+    if str(error) != "opts.max_experiments requires Y to be provided":
+        raise
+else:
+    raise RuntimeError("Missing scores accepted")
+client._send.assert_not_called()
+"""
+            % cap,
+        ]
+    )
+    result = subprocess.run(
+        command, capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode == 0, result.stderr

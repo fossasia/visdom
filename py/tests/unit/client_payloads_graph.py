@@ -645,10 +645,6 @@ def test_parallel_coordinates_keeps_an_explicit_size(capture_send):
         (dict(X=np.ones((2, 2)), Y=np.ones((2, 2))), "Y must be a 1D vector"),
         (dict(X=np.ones((2, 2)), Y=np.ones(3)), "must match number of rows in X"),
         (
-            dict(X=np.ones((2, 2)), opts=dict(max_experiments=1)),
-            "opts.max_experiments requires Y",
-        ),
-        (
             dict(X=np.ones((2, 2)), opts=dict(dimensions="ab")),
             "should be a list/tuple of length",
         ),

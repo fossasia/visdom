@@ -4692,7 +4692,8 @@ class Visdom(object):
                 or max_exp <= 0
             ):
                 raise ValueError("opts.max_experiments must be a positive integer")
-            assert Y is not None, "opts.max_experiments requires Y to be provided"
+            if Y is None:
+                raise ValueError("opts.max_experiments requires Y to be provided")
             if N > max_exp:
                 top_idx = np.lexsort((-Y, np.isnan(Y)))[:max_exp]
                 X = X[top_idx]
