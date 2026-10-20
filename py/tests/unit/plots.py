@@ -390,6 +390,106 @@ def test_line_3d_aspectmode_forwarded_to_scene(capture_send):
     assert sent["payload"]["layout"]["scene"]["aspectmode"] == "cube"
 
 
+# ----------------------------------------------------------------- traceopts ----
+#
+# ``scatter`` merges ``opts["traceopts"]["plotly"][<trace name>]`` into the
+# trace it built, and that merge is the only way a title can reach a trace.
+# The title normalization runs on it alone for that reason: the helper descends
+# into lists, so running it over the finished trace cost one call per plotted
+# coordinate and could rewrite nothing. These tests hold both halves -- the
+# normalization still happens, and the coordinates are not walked.
+
+
+def _normalize_spy():
+    """``_normalize_title_strings`` wrapped so the tests can see its arguments.
+
+    The helper recurses through the module global, so patching it records every
+    node it visits, not just the top-level call.
+    """
+    real = visdom._normalize_title_strings
+    seen = []
+
+    def spy(value):
+        seen.append(value)
+        return real(value)
+
+    return spy, seen
+
+
+def _traceopts(**plotly):
+    return {"traceopts": {"plotly": plotly}}
+
+
+def test_scatter_traceopts_title_string_is_normalized(capture_send):
+    """A bare string title in a user's trace options is still rewritten."""
+    sent = capture_send(
+        lambda v: v.line(np.array([1.0, 2.0]), opts=_traceopts(**{"1": {"title": "s"}}))
+    )
+    assert sent["payload"]["data"][0]["title"] == {"text": "s"}
+
+
+def test_scatter_traceopts_nested_title_is_normalized(capture_send):
+    """marker.colorbar.title is the one title plotly really allows on a trace."""
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]),
+            opts=_traceopts(**{"1": {"marker": {"colorbar": {"title": "scale"}}}}),
+        )
+    )
+    marker = sent["payload"]["data"][0]["marker"]
+    assert marker["colorbar"]["title"] == {"text": "scale"}
+
+
+def test_scatter_traceopts_without_a_title_are_merged_unchanged(capture_send):
+    """Normalizing the merged subtree must not disturb the rest of it."""
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]),
+            opts=_traceopts(**{"1": {"hovertemplate": "%{y}", "opacity": 0.5}}),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["hovertemplate"] == "%{y}"
+    assert trace["opacity"] == 0.5
+
+
+def test_scatter_traceopts_are_not_mutated(capture_send):
+    """The caller keeps their own options dict; the helper returns a new one."""
+    given = {"1": {"title": "s"}}
+    capture_send(lambda v: v.line(np.array([1.0, 2.0]), opts=_traceopts(**given)))
+    assert given == {"1": {"title": "s"}}
+
+
+def test_scatter_does_not_normalize_titles_over_the_trace(capture_send):
+    """The finished trace is never handed to the title helper.
+
+    Asserting on what the helper is called with rather than on how long the
+    call takes: a wall-clock budget is not safe on a shared CI runner, and the
+    cost here is one call per plotted point, which is a shape, not a duration.
+    """
+    spy, seen = _normalize_spy()
+    with patch("visdom._normalize_title_strings", side_effect=spy):
+        sent = capture_send(lambda v: v.line(np.array([1.0, 2.0, 3.0])))
+
+    trace = sent["payload"]["data"][0]
+    assert not any(isinstance(node, dict) and "type" in node for node in seen)
+    assert trace["y"] not in seen
+    assert trace["x"] not in seen
+    assert trace["y"] == [1.0, 2.0, 3.0]
+
+
+def test_scatter_normalizes_titles_over_the_merged_trace_options(capture_send):
+    """The other half: the subtree that can carry a title is still visited."""
+    spy, seen = _normalize_spy()
+    with patch("visdom._normalize_title_strings", side_effect=spy):
+        capture_send(
+            lambda v: v.line(
+                np.array([1.0, 2.0]), opts=_traceopts(**{"1": {"title": "s"}})
+            )
+        )
+    assert {"title": "s"} in seen
+
+
 # ------------------------------------------------------------------- heatmap ----
 
 
