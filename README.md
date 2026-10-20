@@ -223,6 +223,16 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
+11. `-internal_port` : A second port for the endpoints a gateway calls, `/_activity` and `/_metrics`. They are not served at all without it, and never on the main port.
+12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
+
+The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
+
+- `VISDOM_INTERNAL_READ_KEYS`: keys that may read `/_activity` and `/_metrics`.
+- `VISDOM_INTERNAL_ADMIN_KEYS`: keys for endpoints that change or remove data.
+- `VISDOM_METRICS_TOKENS`: bearer tokens for `/_metrics`, for scrapers that cannot sign.
+
+A signed request sends `X-Visdom-Timestamp` (Unix seconds) and `X-Visdom-Signature`, the hex HMAC-SHA256 of the method, the path with its query, the timestamp and the hex SHA-256 of the body, joined by newlines. A signature older or newer than 60 seconds is refused. With no key set, every signed request is refused, and `/_metrics` answers only a metrics token. `visdom.server.internal.signed_headers` builds the headers.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
@@ -299,6 +309,8 @@ The python visdom client takes a few options:
 - `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
+- `api_key`: API key sent as the `X-API-KEY` header on every request and on the socket, for servers behind a gateway that checks keys (default: `None`)
+- `workspace`: workspace sent as the `X-Visdom-Workspace` header alongside `api_key`, required when `api_key` is given (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 - `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
