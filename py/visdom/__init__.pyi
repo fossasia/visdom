@@ -76,6 +76,8 @@ class Visdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         proxies: Optional[Mapping[Text, Text]] = ...,
         offline: bool = ...,
         use_polling: bool = ...,
@@ -227,7 +229,7 @@ class Visdom:
     ) -> _SendReturn: ...
     def audio(
         self,
-        tensor: Tensor,
+        tensor: Tensor = ...,
         audiofile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
