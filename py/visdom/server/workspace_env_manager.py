@@ -21,14 +21,20 @@ Workspace ``None`` maps to the server's own state, so plain single-tenant or
 local visdom behaves exactly as before.
 """
 
+import asyncio
 import os
 import threading
+import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from visdom.data_model.json_store import JSONStore
 from visdom.server.server_state import ServerState
 from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
+
+# How long a disk scan is reused before the directories are walked again.
+DISK_SCAN_TTL = 30.0
 
 # Configuration a workspace inherits from the server it runs inside. Only the
 # containers and the storage differ per workspace; how the server behaves does
@@ -73,17 +79,70 @@ def build_state(storage, eager=False, ensure_main=True):
 
 
 class WorkspaceState(ServerState):
-    """One workspace's state, a ``ServerState`` in every respect the handlers
-    care about."""
+    """One workspace's state, and what an operator can ask about it.
 
-    def __init__(self, *, storage_executor=None, **kwargs):
+    A ServerState in every respect the handlers care about. The additions
+    are the slug, which the proxy hashes on and this process would otherwise
+    never learn, and enough activity to answer whether anyone is using the
+    workspace at all.
+    """
+
+    def __init__(self, *, slug=None, storage_executor=None, **kwargs):
         super().__init__(**kwargs)
+        self.slug = slug
+        self.last_write_at = None
+        # Counted here because a process serving many workspaces cannot have its
+        # own CPU divided between them afterwards. These are running totals for
+        # the life of the process, which is what a scraper expects of a counter.
+        self.writes = 0
+        self.broadcasts = 0
+        self.broadcast_bytes = 0
+        self.active_hour = None
+        self.active_minutes_mask = 0
         if storage_executor is not None:
             # One worker per workspace would mean a thread per tenant held for
             # the life of the process, and the ordering the single worker exists
             # to guarantee holds just as well across workspaces as within one.
             self.storage_executor.shutdown(wait=False)
             self.storage_executor = storage_executor
+
+    def mark_dirty(self, eid):
+        """Persist as usual, and remember that this workspace was written to."""
+        now = time.time()
+        self.last_write_at = now
+        self.writes += 1
+        self.mark_active_minute(now)
+        return super().mark_dirty(eid)
+
+    def mark_active_minute(self, now):
+        """Record that this minute of the hour had work in it.
+
+        Billing wants time spent working, which is not the same as time
+        connected: a dashboard left open overnight is idle, and a run that
+        writes at nine and again at five did not work for eight hours. A minute
+        with at least one write in it is the honest unit, and the smallest one
+        that does not simply restate the write count.
+
+        The hour is held as sixty bits rather than a count so that instances can
+        be combined. Three of them serving the same workspace in the same minute
+        have done one minute of work between them, and a union says so where a
+        sum would say three.
+        """
+        hour = int(now // 3600)
+        if hour != self.active_hour:
+            self.active_hour = hour
+            self.active_minutes_mask = 0
+        self.active_minutes_mask |= 1 << int((now % 3600) // 60)
+
+    def record_broadcast(self, messages, size):
+        """Note messages pushed to this workspace's viewers.
+
+        Counted at the push rather than per subscriber pair, so a message going
+        to ten viewers is ten messages and ten times the bytes: what is being
+        measured is work the instance did, and it did it ten times.
+        """
+        self.broadcasts += messages
+        self.broadcast_bytes += size
 
     def flush_envs(self, eids):
         """Persist as usual, but never hold marks a save can never clear.
@@ -101,6 +160,43 @@ class WorkspaceState(ServerState):
             return None
         return super().flush_envs(eids)
 
+    def last_active_at(self):
+        """When this workspace was last written to, as a unix timestamp.
+
+        Prefers the in-memory mark, which is exact but resets when the instance
+        restarts, and falls back to the mtime of the workspace's directory so a
+        restart reports a stale time rather than none at all.
+        """
+        if self.last_write_at is not None:
+            return self.last_write_at
+        env_path = getattr(self.storage, "env_path", None)
+        if not env_path:
+            return None
+        try:
+            return os.path.getmtime(env_path)
+        except OSError:
+            return None
+
+    def activity(self):
+        """Live socket counts for this workspace, plus when it was last written.
+
+        Readers and writers are counted separately because they mean different
+        things to an operator: a workspace with viewers but no sources is being
+        watched, one with sources and no viewers is being fed by a training run
+        nobody is looking at.
+        """
+        return {
+            "slug": self.slug,
+            "viewers": len(self.subs),
+            "writers": len(self.sources),
+            "last_active_at": self.last_active_at(),
+            "writes": self.writes,
+            "broadcasts": self.broadcasts,
+            "broadcast_bytes": self.broadcast_bytes,
+            "active_hour": self.active_hour,
+            "active_minutes_mask": self.active_minutes_mask,
+        }
+
 
 class WorkspaceEnvManager:
     def __init__(self, base_env_path, default_state, eager=False, live_queue=None):
@@ -110,17 +206,25 @@ class WorkspaceEnvManager:
         self.live_queue = live_queue
         self._states = {None: default_state}
         self._lock = threading.Lock()
+        self._disk_lock = threading.Lock()
+        self._scan_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="workspace-scan"
+        )
+        self._disk_cache = {}
+        self._disk_scanned_at = None
 
-    def space(self, workspace_id):
+    def space(self, workspace_id, slug=None):
         """Return the state for a workspace id, creating it on first use.
-        ``None`` returns the server's own (default) state."""
+        None returns the server's own (default) state."""
         if workspace_id is None:
             return self._states[None]
         with self._lock:
             state = self._states.get(workspace_id)
             if state is None:
-                state = self._create_space(workspace_id)
+                state = self._create_space(workspace_id, slug)
                 self._states[workspace_id] = state
+            if slug and state.slug != slug:
+                state.slug = slug
             return state
 
     def spaces(self):
@@ -142,7 +246,64 @@ class WorkspaceEnvManager:
                 (wid, state) for wid, state in self._states.items() if wid is not None
             ]
 
-    def _create_space(self, workspace_id):
+    async def stored_workspaces_off_loop(self):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, self.stored_workspaces
+        )
+
+    def stored_workspaces(self):
+        """Every workspace with a directory on disk, with its size and last write.
+
+        workspace_spaces only knows the workspaces something has touched since
+        this process started, so on its own it reports a freshly restarted server
+        as having no workspaces at all. Disk is the durable record, and it is what
+        makes a dormant workspace distinguishable from one that has merely not
+        been visited yet.
+
+        Cached, because this walks every workspace's files and neither a size nor
+        a last write needs to be accurate to the second.
+        """
+        if self.base_env_path is None:
+            return {}
+
+        now = time.monotonic()
+        with self._disk_lock:
+            if (
+                self._disk_scanned_at is not None
+                and now - self._disk_scanned_at < DISK_SCAN_TTL
+            ):
+                return self._disk_cache
+
+        root = os.path.join(self.base_env_path, "workspaces")
+        found = {}
+        try:
+            entries = list(os.scandir(root))
+        except OSError:
+            entries = []
+
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            total = 0
+            newest = 0.0
+            try:
+                for item in os.scandir(entry.path):
+                    try:
+                        stat = item.stat()
+                    except OSError:
+                        continue
+                    total += stat.st_size
+                    newest = max(newest, stat.st_mtime)
+            except OSError:
+                continue
+            found[entry.name] = {"bytes": total, "last_active_at": newest or None}
+
+        with self._disk_lock:
+            self._disk_cache = found
+            self._disk_scanned_at = now
+            return self._disk_cache
+
+    def _create_space(self, workspace_id, slug=None):
         """Build a workspace's state, inheriting the server's configuration.
 
         The containers and the storage are new; everything about how the server
@@ -172,6 +333,7 @@ class WorkspaceEnvManager:
             name: getattr(self.default_state, name) for name in _INHERITED_SETTINGS
         }
         state = WorkspaceState(
+            slug=slug,
             storage_executor=self.default_state.storage_executor,
             state=build_state(storage, eager=self.eager),
             subs={},

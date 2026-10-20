@@ -39,6 +39,7 @@ from visdom.server.handlers.experiments_handler import (
     make_live_queue,
 )
 from visdom.server.handlers.web_handlers import (
+    ActivityHandler,
     CloseHandler,
     CompareHandler,
     DataHandler,
@@ -53,6 +54,7 @@ from visdom.server.handlers.web_handlers import (
     ExperimentSuggestHandler,
     ForkEnvHandler,
     HealthHandler,
+    MetricsHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -274,6 +276,8 @@ class Application(tornado.web.Application):
                 UserSettingsHandler,
                 server_state_args,
             ),
+            (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
+            (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
