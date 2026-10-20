@@ -98,6 +98,11 @@ class TestRequestsFindTheirWorkspace(WorkspaceRoutingCase):
         self.assertEqual(len(windows(self.space("ws-a"))), 1)
         self.assertEqual(windows(self._app.server_state), {})
 
+    def test_a_keyed_write_records_the_workspace_slug(self):
+        self.write({"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"})
+
+        self.assertEqual(self.space("ws-a").slug, "alpha")
+
     def test_two_workspaces_keep_the_same_environment_apart(self):
         self.write({"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"})
         self.write({"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"})
@@ -316,6 +321,7 @@ def test_a_viewer_socket_joins_its_workspace(gated_app):
 
     space = gated_app.workspace_env_manager.space("ws-a")
     assert space.subs[sub.sid] is sub
+    assert space.slug == "alpha"
     assert gated_app.subs == {}
 
 
