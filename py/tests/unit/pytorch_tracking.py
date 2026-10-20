@@ -444,6 +444,20 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         "json_array": '["error", "readonly mode"]',
         "html_error": "<html><title>502 Bad Gateway</title></html>",
         "plain_text_error": "Internal Server Error",
+        # Single-token, whitespace-free, digit-free rejection bodies --
+        # exactly the shape a reverse proxy or auth layer in front of
+        # the Visdom server (not the server's own handlers, which
+        # either write an empty 401 body or a JSON 403 body) commonly
+        # returns, and the gap the old heuristic missed: no whitespace,
+        # doesn't start with "{[<", so it used to pass as a plausible
+        # window id. Every id Visdom itself generates contains a digit
+        # (a hex timestamp or a uuid4 suffix), so requiring one closes
+        # this without rejecting any real id.
+        "single_token_forbidden": "Forbidden",
+        "single_token_unauthorized": "Unauthorized",
+        "single_token_denied": "Denied",
+        "single_token_error_word": "ERROR",
+        "single_token_ok": "OK",
     }
 
     def test_rejection_bodies_are_not_mistaken_for_a_window_id_on_creation(self):
@@ -494,6 +508,59 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
                 updates = self._plot_update_events(run)
                 self.assertEqual(len(updates), 1)
                 self.assertEqual(updates[0]["data"]["value"], 0.5)
+
+    def test_true_response_after_a_real_window_id_is_not_mistaken_for_success(self):
+        """Regression test for the exact bug the _is_verified_win() fix
+        addresses: once a real window id has been cached for a metric
+        (from a genuinely successful creation), a later `True` response
+        must NOT be accepted as proof that *this* window was updated --
+        True only ever confirms the offline sentinel, and an
+        already-established real id must be echoed back exactly
+        instead. Before the fix, `win is True` was checked first and
+        short-circuited straight to "verified" regardless of
+        expected_win, so this append would have been wrongly tracked
+        under the cached win_1 id."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        results = iter(["win_1", True])
+        with patch.object(self.vis, "line", side_effect=lambda *a, **kw: next(results)):
+            with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                tracker.log("loss", 0.5)  # creates win_1, tracked
+                tracker.log("loss", 0.4)  # append returns True, must be skipped
+                # the real cached id must survive untouched -- not
+                # clobbered by the untrustworthy True response
+                self.assertEqual(tracker._wins["loss"], "win_1")
+        run.finish()
+        updates = self._plot_update_events(run)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["data"]["value"], 0.5)
+        self.assertEqual(updates[0]["data"]["win"], "win_1")
+
+    def test_true_response_after_a_real_window_id_also_skips_experiment_store(self):
+        """Same regression as above, for params=/ExperimentStore tracking
+        (viz.log_metrics()) rather than run=/RunTracker."""
+        metric_calls = []
+        results = iter(["win_1", True])
+        with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
+            with patch.object(
+                self.vis, "finish_experiment", return_value={"env_id": "e1"}
+            ):
+                with patch.object(
+                    self.vis,
+                    "log_metrics",
+                    side_effect=lambda metrics, step=None, env=None: metric_calls.append(
+                        metrics
+                    )
+                    or {"env_id": env},
+                ):
+                    with patch.object(
+                        self.vis, "line", side_effect=lambda *a, **kw: next(results)
+                    ):
+                        with VisdomLogger(
+                            self.vis, env="e1", params={"lr": 0.01}
+                        ) as tracker:
+                            tracker.log("loss", 0.5)  # creates win_1, tracked
+                            tracker.log("loss", 0.4)  # append True, must be skipped
+        self.assertEqual(metric_calls, [{"loss": 0.5}])
 
     def test_failed_send_also_skips_experiment_store_log_metrics(self):
         """The same genuine-failure check guards params=/ExperimentStore
@@ -635,6 +702,110 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
             VisdomLogger(self.vis, env="e1", run=run)
         self.assertEqual(len(caught), 0)
         run.finish()
+
+
+class TestWindowIdVerificationHeuristics(unittest.TestCase):
+    """Direct, table-driven coverage of _looks_like_a_window_id() and
+    _is_verified_win() in isolation, independent of any VisdomLogger
+    plumbing. These are the two building blocks every other test in
+    this file exercises indirectly; testing them directly pins down
+    every branch -- including ones no integration test happens to hit
+    -- and is what actually caught the two bugs fixed here (the
+    missing digit requirement, and the `win is True` ordering)."""
+
+    # --- _looks_like_a_window_id -------------------------------------
+
+    LOOKS_LIKE_WIN_ID_TRUE = {
+        "server_generated_uuid_style": "window_3f9a4b7c-1e2d-4a5b-8c6d-9e0f1a2b3c4d",
+        "client_offline_hex_timestamp_style": "window_18f3a2c9d0e",
+        "short_sequential_test_id": "win_1",
+        "another_sequential_test_id": "win_2",
+        "digit_only": "12345",  # a digit string is still a str, so it qualifies
+    }
+
+    LOOKS_LIKE_WIN_ID_FALSE = {
+        "none": None,
+        "empty_string": "",
+        "bool_true": True,
+        "bool_false": False,
+        "int": 12345,
+        "float": 1.5,
+        "dict": {"success": False},
+        "list": ["error"],
+        "json_object_string": '{"success": false}',
+        "json_array_string": '["error"]',
+        "html_string": "<html>502 Bad Gateway</html>",
+        "whitespace_only": "   ",
+        "multi_word_no_digit": "Internal Server Error",
+        "single_token_no_digit_forbidden": "Forbidden",
+        "single_token_no_digit_unauthorized": "Unauthorized",
+        "single_token_no_digit_error": "ERROR",
+        "single_token_no_digit_ok": "OK",
+        "leading_whitespace_digit": " win_1",
+        "trailing_whitespace_digit": "win_1 ",
+        "internal_whitespace_digit": "win 1",
+    }
+
+    def test_looks_like_a_window_id_accepts_plausible_ids(self):
+        for label, win in self.LOOKS_LIKE_WIN_ID_TRUE.items():
+            with self.subTest(label):
+                self.assertTrue(VisdomLogger._looks_like_a_window_id(win))
+
+    def test_looks_like_a_window_id_rejects_everything_else(self):
+        for label, win in self.LOOKS_LIKE_WIN_ID_FALSE.items():
+            with self.subTest(label):
+                self.assertFalse(VisdomLogger._looks_like_a_window_id(win))
+
+    # --- _is_verified_win ---------------------------------------------
+
+    def test_is_verified_win_fresh_creation_accepts_a_plausible_id(self):
+        # expected_win is None on a window's first-ever creation.
+        self.assertTrue(VisdomLogger._is_verified_win("win_1", None))
+
+    def test_is_verified_win_fresh_creation_rejects_rejection_bodies(self):
+        # Bug 1 regression: single-token, digit-free error bodies must
+        # not be mistaken for a freshly created window's id.
+        for label, body in (
+            ("forbidden", "Forbidden"),
+            ("unauthorized", "Unauthorized"),
+            ("error", "ERROR"),
+            ("json", '{"success": false}'),
+            ("html", "<html>error</html>"),
+            ("multi_word", "Internal Server Error"),
+        ):
+            with self.subTest(label):
+                self.assertFalse(VisdomLogger._is_verified_win(body, None))
+
+    def test_is_verified_win_fresh_creation_accepts_offline_sentinel(self):
+        self.assertTrue(VisdomLogger._is_verified_win(True, None))
+
+    def test_is_verified_win_append_requires_exact_match(self):
+        self.assertTrue(VisdomLogger._is_verified_win("win_1", "win_1"))
+        self.assertFalse(VisdomLogger._is_verified_win("win_2", "win_1"))
+        self.assertFalse(VisdomLogger._is_verified_win("Forbidden", "win_1"))
+
+    def test_is_verified_win_true_does_not_override_a_real_expected_win(self):
+        # Bug 2 regression: once a real window id is established, a
+        # later `True` must not be accepted in its place.
+        self.assertFalse(VisdomLogger._is_verified_win(True, "win_1"))
+
+    def test_is_verified_win_true_sentinel_requires_true_on_both_sides(self):
+        self.assertTrue(VisdomLogger._is_verified_win(True, True))
+        # a real-looking id does not satisfy an established True
+        # sentinel either -- the sentinel's identity is True itself
+        self.assertFalse(VisdomLogger._is_verified_win("win_1", True))
+
+    def test_is_verified_win_rejects_falsy_and_unverifiable_responses(self):
+        for label, win, expected_win in (
+            ("false_on_creation", False, None),
+            ("none_on_creation", None, None),
+            ("empty_string_on_creation", "", None),
+            ("int_on_creation", 12345, None),
+            ("false_on_append", False, "win_1"),
+            ("none_on_append", None, "win_1"),
+        ):
+            with self.subTest(label):
+                self.assertFalse(VisdomLogger._is_verified_win(win, expected_win))
 
 
 class TestVisdomLoggerBothIntegrationsTogether(unittest.TestCase):

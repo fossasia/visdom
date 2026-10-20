@@ -186,18 +186,29 @@ class VisdomLogger:
     @staticmethod
     def _looks_like_a_window_id(win):
         """Whether `win` could plausibly be a real window id: a single
-        token with no whitespace, not starting with '{', '[' or '<' --
-        which rules out JSON, HTML, and most plain-text error bodies.
+        token with no whitespace, not starting with '{', '[' or '<'
+        (which rules out JSON and HTML), and containing at least one
+        digit (which rules out plain-word error bodies like "Forbidden",
+        "Unauthorized" or "ERROR" -- every window id Visdom actually
+        generates, client-side (``"window_" + <hex timestamp>``) or
+        server-side (``"window_" + <uuid4>``), is built from a
+        random/hex/uuid suffix and so always contains a digit; a
+        caller-supplied win is never checked here since _plot() only
+        ever reaches this heuristic for server-generated ids).
         Visdom's transport returns the raw HTTP response body without
         checking the status code, so a rejected request can come back as
         an ordinary truthy string too, and this is what tells the two
         apart when there's nothing else to go on (see _is_verified_win).
+        This is still only a heuristic, not a guarantee -- a status-code
+        check at the transport level would be airtight where this can't
+        be, but is outside what this method can do with a plain string.
         """
         return (
             isinstance(win, str)
             and bool(win)
             and win[0] not in "{[<"
             and not any(c.isspace() for c in win)
+            and any(c.isdigit() for c in win)
         )
 
     @classmethod
@@ -206,19 +217,26 @@ class VisdomLogger:
         the server applied this point, strongly enough to record it to
         params=/run=.
 
-        True is always genuine (the offline sentinel). Otherwise, if
-        `expected_win` is itself trustworthy (True, or a value that looks
-        like a real window id), a real success must echo it back exactly
-        -- this is what makes an append's check airtight regardless of
-        what a failure response looks like. Without a trustworthy id to
-        compare against (a fresh creation, or a window whose cached id was
-        never actually verified), this falls back to just checking `win`
-        itself looks like a plausible id.
+        If `expected_win` is itself trustworthy (a value that looks like
+        a real window id, or the offline sentinel True), a real success
+        must echo it back exactly -- this is what makes an append's
+        check airtight regardless of what a failure response looks like,
+        and it is checked *before* the `win is True` fallback below so
+        that sentinel can't be used to rubber-stamp a mismatch against an
+        already-established id (e.g. a real cached window id with a
+        later True response -- that is not proof this specific window
+        was updated, whatever caused it). Without a trustworthy id to
+        compare against (a fresh creation, or a window whose cached id
+        was never actually verified), True is accepted as genuine (the
+        offline sentinel), and otherwise this falls back to just
+        checking `win` itself looks like a plausible id.
         """
+        if cls._looks_like_a_window_id(expected_win):
+            return win == expected_win
+        if expected_win is True:
+            return win is True
         if win is True:
             return True
-        if expected_win is True or cls._looks_like_a_window_id(expected_win):
-            return win == expected_win
         return cls._looks_like_a_window_id(win)
 
     def _plot(self, name, x_val, value, xlabel):
