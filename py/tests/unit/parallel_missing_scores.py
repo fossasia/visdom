@@ -4,6 +4,7 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -73,6 +74,7 @@ for cap in (0, -1, True, 1.5, "2"):
 client._send.assert_not_called()
 """,
         ],
+        cwd=Path(__file__).resolve().parents[2],
         capture_output=True,
         text=True,
         check=False,
@@ -126,6 +128,11 @@ client._send.assert_not_called()
         ]
     )
     result = subprocess.run(
-        command, capture_output=True, text=True, check=False, timeout=30
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
