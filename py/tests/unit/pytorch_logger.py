@@ -214,6 +214,35 @@ class TestContextManager(unittest.TestCase):
         logger.viz.line.assert_called_once()
         self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [1.0])
 
+    def test_failed_exit_flush_warns_and_preserves_the_pending_value(self):
+        """Regression test: __exit__ must not silently ignore _plot()'s
+        return value for the final flush. If the server is still down
+        when the context manager exits, the dropped point must (a) raise
+        a clear warning naming the metric and value, and (b) remain
+        inspectable on tracker._pending rather than vanishing outright."""
+        logger = _logger(log_every=5)
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        with self.assertWarns(UserWarning) as cm:
+            with logger as tracker:
+                tracker.log("loss", 1.0)  # due call, fails -> pending = 1.0
+                tracker.log("loss", 2.0)  # off-interval, never attempted
+        warning_text = str(cm.warning)
+        self.assertIn("loss", warning_text)
+        self.assertIn("1.0", warning_text)
+        self.assertEqual(tracker._pending["loss"], (1, 1.0, "epoch"))
+        self.assertIn("loss", tracker._pending_failed)
+
+    def test_successful_exit_flush_clears_pending_state(self):
+        """The happy-path complement of the above: once the final flush
+        actually succeeds, nothing is left dangling in _pending."""
+        logger = _logger(log_every=5)
+        with logger as tracker:
+            tracker.log("loss", 1.0)
+            tracker.log("loss", 2.0)  # buffered, flushed successfully on exit
+        self.assertNotIn("loss", tracker._pending)
+        self.assertNotIn("loss", tracker._pending_failed)
+        self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [2.0])
+
 
 class TestLogEvery(unittest.TestCase):
     def test_first_call_plotted_even_with_large_log_every(self):
@@ -302,6 +331,28 @@ class TestLogEvery(unittest.TestCase):
         self.assertEqual(calls[0].kwargs["Y"], [5.0])
         self.assertEqual(calls[1].kwargs["X"], [10])
         self.assertEqual(calls[1].kwargs["Y"], [10.0])
+        self.assertNotIn("loss", logger._pending)
+
+    def test_repeated_due_call_failures_coalesce_to_the_oldest_point(self):
+        """Documents the deliberate single-slot trade-off: if the retry of
+        a failed point itself keeps failing across several due calls, the
+        newer values seen on each of those calls are not queued anywhere
+        -- only the original failed point keeps getting retried -- until
+        either it succeeds or the context exits."""
+        logger = _logger(log_every=1)  # every call is "due"
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        logger.log("loss", 1.0)  # fails -> pending = 1.0
+        logger.log("loss", 2.0)  # retries 1.0, fails again -> 2.0 dropped
+        logger.log("loss", 3.0)  # retries 1.0, fails again -> 3.0 dropped
+        self.assertEqual(logger._pending["loss"], (1, 1.0, "epoch"))
+
+        logger.viz.line.side_effect = lambda *a, **kw: Mock()
+        logger.viz.line.reset_mock()
+        logger.log("loss", 4.0)  # retries 1.0 (succeeds), then sends 4.0
+        calls = logger.viz.line.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].kwargs["Y"], [1.0])
+        self.assertEqual(calls[1].kwargs["Y"], [4.0])
         self.assertNotIn("loss", logger._pending)
 
     def test_plotted_value_after_buffered_one_drops_the_buffer(self):

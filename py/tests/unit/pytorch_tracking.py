@@ -471,6 +471,44 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual(metric_calls, [])
         self.assertEqual(self._plot_update_events(run), [])
 
+    def test_readonly_rejection_body_is_not_mistaken_for_a_real_window_id(self):
+        """Regression test: Visdom's transport (_send()/_handle_post())
+        returns the raw HTTP response body without checking the status
+        code, so a rejected write (e.g. a readonly server's 403) can come
+        back as a non-empty, JSON-object-shaped string -- exactly as
+        truthy, and exactly as much a `str`, as a real window id. Such a
+        response must not be mistaken for a successfully-applied plot by
+        params=/run= tracking, for both the window-creation call and a
+        later append."""
+        rejection_body = (
+            '{"success": false, "error": "The server is running in readonly mode"}'
+        )
+        run = RunTracker("exp", out_dir=self.out_dir)
+        metric_calls = []
+        with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
+            with patch.object(
+                self.vis, "finish_experiment", return_value={"env_id": "e1"}
+            ):
+                with patch.object(
+                    self.vis,
+                    "log_metrics",
+                    side_effect=lambda metrics, step=None, env=None: metric_calls.append(
+                        metrics
+                    )
+                    or {"env_id": env},
+                ):
+                    with patch.object(
+                        self.vis, "line", side_effect=lambda *a, **kw: rejection_body
+                    ):
+                        with VisdomLogger(
+                            self.vis, env="e1", params={"lr": 0.01}, run=run
+                        ) as tracker:
+                            tracker.log("loss", 0.5)  # creation: rejected
+                            tracker.log("loss", 0.4)  # "append": rejected too
+        run.finish()
+        self.assertEqual(metric_calls, [])
+        self.assertEqual(self._plot_update_events(run), [])
+
     def test_failed_send_also_skips_experiment_store_log_metrics(self):
         """The same genuine-failure check guards params=/ExperimentStore
         tracking too, for the same reason: viz.log_metrics() must not

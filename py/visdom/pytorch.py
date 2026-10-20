@@ -66,6 +66,20 @@ class VisdomLogger:
     recording failure surfaces as a warning rather than an exception (the
     run already having finished is expected/benign and stays silent).
 
+    When ``viz.line()`` can't report a real window id (offline mode, or
+    any other case where it returns the bare ``True`` sentinel instead of
+    a string), this metric's own *name* is used as a stand-in window
+    identity for ``run=`` tracking instead, since ``RunTracker`` keys its
+    per-window update sequence on that identity. That stand-in is only
+    unique within one ``VisdomLogger`` instance: sharing a single ``run=``
+    across *multiple* ``VisdomLogger`` instances that both have a
+    same-named metric and both hit this fallback would merge those two
+    metrics' sequences together. This is a known, narrow limitation
+    rather than something this class guards against -- give each
+    concurrently-used ``VisdomLogger`` instance its own ``run=`` (or
+    distinct metric names) if you're running more than one against the
+    same reproducibility record.
+
     ``run=``, if passed, must be a :class:`~visdom.tracking.RunTracker` (or
     a duck-typed equivalent exposing a callable ``log_plot_update()``) —
     anything else raises ``TypeError`` immediately, rather than appearing
@@ -199,8 +213,30 @@ class VisdomLogger:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        for name, (x_val, value, xlabel) in self._pending.items():
-            self._plot(name, x_val, value, xlabel)
+        # This is the last opportunity to send anything still waiting on
+        # log_every throttling (or on a previous failed send) -- there is
+        # no later log() call left to retry it on. A failure here is
+        # therefore reported loudly (a warning naming exactly which metric
+        # and value didn't make it) rather than being swallowed the way
+        # the old code did by ignoring _plot()'s return value entirely.
+        # The failed point is also left in _pending/_pending_failed rather
+        # than discarded, so a caller holding onto `tracker` after the
+        # `with` block exits can still inspect exactly what was lost.
+        for name, (x_val, value, xlabel) in list(self._pending.items()):
+            if self._plot(name, x_val, value, xlabel):
+                self._pending.pop(name, None)
+                self._pending_failed.discard(name)
+            else:
+                self._pending_failed.add(name)
+                _safe_warn(
+                    "VisdomLogger: final flush of metric {0!r} (value={1!r}) "
+                    "failed -- this point was never plotted and will not "
+                    "be recorded, since the context manager is exiting and "
+                    "there is no further call to retry it on. It remains "
+                    "available in tracker._pending[{0!r}] if you need to "
+                    "recover or re-send it yourself.".format(name, value),
+                    UserWarning,
+                )
         if self._params is not None:
             try:
                 reply = self.viz.finish_experiment(
@@ -289,7 +325,19 @@ class VisdomLogger:
         # placeholder (an int, a Mock, a list) still gets cached/reused
         # above so it isn't retried forever, but that alone isn't grounds
         # to tell params=/run= the point was verifiably plotted.
-        verified = win is True or (isinstance(win, str) and win)
+        #
+        # A non-empty string alone isn't quite enough either: Visdom's
+        # transport (Visdom._send()/_handle_post()) returns the raw HTTP
+        # response body without checking the status code, and every
+        # rejection this codebase writes (readonly server, auth, etc.) is
+        # a JSON object body such as {"success": false, "error": ...} --
+        # exactly as truthy and exactly as much a `str` as a real window
+        # id. A genuine window id is never JSON-object-shaped, so a
+        # response shaped like one is rejected here too, rather than
+        # being mistaken for a successfully-applied plot.
+        verified = win is True or (
+            isinstance(win, str) and win and not win.lstrip().startswith("{")
+        )
         if verified and self._params is not None:
             # Its own try/except, separate from the viz.line() one above:
             # log_metrics() is a second, unrelated call (to the
@@ -388,8 +436,11 @@ class VisdomLogger:
             once per epoch, leave log_every=1 — the epoch counter handles
             throttling by design. The first call for a metric is always
             plotted immediately, and any value still waiting on log_every
-            when the context manager exits is flushed automatically — no
-            metric is ever silently dropped.
+            when the context manager exits is flushed automatically — a
+            metric is never *silently* dropped: on any failure (including
+            at that final exit flush) a warning names exactly which metric
+            and value didn't make it, and the point stays inspectable on
+            ``tracker._pending`` rather than disappearing outright.
 
             This also holds for a point that was actually attempted and
             failed (as opposed to one merely withheld by throttling): it is
@@ -400,6 +451,17 @@ class VisdomLogger:
             point is still waiting leave it untouched -- they neither
             attempt a send nor overwrite it -- so it survives, unmodified,
             until a due call can actually retry it.
+
+            There is only one pending slot per metric, though, so this
+            isn't an unbounded retry queue: if a due-call retry of a
+            failed point fails *again*, that call's own (newer) value is
+            not queued anywhere -- the metric keeps retrying the original
+            failed point, on every subsequent due call, until either it
+            succeeds or the context manager exits. A connection outage
+            spanning several due intervals therefore coalesces down to
+            that one oldest unsent point (the same way ordinary log_every
+            throttling already coalesces intervening values down to the
+            latest one) rather than queuing every value seen in between.
         """
         if not isinstance(name, str) or not name:
             raise TypeError("name must be a non-empty string, got {!r}".format(name))
