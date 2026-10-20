@@ -145,7 +145,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         cmd = msg.get("cmd")
         if self.readonly:
             return
-        refusal = self.storage_refusal() if cmd == "save" else None
+        refusal = self.storage_refusal() if cmd in ("save", "save_layouts") else None
         if refusal:
             notify(self, refusal, type="error", target_subs=[self])
             return
