@@ -88,11 +88,17 @@ def start_server(
     ssl_keyfile=None,
     save_interval=DEFAULT_SAVE_INTERVAL,
     save_threshold=DEFAULT_SAVE_THRESHOLD,
+    internal_port=None,
+    internal_ssl_certfile=None,
+    internal_ssl_keyfile=None,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
     # from leaving a storage worker and an open port behind.
     ssl_ctx = _build_ssl_context(ssl_certfile, ssl_keyfile)
+    internal_ssl_ctx = _build_internal_ssl_context(
+        internal_port, internal_ssl_certfile, internal_ssl_keyfile
+    )
     asyncio.run(
         _serve(
             port=port,
@@ -108,8 +114,21 @@ def start_server(
             ssl_ctx=ssl_ctx,
             save_interval=save_interval,
             save_threshold=save_threshold,
+            internal_port=internal_port,
+            internal_ssl_ctx=internal_ssl_ctx,
         )
     )
+
+
+def _build_internal_ssl_context(internal_port, certfile, keyfile):
+    if internal_port is None:
+        return None
+    if not (certfile and keyfile):
+        raise ValueError(
+            "the internal port is only served over TLS: pass "
+            "internal_ssl_certfile and internal_ssl_keyfile"
+        )
+    return _build_ssl_context(certfile, keyfile)
 
 
 def _build_ssl_context(ssl_certfile, ssl_keyfile):
@@ -191,6 +210,8 @@ async def _serve(
     ssl_ctx,
     save_interval,
     save_threshold,
+    internal_port=None,
+    internal_ssl_ctx=None,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -231,6 +252,18 @@ async def _serve(
     app.port = port
     server.add_sockets(sockets)
 
+    internal_server = None
+    if internal_port is not None:
+        internal_server = tornado.httpserver.HTTPServer(
+            app.internal_application(), ssl_options=internal_ssl_ctx
+        )
+        internal_server.add_sockets(
+            tornado.netutil.bind_sockets(
+                internal_port, address=bind_addr, family=family
+            )
+        )
+        logging.info(f"Internal endpoints on port {internal_port}")
+
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
@@ -261,6 +294,8 @@ async def _serve(
     finally:
         logging.info("Shutting down")
         server.stop()
+        if internal_server is not None:
+            internal_server.stop()
         # Through the state that owns them: rebinding ``app.subs`` left both
         # the live sockets and the dictionaries the handlers share untouched.
         app.server_state.close_connections()
@@ -286,6 +321,29 @@ def main(print_func=None):
         type=valid_port,
         default=DEFAULT_PORT,
         help="port to run the server on.",
+    )
+    parser.add_argument(
+        "-internal_port",
+        metavar="internal_port",
+        type=valid_port,
+        default=None,
+        help="port for the endpoints a gateway calls, which only answer signed "
+        "requests. They are not served at all when this is unset.",
+    )
+    parser.add_argument(
+        "-internal_ssl_certfile",
+        metavar="internal_ssl_certfile",
+        type=str,
+        default=None,
+        help="certificate the internal port is served with. Required with "
+        "-internal_port.",
+    )
+    parser.add_argument(
+        "-internal_ssl_keyfile",
+        metavar="internal_ssl_keyfile",
+        type=str,
+        default=None,
+        help="private key for -internal_ssl_certfile.",
     )
     parser.add_argument(
         "-hostname",
@@ -392,6 +450,12 @@ def main(print_func=None):
 
     if bool(FLAGS.ssl_certfile) != bool(FLAGS.ssl_keyfile):
         parser.error("-ssl_certfile and -ssl_keyfile must be provided together.")
+    if FLAGS.internal_port is not None and not (
+        FLAGS.internal_ssl_certfile and FLAGS.internal_ssl_keyfile
+    ):
+        parser.error(
+            "-internal_port needs -internal_ssl_certfile and -internal_ssl_keyfile."
+        )
 
     try:
         logging_level = int(FLAGS.logging_level)
@@ -474,6 +538,9 @@ def main(print_func=None):
         ssl_keyfile=FLAGS.ssl_keyfile,
         save_interval=FLAGS.save_interval,
         save_threshold=FLAGS.save_threshold,
+        internal_port=FLAGS.internal_port,
+        internal_ssl_certfile=FLAGS.internal_ssl_certfile,
+        internal_ssl_keyfile=FLAGS.internal_ssl_keyfile,
     )
 
 
