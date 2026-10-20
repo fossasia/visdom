@@ -434,3 +434,26 @@ def test_a_full_workspace_refuses_a_socket_save(
         json.loads(m)["data"]["message"] for m in sub.messages if "notification" in m
     ]
     assert told == ([] if copied else ["out of storage"])
+
+
+@pytest.mark.parametrize("full, kept", [(None, True), ("out of storage", False)])
+def test_a_full_workspace_refuses_a_socket_layout_save(
+    gated_app, inline_executor, full, kept
+):
+    gated_app.workspace_manager.full["ws-a"] = full
+    space = gated_app.workspace_env_manager.space("ws-a")
+    before = space.get_layouts()
+    sub = keyed_socket(
+        SocketWrapper, gated_app, {"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-a"}
+    )
+    sub.open()
+    sub.messages.clear()
+
+    layouts = json.dumps({"main": {"wide": {}}})
+    asyncio.run(sub.on_message(json.dumps({"cmd": "save_layouts", "data": layouts})))
+
+    assert space.get_layouts() == (layouts if kept else before)
+    told = [
+        json.loads(m)["data"]["message"] for m in sub.messages if "notification" in m
+    ]
+    assert told == ([] if kept else ["out of storage"])

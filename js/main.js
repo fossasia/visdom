@@ -985,6 +985,8 @@ const App = () => {
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
+    // repack panes that were placed against the previous width
+    if (mounted.current) relayout();
   };
 
   let panes = useMemo(() => {
