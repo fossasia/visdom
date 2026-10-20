@@ -830,6 +830,24 @@ def test_boxplot_all_singleton_shape_one_box(capture_send):
     assert sent["payload"]["data"][0]["y"] == [7.0]
 
 
+@pytest.mark.parametrize("shape", [(1, 3, 1), (3, 1, 1), (1, 1, 3)])
+def test_boxplot_non_singleton_3d_shape_raises(offline_client, shape):
+    """Regression: a >2D shape with more than one real value used to be
+    silently squeezed down to whichever axis survived, so (1, 3, 1) and
+    (3, 1, 1) -- the same three numbers -- disagreed on box count purely
+    because of which axes happened to be 1. Only a shape with exactly one
+    value is unambiguous enough to collapse automatically; anything else
+    with more than two dimensions is rejected instead of guessed at.
+
+    Matching the specific message, not just AssertionError: offline_client
+    also raises AssertionError for any call that reaches the network, so a
+    bare ``pytest.raises(AssertionError)`` would pass even if the old,
+    buggy squeeze let the call through to ``_send``.
+    """
+    with pytest.raises(AssertionError, match="one or two-dimensional"):
+        offline_client.boxplot(np.array([1.0, 2.0, 3.0]).reshape(shape))
+
+
 def test_boxplot_masked_array_excludes_masked_observations(capture_send):
     """Regression: np.asarray() used to silently drop a masked array's mask,
     so masked-out observations were serialized as if they were real data."""
