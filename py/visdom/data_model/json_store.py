@@ -16,10 +16,18 @@ import re
 
 from visdom.data_model.base import DataStore
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
-from visdom.utils.server_utils import escape_eid, LazyEnvData
+from visdom.utils.server_utils import (
+    env_is_readable,
+    escape_eid,
+    LazyEnvData,
+    readable_panes,
+    reload_is_readable,
+)
 from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
+
+UNREADABLE_SUFFIX = ".unreadable"
 
 
 class JSONStore(DataStore):
@@ -34,6 +42,7 @@ class JSONStore(DataStore):
     def __init__(self, env_path):
         """Create a store rooted at ``env_path`` (``None`` disables persistence)."""
         self.env_path = env_path
+        self._unreadable = {}
 
     def _safe_eid(self, eid):
         """Sanitise ``eid`` into the id used for on-disk filenames.
@@ -159,6 +168,8 @@ class JSONStore(DataStore):
         else:
             payload = env_data
 
+        self._keep_unreadable_copy(eid)
+
         primary = self._primary_path(eid)
         try:
             if primary is None:
@@ -173,6 +184,64 @@ class JSONStore(DataStore):
                 self._hash_path(eid), json.dumps(data_to_save, cls=NanSafeEncoder)
             )
         return True
+
+    def _note_unreadable(
+        self, eid, raw, panes=(), reload_unreadable=False, whole=False
+    ):
+        """Remember that ``eid``'s file held something that could not be read."""
+        self._unreadable[self._safe_eid(eid)] = {
+            "raw": raw,
+            "panes": list(panes),
+            "reload": reload_unreadable,
+            "whole": whole,
+        }
+
+    def unreadable_report(self, eid):
+        """What of ``eid``'s file could not be read, or ``{}``.
+
+        The parts themselves are not kept: a pane or a layout this store could
+        not read is left out of the env it serves and out of what it writes
+        back. Only the fact that they were there is remembered, so a reader can
+        say so, and so the file they came from is copied aside before it is
+        replaced.
+        """
+        note = self._unreadable.get(self._safe_eid(eid))
+        if not note:
+            return {}
+        return {k: v for k, v in note.items() if k != "raw"}
+
+    def _keep_unreadable_copy(self, eid):
+        """Copy ``eid``'s file aside before it is written over, once.
+
+        What this store could not read is not written back, so the file is
+        about to lose it. The bytes are kept next to it under
+        ``<name>.json.unreadable`` -- a name :meth:`list_envs` does not pick up
+        -- which leaves them where someone can repair them by hand.
+        """
+        safe_eid = self._safe_eid(eid)
+        note = self._unreadable.get(safe_eid)
+        if not note or "raw" not in note:
+            return
+        path = self._resolve_existing(eid) or self._primary_path(eid)
+        if path is None:
+            return
+        backup = path + UNREADABLE_SUFFIX
+        raw = note.pop("raw")
+        if os.path.exists(backup):
+            return
+        try:
+            with open(backup, "w", encoding="utf-8") as fn:
+                fn.write(raw)
+        except OSError as e:
+            logging.error("Could not keep a copy of %s at %s: %s", path, backup, e)
+            return
+        note["backup"] = backup
+        logging.warning(
+            "Environment file %s is being written without the parts that could"
+            " not be read; the original is kept at %s",
+            path,
+            backup,
+        )
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
@@ -192,12 +261,34 @@ class JSONStore(DataStore):
             return {}
         try:
             with open(path, "r", encoding="utf-8") as fn:
-                data = json.load(fn)
+                raw = fn.read()
+            data = json.loads(raw)
         except (OSError, ValueError):
             return {}
-        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+        if not env_is_readable(data):
+            self._note_unreadable(eid, raw, whole=True)
+            logging.warning(
+                "Environment file %s does not hold a readable environment; ignoring it",
+                path,
+            )
             return {}
-        env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
+        panes, unreadable = readable_panes(data)
+        reload_ok = reload_is_readable(data)
+        env = {"jsons": panes, "reload": data["reload"] if reload_ok else {}}
+        if unreadable or not reload_ok:
+            self._note_unreadable(eid, raw, unreadable, not reload_ok)
+            logging.warning(
+                "Environment file %s holds %s that cannot be read; serving the rest",
+                path,
+                " and ".join(
+                    part
+                    for part in (
+                        "{} pane(s)".format(len(unreadable)) if unreadable else "",
+                        "" if reload_ok else "its saved layout",
+                    )
+                    if part
+                ),
+            )
         if "experiment" in data:
             env["experiment"] = data["experiment"]
         return env
