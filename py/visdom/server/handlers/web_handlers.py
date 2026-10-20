@@ -683,18 +683,31 @@ class UpdateHandler(BaseHandler):
                 and background_new is None
                 and data_new is not None
             ):
+                # Copy, don't alias: _apply_heatmap_update assigns new_data's
+                # label lists onto the plot directly on 'replace', and a
+                # shared list object would then get a later appendRow's
+                # label pushed onto it twice -- once per trace that "+="s
+                # the same underlying list.
                 background_new = {
                     "z": [[0] * len(row) for row in data_new["z"]],
-                    "x": data_new.get("x"),
-                    "y": data_new.get("y"),
+                    "x": (
+                        list(data_new["x"]) if data_new.get("x") is not None else None
+                    ),
+                    "y": (
+                        list(data_new["y"]) if data_new.get("y") is not None else None
+                    ),
                 }
             elif (
                 background_plot_idx is None
                 and background_new is not None
                 and data_plot_idx is not None
             ):
+                # Insert before the data trace, not after: traces draw in
+                # pdata order, and an opaque background appended last would
+                # paint over the data trace instead of sitting behind it.
                 existing = pdata[data_plot_idx]
-                pdata.append(
+                pdata.insert(
+                    data_plot_idx,
                     {
                         "type": "heatmap",
                         "showscale": False,
@@ -710,10 +723,11 @@ class UpdateHandler(BaseHandler):
                             if existing.get("y") is not None
                             else None
                         ),
-                    }
+                    },
                 )
-                inserted_background_idx = len(pdata) - 1
-                background_plot_idx = inserted_background_idx
+                inserted_background_idx = data_plot_idx
+                background_plot_idx = data_plot_idx
+                data_plot_idx += 1
 
             pairs = []
             if data_plot_idx is not None and data_new is not None:

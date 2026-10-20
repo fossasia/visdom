@@ -284,6 +284,31 @@ class TestHeatmapNancolorToggled(NancolorHeatmapMixin, PlotUpdateTestCase):
         self.assertEqual(data["z"], [[1, 2], [3, 4], [5, 6]])
         self.assertEqual(background["z"], [[0, 0], [0, 0], [0, 0]])
 
+    def test_update_adding_nancolor_inserts_the_background_first(self):
+        """Regression: traces draw in pdata order, so appending the new
+        background last painted its opaque, all-zero cells over the data
+        trace instead of sitting behind it. It has to land before the data
+        trace, matching every other path that creates one."""
+        win = self.create_heatmap()
+        self.update_nancolor_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        self.assertIs(self.traces(win)[0].get("showscale"), False)
+
+    def test_replace_without_nancolor_then_append_labels_once(self):
+        """Regression: synthesizing the background update by pointing
+        straight at the data update's label lists (instead of copying them)
+        made both traces share one list object after a 'replace'. A later
+        appendRow then extended that single shared list once per trace,
+        doubling the new label on both.
+
+        The replace keeps the column count at 2 so the follow-up appendRow
+        passes shape validation and its ``+=`` actually runs.
+        """
+        win = self.create_nancolor_heatmap()
+        self.update_heatmap(win, [[9, 10]], "replace", x=["c1", "c2"], y=["one"])
+        self.update_heatmap(win, [[5, 6]], "appendRow", y=["e"])
+        for trace in self.traces(win):
+            self.assertEqual(trace["y"], ["one", "e"])
+
 
 class TestTraceUpdates(PlotUpdateTestCase):
     """A ``name`` selects which traces the update applies to."""
