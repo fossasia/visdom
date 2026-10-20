@@ -36,6 +36,7 @@ import logging
 import warnings
 import time
 import errno
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -162,6 +163,30 @@ except Exception:
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
+REFUSED_STATUSES = (401, 402, 403)
+REFUSALS_REMEMBERED = 100
+
+
+def _one_line(text):
+    return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
+
+
+def _refusal_reason(body):
+    """The reason a server gave for turning a request down, as one line."""
+    text = (body or "").strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("detail", "error", "message"):
+            if isinstance(parsed.get(key), str) and _one_line(parsed[key]):
+                return _one_line(parsed[key])[:200]
+    if not text or text.startswith("<"):
+        return "no reason given"
+    return _one_line(text)[:200]
+
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
@@ -1318,6 +1343,35 @@ class Visdom(object):
                         + "\n"
                     )
 
+    def _note_refusal(self, status, body):
+        """Say so when the server turns a request down.
+
+        A hosted server answers 401, 402 or 403 for a key that is wrong,
+        revoked or read-only, for a workspace this key may not reach, and for a
+        plan that is out of storage. The body still goes back to the caller,
+        as it does for any status, but on its own it reads as a window id, so a
+        script whose every plot was refused ran to the end looking as if it had
+        worked.
+
+        A warning and never an exception, whatever ``raise_exceptions`` says:
+        a refused write has to look the way it does for ``requests``, which
+        does not raise on a 4xx. Each distinct reason is logged once, so a
+        training loop is not flooded.
+        """
+        if status not in REFUSED_STATUSES:
+            return
+        message = "The visdom server refused this request ({0}): {1}".format(
+            status, _refusal_reason(body)
+        )
+        seen = self.__dict__.setdefault("_refusals_seen", OrderedDict())
+        if message in seen:
+            seen.move_to_end(message)
+            return
+        seen[message] = True
+        if len(seen) > REFUSALS_REMEMBERED:
+            seen.popitem(last=False)
+        logger.warning(message)
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1330,6 +1384,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
             raise
@@ -1345,6 +1400,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
 
     def _send(
