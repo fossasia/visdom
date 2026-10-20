@@ -26,8 +26,8 @@ HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 #: The small facts an env file holds outside its windows: the experiment
 #: metadata blob and, for a ``hash_<sha256>.json`` fallback, the real env id.
 #: ``readable`` is ``False`` for a file that could not be opened or parsed --
-#: cached like any other answer, so a corrupt file is not re-parsed on every
-#: scan, and distinct from a file that parsed but holds neither fact.
+#: never cached, for the reasons in :meth:`JSONStore._read_meta`, and distinct
+#: from a file that parsed but holds neither fact.
 MetaRecord = collections.namedtuple("MetaRecord", "readable experiment name")
 
 UNREADABLE_META = MetaRecord(readable=False, experiment=None, name=None)
@@ -430,16 +430,24 @@ class JSONStore(DataStore):
         because :meth:`_atomic_write` finishes with :func:`os.replace` and a
         replaced file is a new inode whatever its timestamps say.
 
-        ``st_ctime_ns`` and ``st_mode`` are in the key because a *failed* read
-        is cached too, and permissions are the one way a file can change what
-        it answers without its contents moving at all: ``chmod -r`` makes the
-        next read fail, and ``chmod +r`` makes it succeed again, neither of
-        them touching mtime, size or inode. Without those two fields, a record
-        taken while a file was unreadable would be served for the life of the
-        process after access was restored -- and, in the other direction, a
-        record read before access was revoked would go on being served. Both
-        are cheap: they come from the same :func:`os.stat` the key already
-        needs.
+        Only a *successful* read is stored. A failure is returned to the
+        caller and then forgotten, because nothing in the stat key has to move
+        for a read to fail: a process out of file descriptors, an interrupted
+        syscall or a disk error makes the next read fail while leaving the
+        file itself untouched. A cached failure would therefore outlive its
+        cause and keep the env out of :meth:`list_envs` and out of every
+        ``/experiments`` answer until the file was rewritten, deleted or
+        evicted. Re-reading an unreadable file costs one failed open per scan,
+        on a file that is rare to begin with, so that is the cheaper mistake.
+        The stat-failure branch below forgets the path for the same reason.
+
+        ``st_ctime_ns`` and ``st_mode`` are still in the key, because
+        permissions are the one way a file can change what it answers without
+        its contents moving at all: ``chmod -r`` makes the next read fail
+        without touching mtime, size or inode, so a record cached while the
+        file was readable would otherwise go on being served after access was
+        revoked. Both are cheap: they come from the same :func:`os.stat` the
+        key already needs.
 
         What is left is a genuine, narrow window rather than an oversight: an
         **external, in-place** rewrite that leaves the file the same size and
@@ -496,6 +504,9 @@ class JSONStore(DataStore):
                 self._meta_cache[path] = cached
                 return cached[1]
         record = self._parse_meta(path)
+        if not record.readable:
+            self._forget_meta(path)
+            return record
         weight = meta_weight(record)
         with self._meta_lock:
             self._drop_locked(path)

@@ -851,15 +851,50 @@ def test_recreated_env_is_not_served_from_the_cache(store):
     assert store.load_experiment("run")["params"]["lr"] == "0.20"
 
 
-def test_corrupt_env_keeps_returning_none_without_reparsing(store, env_path, parses):
-    """A file that cannot be parsed is remembered as such, not retried."""
+def test_corrupt_env_is_retried_rather_than_remembered(store, env_path, parses):
+    """A file that cannot be read is answered for, never cached.
+
+    Nothing in the stat key has to move for a read to fail, so a cached
+    failure would outlive a transient cause. Unreadable files are rare, so
+    the store pays the failed read again on every scan instead.
+    """
     with open(os.path.join(env_path, "broken.json"), "w") as fn:
         fn.write("{not valid json")
     parses.loads = 0
 
     assert store.load_experiment("broken") is None
     assert store.load_experiment("broken") is None
-    assert parses.loads == 1
+    assert parses.loads == 2
+    assert store._meta_cache == {}
+
+
+def test_a_transient_read_failure_does_not_hide_the_env(store, env_path, monkeypatch):
+    """One failed read is not taken as the file's answer from then on.
+
+    A server out of file descriptors fails the open without touching the file
+    it failed on, so the stat key is byte-for-byte the same on the next scan.
+    Were the failure cached, the env would stay out of ``list_envs`` and out
+    of every ``/experiments`` answer until something rewrote or deleted it.
+    """
+    store.save_env("run", _experiment_env("run"))
+    path = os.path.join(env_path, "run.json")
+    before = os.stat(path)
+
+    monkeypatch.setattr(
+        json_store_module, "read_json_file", lambda *a, **k: UNREADABLE_JSON
+    )
+    assert store.load_experiment("run") is None
+    assert store._meta_cache == {}
+    monkeypatch.undo()
+
+    after = os.stat(path)
+    assert (after.st_mtime_ns, after.st_ctime_ns, after.st_size, after.st_ino) == (
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+        before.st_size,
+        before.st_ino,
+    )
+    assert store.load_experiment("run")["env_id"] == "run"
 
 
 needs_file_permissions = pytest.mark.skipif(
@@ -872,12 +907,10 @@ needs_file_permissions = pytest.mark.skipif(
 def test_a_file_made_readable_again_is_re_read(store, env_path):
     """Restoring access makes the env readable again, not stale forever.
 
-    An unreadable file is cached as unreadable, so that a corrupt one is not
-    re-parsed on every scan. Permissions are the one way that answer can stop
-    being true without the contents moving: chmod changes neither mtime, size
-    nor inode, so without ctime and mode in the key this record would be
-    served for the life of the process and the environment would stay
-    invisible long after access came back.
+    Nothing was cached while access was denied, so there is no stale record
+    to displace here. This pins the end-to-end behaviour a user sees: chmod
+    moves neither mtime, size nor inode, so an env that went briefly
+    unreadable must not stay invisible once access comes back.
     """
     store.save_env("run", _experiment_env("run"))
     path = os.path.join(env_path, "run.json")
@@ -892,7 +925,13 @@ def test_a_file_made_readable_again_is_re_read(store, env_path):
 
 @needs_file_permissions
 def test_a_file_whose_access_is_revoked_stops_being_served(store, env_path):
-    """The other direction: a cached record does not outlive the right to read it."""
+    """The other direction: a cached record does not outlive the right to read it.
+
+    This is the direction that keeps ``st_ctime_ns`` and ``st_mode`` in the
+    stat key. The record cached here was a successful read, and chmod leaves
+    mtime, size and inode alone, so those two fields are the only thing that
+    tells the next read the answer has changed.
+    """
     store.save_env("run", _experiment_env("run"))
     assert store.load_experiment("run")["env_id"] == "run"
     path = os.path.join(env_path, "run.json")
@@ -924,7 +963,7 @@ def test_list_envs_parses_a_hash_file_once(store, parses):
 
 
 def test_list_envs_keeps_skipping_an_unreadable_hash_file(store, env_path, parses):
-    """The skip survives being cached: a corrupt hash file stays unlisted."""
+    """A corrupt hash file stays unlisted, and is re-read on each scan."""
     with open(os.path.join(env_path, "hash_{0}.json".format("a" * 64)), "w") as fn:
         fn.write("{not valid json")
     store.save_env("main", _env())
@@ -932,7 +971,7 @@ def test_list_envs_keeps_skipping_an_unreadable_hash_file(store, env_path, parse
 
     assert store.list_envs() == ["main"]
     assert store.list_envs() == ["main"]
-    assert parses.loads == 1
+    assert parses.loads == 2
 
 
 def test_load_env_is_never_served_from_the_cache(store, parses):
