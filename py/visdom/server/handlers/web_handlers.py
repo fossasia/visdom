@@ -2187,8 +2187,8 @@ class ActivityHandler(BaseHandler):
     Only ever the instance's own share of them: the proxy hashes each workspace
     onto exactly one instance, so a caller wanting the whole deployment asks every
     instance and concatenates. Carries no environment data or plot contents, only
-    counts, but it does name every workspace on the instance, so the proxy keeps it
-    off the public surface and it is reached directly over the internal network.
+    counts, but it does name every workspace on the instance, so it is served only
+    on the internal port, and only to a request signed with a read key.
     """
 
     # Registered against the application rather than a state, because it
@@ -2274,8 +2274,9 @@ class MetricsHandler(ActivityHandler):
     """The same workspace numbers, in the format a Prometheus scrape wants.
 
     Inherits the gathering rather than repeating it. Like the activity endpoint
-    it names every workspace on the instance, so it belongs on the internal
-    network and the proxy keeps it off the public surface.
+    it names every workspace on the instance, so it is served only on the
+    internal port. Prometheus cannot sign a request, so a metrics token is
+    accepted here as well as a read signature.
     """
 
     def allowed(self):
