@@ -1527,7 +1527,10 @@ components:
                 description: Inferred type, so a stored value can be cast back.
         metrics:
           type: array
-          description: Metric observations, appended over time.
+          description: >-
+            Metric observations, appended over time. An observation is returned
+            as it was stored; every one the server recorded carries all four
+            fields below.
           items:
             type: object
             properties:
