@@ -3961,7 +3961,7 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.asarray(X)
+        X = np.ma.asarray(X)
         if X.ndim != 2:
             X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"

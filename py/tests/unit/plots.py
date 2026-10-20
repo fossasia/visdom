@@ -639,6 +639,22 @@ def test_boxplot_2d_x_one_box_per_column(capture_send):
     assert len(sent["payload"]["data"]) == 2
 
 
+@pytest.mark.parametrize("shape", [(3,), (3, 1), (1, 3)])
+def test_boxplot_preserves_masked_values(capture_send, shape):
+    """Masked samples stay hidden for vectors, columns and single-row matrices."""
+    values = np.ma.masked_array([1.0, 100.0, 3.0], mask=[False, True, False])
+    values = values.reshape(shape)
+    original_data = values.data.copy()
+    original_mask = np.ma.getmaskarray(values).copy()
+
+    sent = capture_send(lambda v: v.boxplot(values))
+    traces = sent["payload"]["data"]
+    expected = [[1.0], [None], [3.0]] if shape == (1, 3) else [[1.0, None, 3.0]]
+    assert [trace["y"] for trace in traces] == expected
+    np.testing.assert_array_equal(values.data, original_data)
+    np.testing.assert_array_equal(np.ma.getmaskarray(values), original_mask)
+
+
 @pytest.mark.parametrize("values", [[[1.0, 2.0, 3.0]], np.array([[1.0, 2.0, 3.0]])])
 @pytest.mark.parametrize("legend", [None, ["train", "validation", "test"]])
 def test_boxplot_single_row_keeps_separate_columns(capture_send, values, legend):
