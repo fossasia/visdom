@@ -27,14 +27,9 @@ class VisdomLogger:
     "finished" otherwise.
 
     Separately, pass a :class:`visdom.tracking.RunTracker` via ``run=`` to
-    additionally record every metric update to that run's local
-    reproducibility record (params, environment, and this training curve's
-    timeline) — a different, local-JSON-file mechanism from the
-    server-side ExperimentStore that ``params=`` uses. The two are
-    independent and can be used together, separately, or not at all; the
-    run's own lifecycle (finish reason, params, etc.) stays entirely under
-    your control, since the two context managers compose independently
-    rather than one driving the other::
+    also record every metric update to that run's local reproducibility
+    record. This is independent of ``params=`` (a different, local-JSON-file
+    mechanism) and the two can be used together, separately, or not at all::
 
         from visdom.tracking import RunTracker
         from visdom.pytorch import VisdomLogger
@@ -44,54 +39,31 @@ class VisdomLogger:
                 for epoch in range(num_epochs):
                     tracker.log("Train Loss", train_loss)  # plotted AND tracked
 
-    Nest in that order -- ``run`` outer, ``VisdomLogger`` inner, as above
-    -- not the reverse. ``VisdomLogger.__exit__`` flushes any value still
-    held back by ``log_every`` throttling, and that flush has to happen
-    while ``run`` is still open to be recorded; nesting the other way
-    finishes ``run`` first, so the flushed value's tracking call silently
-    no-ops (``RunAlreadyFinishedError`` is swallowed, by design, same as
-    any other already-finished-run write) instead of raising to tell you
-    something was dropped.
+    Nest in that order -- ``run`` outer, ``VisdomLogger`` inner -- not the
+    reverse, or a value flushed at exit will find ``run`` already finished
+    and silently fail to record.
 
-    Only values that actually get plotted are recorded to ``run`` — a value
-    withheld by ``log_every`` throttling and later flushed on exit is
-    recorded once, at the point it's actually plotted, not once per raw
-    ``log()`` call. "Actually get plotted" is checked, not assumed: a
-    client built with ``raise_exceptions=False`` can have ``viz.line()``
-    return ``False``/``None`` on a failed send instead of raising, and that
-    point is skipped for both ``run=`` and ``params=`` tracking rather than
-    recorded as if it had succeeded. A failure while recording to ``run``
-    never breaks the plot itself: the ``viz.line()`` call has already
-    succeeded by the time recording is attempted, and any unexpected
-    recording failure surfaces as a warning rather than an exception (the
-    run already having finished is expected/benign and stays silent).
+    Only values that actually get plotted are recorded to ``run``/``params``
+    -- a send that fails (whether it raises, or returns False/None the way
+    a client built with ``raise_exceptions=False`` can) is skipped rather
+    than recorded as if it had succeeded.
 
-    When ``viz.line()`` can't report a real window id (offline mode, or
-    any other case where it returns the bare ``True`` sentinel instead of
-    a string), this metric's own *name* is used as a stand-in window
-    identity for ``run=`` tracking instead, since ``RunTracker`` keys its
-    per-window update sequence on that identity. That stand-in is only
-    unique within one ``VisdomLogger`` instance: sharing a single ``run=``
-    across *multiple* ``VisdomLogger`` instances that both have a
-    same-named metric and both hit this fallback would merge those two
-    metrics' sequences together. This is a known, narrow limitation
-    rather than something this class guards against -- give each
-    concurrently-used ``VisdomLogger`` instance its own ``run=`` (or
-    distinct metric names) if you're running more than one against the
-    same reproducibility record.
+    When ``viz.line()`` can't report a real window id (offline mode), this
+    metric's own name is used as a stand-in identity for ``run=`` tracking
+    instead. That stand-in is only unique within one ``VisdomLogger``
+    instance, so sharing one ``run=`` across multiple instances with the
+    same metric name, in offline mode, can merge their sequences -- give
+    each instance its own ``run=`` if you need that.
 
     ``run=``, if passed, must be a :class:`~visdom.tracking.RunTracker` (or
     a duck-typed equivalent exposing a callable ``log_plot_update()``) —
-    anything else raises ``TypeError`` immediately, rather than appearing
-    to work and then failing confusingly on the first logged metric.
+    anything else raises ``TypeError`` immediately.
 
     Do not pass a proxy returned by ``run.track(viz)`` as ``viz`` here
     while also passing that same run as ``run=`` — that double-tracks
-    every update (once via the proxy, once via this class's own ``run=``
-    handling). Use exactly one of the two integration points for a given
-    ``viz``/``run`` pair: either ``VisdomLogger(viz, run=run)`` with the
-    *plain* Visdom instance, or ``run.track(viz)`` on its own without also
-    passing ``run=`` here.
+    every update. Use exactly one of the two: either
+    ``VisdomLogger(viz, run=run)`` with the plain Visdom instance, or
+    ``run.track(viz)`` on its own.
 
     Usage::
 
@@ -122,36 +94,15 @@ class VisdomLogger:
             raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._params = params
         if run is not None and not callable(getattr(run, "log_plot_update", None)):
-            # Fail fast and clearly here, at construction time, rather than
-            # letting a nonsensical run= (a plain string, an int, some
-            # unrelated object) silently no-op its way to a crash deep
-            # inside _log_to_run's own warning formatting the first time a
-            # metric is logged -- see the run_id access there, which
-            # assumes `run` is at least roughly RunTracker-shaped. callable(),
-            # not just hasattr(): an object whose log_plot_update is present
-            # but None (or any other non-callable) would pass a bare hasattr
-            # check and then raise TypeError on every single logged metric
-            # when _log_to_run actually tries to call it -- every point
-            # silently untracked and warned about, instead of one clear
-            # error up front. Checking for log_plot_update specifically
-            # (not isinstance(run, RunTracker)) keeps the same deliberate
-            # duck-typing this module already uses for the run.track(viz)
-            # detection below, so a test double/mock with the right
-            # interface still works.
+            # Fail fast here rather than crashing confusingly on the first
+            # logged metric.
             raise TypeError(
                 "run must be a visdom.tracking.RunTracker (or a duck-typed "
                 "equivalent exposing a callable log_plot_update()), got "
                 "{!r}".format(run)
             )
         self.run = run
-        # Best-effort detection of the double-tracking mistake described
-        # above: run.track(viz) returns a proxy that stores the run it's
-        # attached to as `_run` (see visdom.tracking.graphs.TrackedVisdom).
-        # Not imported/isinstance-checked here on purpose, to avoid a
-        # hard dependency on that module from this one -- duck-typed
-        # instead, since all that actually matters is "does this viz
-        # appear to already be tracking to the exact run= we were also
-        # given".
+        # run.track(viz) stores the run it's attached to as viz._run.
         if run is not None and getattr(viz, "_run", None) is run:
             _safe_warn(
                 "VisdomLogger was given a viz that already tracks to "
@@ -167,27 +118,17 @@ class VisdomLogger:
         self._step = {}
         self._counter = {}
         self._pending = {}
-        # Names whose _pending entry is a point that was actually attempted
-        # and failed (as opposed to a value merely withheld by log_every
-        # throttling and never sent at all). log() uses this to decide
-        # whether a metric's single pending slot may be overwritten by a
-        # newer value or must first be retried -- see log() below.
+        # Metrics whose _pending entry actually failed to send, as opposed
+        # to one merely withheld by throttling. See log() below.
         self._pending_failed = set()
 
     @staticmethod
     def _check_experiment_reply(reply, action):
         """Warn if the server rejected an experiment-tracking call.
 
-        Connection failures raise and are caught by the callers below, but a
-        server-side rejection (readonly server, already-finished experiment,
-        unknown env) comes back as an ordinary reply with no exception. A
-        successful reply is always the stored experiment dict, keyed by
-        "env_id"; anything else means nothing was recorded. `reply is True`
-        is `_send`'s own sentinel for offline mode, where nothing was sent
-        to a server at all, so it is not a rejection.
-
-        Returns True if the call succeeded (or was offline), False if it
-        was rejected, so __enter__ can stop retrying after a failed handshake.
+        A successful reply is always the stored experiment dict (keyed by
+        "env_id"); `reply is True` is the offline-mode sentinel, not a
+        rejection. Returns whether the call succeeded (or was offline).
         """
         if reply is True:
             return True
@@ -213,15 +154,10 @@ class VisdomLogger:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # This is the last opportunity to send anything still waiting on
-        # log_every throttling (or on a previous failed send) -- there is
-        # no later log() call left to retry it on. A failure here is
-        # therefore reported loudly (a warning naming exactly which metric
-        # and value didn't make it) rather than being swallowed the way
-        # the old code did by ignoring _plot()'s return value entirely.
-        # The failed point is also left in _pending/_pending_failed rather
-        # than discarded, so a caller holding onto `tracker` after the
-        # `with` block exits can still inspect exactly what was lost.
+        # Last chance to send anything still buffered -- there's no later
+        # log() call to retry on, so a failure here is warned about (with
+        # the metric and value named) instead of being dropped silently,
+        # and the point is left in _pending/_pending_failed for inspection.
         for name, (x_val, value, xlabel) in list(self._pending.items()):
             if self._plot(name, x_val, value, xlabel):
                 self._pending.pop(name, None)
@@ -230,11 +166,8 @@ class VisdomLogger:
                 self._pending_failed.add(name)
                 _safe_warn(
                     "VisdomLogger: final flush of metric {0!r} (value={1!r}) "
-                    "failed -- this point was never plotted and will not "
-                    "be recorded, since the context manager is exiting and "
-                    "there is no further call to retry it on. It remains "
-                    "available in tracker._pending[{0!r}] if you need to "
-                    "recover or re-send it yourself.".format(name, value),
+                    "failed and will not be retried. It remains available "
+                    "in tracker._pending[{0!r}].".format(name, value),
                     UserWarning,
                 )
         if self._params is not None:
@@ -250,19 +183,56 @@ class VisdomLogger:
                 )
         return False
 
+    @staticmethod
+    def _looks_like_a_window_id(win):
+        """Whether `win` could plausibly be a real window id: a single
+        token with no whitespace, not starting with '{', '[' or '<' --
+        which rules out JSON, HTML, and most plain-text error bodies.
+        Visdom's transport returns the raw HTTP response body without
+        checking the status code, so a rejected request can come back as
+        an ordinary truthy string too, and this is what tells the two
+        apart when there's nothing else to go on (see _is_verified_win).
+        """
+        return (
+            isinstance(win, str)
+            and bool(win)
+            and win[0] not in "{[<"
+            and not any(c.isspace() for c in win)
+        )
+
+    @classmethod
+    def _is_verified_win(cls, win, expected_win):
+        """Whether `win` -- whatever viz.line() returned -- actually proves
+        the server applied this point, strongly enough to record it to
+        params=/run=.
+
+        True is always genuine (the offline sentinel). Otherwise, if
+        `expected_win` is itself trustworthy (True, or a value that looks
+        like a real window id), a real success must echo it back exactly
+        -- this is what makes an append's check airtight regardless of
+        what a failure response looks like. Without a trustworthy id to
+        compare against (a fresh creation, or a window whose cached id was
+        never actually verified), this falls back to just checking `win`
+        itself looks like a plausible id.
+        """
+        if win is True:
+            return True
+        if expected_win is True or cls._looks_like_a_window_id(expected_win):
+            return win == expected_win
+        return cls._looks_like_a_window_id(win)
+
     def _plot(self, name, x_val, value, xlabel):
         """Send one point to viz.line(), then best-effort mirror it to
-        params=/run= tracking if (and only if) the send actually succeeded.
+        params=/run= tracking if the send actually succeeded.
 
         Returns True if the point was actually plotted, False if the send
         failed (or raised) -- log() uses this to decide whether to clear
-        the metric's pending buffer or keep the value there for a retry on
-        the metric's next *due* call (see log()'s own handling of
+        the metric's pending buffer or retry on its next due call (see
         self._pending_failed), or at the context manager's exit flush.
         """
-        win = None
+        expected_win = self._wins.get(name)
         try:
-            if name not in self._wins:
+            if expected_win is None:
                 win = self.viz.line(
                     X=[x_val],
                     Y=[value],
@@ -273,7 +243,7 @@ class VisdomLogger:
                 win = self.viz.line(
                     X=[x_val],
                     Y=[value],
-                    win=self._wins[name],
+                    win=expected_win,
                     env=self.env,
                     update="append",
                 )
@@ -282,70 +252,20 @@ class VisdomLogger:
                 "VisdomLogger failed to log {!r}: {}".format(name, e), UserWarning
             )
             return False
-        # viz.line() doesn't always raise on failure: a client built with
-        # raise_exceptions=False can return False/None from a failed send
-        # instead -- a real attempt that the server never actually applied.
-        # Plain truthiness is deliberately all that's checked here (not,
-        # say, requiring a str): the real client only ever returns a
-        # string win id or the True offline-mode sentinel on success (see
-        # _check_experiment_reply's docstring above), but this also has to
-        # keep working for any other truthy stand-in a wrapped/mocked viz
-        # returns, matching the plain `if win:` convention this module's
-        # window-caching already uses elsewhere. Without this check at
-        # all, a non-raising failed append would silently keep whatever
-        # window id the *previous, genuinely successful* call left behind
-        # and have both log_metrics() and run= tracking below record this
-        # failed point as if it had actually been plotted.
-        send_ok = bool(win)
-        if not send_ok:
+
+        # A non-raising failed send (raise_exceptions=False) returns
+        # False/None instead. Plain truthiness is enough here to decide
+        # whether to keep reusing this window id and stop retrying --
+        # params=/run= tracking needs the stronger _is_verified_win check
+        # below instead, since it's a durable claim, not just "got
+        # something back".
+        if not win:
             return False
-        if name not in self._wins:
-            # Only cache a window id once creation has actually succeeded
-            # (send_ok is True here) -- caching a falsy one would make
-            # every later call for this metric believe a window already
-            # exists (the check right above is membership, not
-            # truthiness) and permanently skip retrying creation; log()'s
-            # own throttle is based on the call counter rather than this
-            # dict precisely so a failed creation doesn't also disable
-            # throttling. An append's own win is deliberately never
-            # (re)cached here: the id already on file from the successful
-            # creation is the one every later append keeps using,
-            # regardless of this particular call's result.
+        if expected_win is None:
             self._wins[name] = win
 
-        # send_ok (just above) only asks "did we get *something* back to
-        # reuse" -- enough to stop retrying and to key the next append.
-        # params=/run= tracking is a separate, stronger claim ("this point
-        # is durably recorded as plotted"), so it needs a correspondingly
-        # stronger check: the real client only ever returns a string
-        # window id or the True offline-mode sentinel on success: nothing
-        # else is a value _resolve_win (visdom.tracking.graphs) or
-        # RunTracker.log_plot_update know how to validate either. A
-        # wrapped/mocked viz.line() that returns some other truthy
-        # placeholder (an int, a Mock, a list) still gets cached/reused
-        # above so it isn't retried forever, but that alone isn't grounds
-        # to tell params=/run= the point was verifiably plotted.
-        #
-        # A non-empty string alone isn't quite enough either: Visdom's
-        # transport (Visdom._send()/_handle_post()) returns the raw HTTP
-        # response body without checking the status code, and every
-        # rejection this codebase writes (readonly server, auth, etc.) is
-        # a JSON object body such as {"success": false, "error": ...} --
-        # exactly as truthy and exactly as much a `str` as a real window
-        # id. A genuine window id is never JSON-object-shaped, so a
-        # response shaped like one is rejected here too, rather than
-        # being mistaken for a successfully-applied plot.
-        verified = win is True or (
-            isinstance(win, str) and win and not win.lstrip().startswith("{")
-        )
+        verified = self._is_verified_win(win, expected_win)
         if verified and self._params is not None:
-            # Its own try/except, separate from the viz.line() one above:
-            # log_metrics() is a second, unrelated call (to the
-            # ExperimentStore, not the plot itself), and a failure here
-            # must not look like the plot itself failed -- in particular,
-            # it must not suppress run= tracking below, since the point
-            # genuinely was plotted successfully regardless of whether
-            # this ExperimentStore call succeeds.
             try:
                 reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
                 self._check_experiment_reply(reply, "log metric {!r}".format(name))
@@ -355,34 +275,20 @@ class VisdomLogger:
                     UserWarning,
                 )
         if verified and self.run is not None:
-            # RunTracker.log_plot_update keys its per-window sequence
-            # counters on win, so passing True straight through would
-            # collapse every metric onto that one shared value instead of
-            # keeping each metric's window_update_seq independent (every
-            # offline-mode call returns the identical True sentinel).
-            # name is used as the fallback here specifically because it's
-            # already guaranteed to be a non-empty string, unique per
-            # metric within this VisdomLogger instance.
-            tracked_win = win if isinstance(win, str) and win else name
+            # RunTracker keys its per-window sequence on win, and every
+            # offline-mode call returns the same True sentinel, so name is
+            # used as a per-metric stand-in in that case instead.
+            tracked_win = win if isinstance(win, str) else name
             self._log_to_run(name, tracked_win, x_val, value, xlabel)
         return True
 
     def _log_to_run(self, name, win, x_val, value, xlabel):
         """Best-effort record this already-plotted update on self.run.
 
-        Reuses RunTracker.log_plot_update -- the same per-window
-        sequence/timing primitive TrackedVisdom (visdom.tracking.graphs)
-        uses for auto-logged chart calls -- rather than a separate,
-        parallel bookkeeping mechanism. Kept as a separate try/except from
-        _plot()'s own (which guards the actual viz.line()/log_metrics()
-        calls) so a tracking-only failure here is reported with its own,
-        more specific message rather than being folded into _plot()'s
-        generic "failed to log" warning -- and, since this method never
-        lets anything escape (RunAlreadyFinishedError is swallowed
-        silently, anything else becomes a warning via _safe_warn), it's
-        safe to call after _plot()'s own try/except has already
-        succeeded, with no risk of a tracking failure retroactively
-        looking like a plotting failure.
+        A failure here never affects the plot itself (which already
+        succeeded) -- it's reported as its own warning rather than raised,
+        except for RunAlreadyFinishedError, which is expected/benign and
+        stays silent.
         """
         try:
             self.run.log_plot_update(
@@ -391,23 +297,10 @@ class VisdomLogger:
         except RunAlreadyFinishedError:
             pass
         except Exception as e:
-            # stacklevel=4: warn() -> _log_to_run -> _plot -> log() (or
-            # __exit__, for a value flushed at context-manager exit) ->
-            # the user's call site. One deeper than the equivalent warning
-            # in visdom.tracking.graphs, since _plot is an extra frame of
-            # indirection that TrackedVisdom's wrapper doesn't have.
             _safe_warn(
                 "visdom.pytorch: failed to record metric {0!r} on run "
                 "{1!r} ({2}: {3}) -- the plot itself still succeeded "
                 "normally, only the tracking record is affected.".format(
-                    # getattr, not self.run.run_id directly: __init__
-                    # already rejects a run= that lacks log_plot_update
-                    # entirely, but a duck-typed object can still satisfy
-                    # that check while lacking run_id specifically (e.g. a
-                    # test double, or a genuinely broken log_plot_update
-                    # implementation on an otherwise-valid-looking object).
-                    # That must not turn this best-effort warning itself
-                    # into a second, unrelated crash.
                     name,
                     getattr(self.run, "run_id", repr(self.run)),
                     type(e).__name__,
@@ -436,32 +329,15 @@ class VisdomLogger:
             once per epoch, leave log_every=1 — the epoch counter handles
             throttling by design. The first call for a metric is always
             plotted immediately, and any value still waiting on log_every
-            when the context manager exits is flushed automatically — a
-            metric is never *silently* dropped: on any failure (including
-            at that final exit flush) a warning names exactly which metric
-            and value didn't make it, and the point stays inspectable on
-            ``tracker._pending`` rather than disappearing outright.
+            when the context manager exits is flushed automatically.
 
-            This also holds for a point that was actually attempted and
-            failed (as opposed to one merely withheld by throttling): it is
-            retried on the metric's next due call (the next call where
-            log_every would otherwise trigger a send) rather than being
-            silently replaced by whatever newer value happens to arrive in
-            the meantime. Off-interval calls that arrive while a failed
-            point is still waiting leave it untouched -- they neither
-            attempt a send nor overwrite it -- so it survives, unmodified,
-            until a due call can actually retry it.
-
-            There is only one pending slot per metric, though, so this
-            isn't an unbounded retry queue: if a due-call retry of a
-            failed point fails *again*, that call's own (newer) value is
-            not queued anywhere -- the metric keeps retrying the original
-            failed point, on every subsequent due call, until either it
-            succeeds or the context manager exits. A connection outage
-            spanning several due intervals therefore coalesces down to
-            that one oldest unsent point (the same way ordinary log_every
-            throttling already coalesces intervening values down to the
-            latest one) rather than queuing every value seen in between.
+            A point that fails to send is retried on the metric's next due
+            call (the next call where log_every would otherwise trigger a
+            send), rather than being silently replaced by a newer value in
+            the meantime. There's only one pending slot per metric though:
+            if that retry fails again, the newer value isn't queued either
+            -- the same point keeps getting retried until it succeeds or
+            the context manager exits.
         """
         if not isinstance(name, str) or not name:
             raise TypeError("name must be a non-empty string, got {!r}".format(name))
@@ -480,43 +356,26 @@ class VisdomLogger:
         x_val = x if x is not None else self._step.get(name, 1) - 1
 
         if self._counter[name] > 1 and self._counter[name] % self.log_every != 0:
-            # Off-interval ("throttled") call: ordinarily just buffer this
-            # value for the next due call, same as always. But if the
-            # pending slot already holds a point whose *send was actually
-            # attempted and failed*, it must not be silently replaced here
-            # -- that would mean it never gets retried at all (see the
-            # bottom of this method, and _plot()'s docstring, for where the
-            # retry happens). A value that was merely buffered-and-never-
-            # sent is fine to overwrite, same as before.
+            # Off-interval: buffer the value, unless a previous send
+            # genuinely failed and is still waiting to be retried -- that
+            # one must not be overwritten before it gets a chance.
             if name not in self._pending_failed:
                 self._pending[name] = (x_val, value, xlabel)
             return
 
-        # This call is "due": either the first call ever made for this
-        # metric, or the log_every-th call since its last send attempt. If
-        # an earlier send for this metric failed, that failed point is
-        # retried first, before this call's own value is considered at all
-        # -- it is the oldest point still owed to the server, and letting a
-        # newer value jump ahead of it is exactly the silent-data-loss bug
-        # this retry exists to prevent.
+        # Due call: first call ever, or the log_every-th since the last
+        # attempt. Retry a previously-failed point first, since it's the
+        # oldest thing still owed to the server.
         if name in self._pending_failed:
             failed_x, failed_value, failed_xlabel = self._pending[name]
             if self._plot(name, failed_x, failed_value, failed_xlabel):
                 self._pending.pop(name, None)
                 self._pending_failed.discard(name)
-                # Fall through: the retry succeeded, so this call's own
-                # value still gets its normal due-call treatment below,
-                # rather than being parked until some future call (which,
-                # with log_every == 1, might never arrive via the
-                # throttling branch above and would otherwise strand it in
-                # _pending indefinitely).
+                # Retry succeeded -- fall through to also send this call's
+                # own value now, rather than stranding it until some
+                # future call (which, with log_every == 1, might never
+                # come via the throttling branch above).
             else:
-                # Still failing: keep retrying this exact point on every
-                # subsequent due call and leave it as the sole occupant of
-                # the pending slot. This call's own (newer, never-sent)
-                # value is intentionally not queued anywhere -- there is
-                # only one pending slot per metric, and letting the new
-                # value take it would reproduce the exact bug being fixed.
                 return
 
         if self._plot(name, x_val, value, xlabel):

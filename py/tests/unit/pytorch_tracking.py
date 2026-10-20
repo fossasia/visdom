@@ -296,17 +296,10 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual(updates[0]["data"]["value"], 0.5)
 
     def test_offline_mode_sentinel_does_not_collapse_per_metric_windows(self):
-        """Regression test for a flagged issue: self._wins[name] holds
-        whatever self.viz.line() returns, which in offline mode is True
-        (_send's own sentinel, not a real window id) rather than a
-        string -- and a client built with raise_exceptions=False can
-        similarly return False/None on a failed send. Passed straight
-        through, every metric would key RunTracker's per-window counters
-        on the identical True/False/None value, merging window_update_seq
-        across unrelated metrics instead of keeping each one independent.
-        name (already guaranteed to be a unique, non-empty string per
-        metric within one VisdomLogger instance) is used as the tracked
-        window id whenever the real one isn't a usable string."""
+        """In offline mode viz.line() returns True for every metric, not a
+        real window id -- RunTracker must still key each metric's
+        per-window sequence independently (falling back to name) instead
+        of merging them all onto one shared True."""
         run = RunTracker("exp", out_dir=self.out_dir)
         with patch.object(self.vis, "_send", return_value=True):  # offline sentinel
             with VisdomLogger(self.vis, env="e1", run=run) as tracker:
@@ -332,24 +325,11 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual([seq for _, seq in by_name["Val Loss"]], [1])
 
     def test_failed_send_is_retried_through_full_create_append_lifecycle(self):
-        """End-to-end regression test requested in review: exercises the
-        real Visdom.line() -> scatter() -> _send() path (only the lowest-
-        level _send transport is mocked, never viz.line() itself) across
-        window creation and several appends, for two interleaved metrics,
-        with one append genuinely failing (a non-raising False return) and
-        later succeeding on retry.
-
-        Verifies, together:
-          - real Visdom plotting behaviour: each metric's window is
-            created once and every later call (including the retried one)
-            reuses that exact same win id, across both metrics
-            independently;
-          - RunTracker per-window sequencing stays correct: the failed
-            append is never recorded, the metric it belongs to still ends
-            up with a gap-free [1, 2, 3] sequence once the retry succeeds,
-            and the unrelated metric's own sequence is untouched by the
-            other metric's failure.
-        """
+        """End-to-end: real Visdom.line() -> scatter() -> _send() path
+        (only _send is mocked), two metrics, one append genuinely fails
+        and later succeeds on retry. Each metric should stay on one
+        window throughout, and RunTracker's per-window sequence should
+        end up gap-free and unaffected by the other metric's failure."""
         call_count = {"n": 0}
         win_ids = {"n": 0}
 
@@ -365,30 +345,19 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         run = RunTracker("exp", out_dir=self.out_dir)
         with patch.object(self.vis, "_send", side_effect=_send_with_one_failure):
             with VisdomLogger(self.vis, env="e1", run=run) as tracker:
-                tracker.log("Train Loss", 1.0)  # call 1: create TL -> win_1
-                tracker.log("Val Loss", 2.0)  # call 2: create VL -> win_2
-                tracker.log("Train Loss", 0.9)  # call 3: append TL -> FAILS
-                # (a non-raising False return from _send -- unlike an
-                # exception -- is not itself warning-worthy; see
-                # test_failed_create_send_is_not_tracked)
-                tracker.log("Val Loss", 1.8)  # call 4: append VL -> win_2, ok
-                # call 5: retries the failed 0.9 append (succeeds) then
-                # call 6: sends this call's own 0.8 (also succeeds)
-                tracker.log("Train Loss", 0.8)
-                tracker.log("Val Loss", 1.7)  # call 7: append VL -> win_2, ok
+                tracker.log("Train Loss", 1.0)  # creates win_1
+                tracker.log("Val Loss", 2.0)  # creates win_2
+                tracker.log("Train Loss", 0.9)  # append fails
+                tracker.log("Val Loss", 1.8)  # append ok
+                tracker.log("Train Loss", 0.8)  # retries 0.9, then sends 0.8
+                tracker.log("Val Loss", 1.7)  # append ok
         run.finish()
 
-        # Visdom plotting behaviour: each metric stayed on exactly one
-        # window throughout, including across the failure+retry.
         self.assertEqual(tracker._wins["Train Loss"], "win_1")
         self.assertEqual(tracker._wins["Val Loss"], "win_2")
         self.assertNotIn("Train Loss", tracker._pending)
         self.assertNotIn("Val Loss", tracker._pending)
 
-        # RunTracker sequencing: the failed append never got recorded, so
-        # Train Loss ends up with exactly its 3 genuinely-sent values, in
-        # order, numbered without a gap -- and Val Loss's own sequence was
-        # never touched by Train Loss's unrelated failure.
         updates = self._plot_update_events(run)
         by_name = {}
         for e in updates:
@@ -438,13 +407,9 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
 
     def test_unverifiable_truthy_win_is_cached_but_not_tracked(self):
         """Regression test for a flagged review issue: viz.line() returning
-        some arbitrary truthy value that isn't a real window id or the
-        True offline sentinel (e.g. from a malformed/wrapped client) is
-        not proof the point was genuinely plotted. It's still cached/
-        reused like any other successful send (so it isn't retried
-        forever), but params=/run= tracking -- a durable, external claim
-        that this point was plotted -- must not record it on such
-        unverifiable evidence."""
+        an arbitrary truthy non-string value isn't proof of a genuine
+        plot. It's still cached so it isn't retried forever, but
+        params=/run= tracking must not record it."""
         run = RunTracker("exp", out_dir=self.out_dir)
         metric_calls = []
         with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
@@ -471,43 +436,64 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual(metric_calls, [])
         self.assertEqual(self._plot_update_events(run), [])
 
-    def test_readonly_rejection_body_is_not_mistaken_for_a_real_window_id(self):
-        """Regression test: Visdom's transport (_send()/_handle_post())
-        returns the raw HTTP response body without checking the status
-        code, so a rejected write (e.g. a readonly server's 403) can come
-        back as a non-empty, JSON-object-shaped string -- exactly as
-        truthy, and exactly as much a `str`, as a real window id. Such a
-        response must not be mistaken for a successfully-applied plot by
-        params=/run= tracking, for both the window-creation call and a
-        later append."""
-        rejection_body = (
-            '{"success": false, "error": "The server is running in readonly mode"}'
-        )
-        run = RunTracker("exp", out_dir=self.out_dir)
-        metric_calls = []
-        with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
-            with patch.object(
-                self.vis, "finish_experiment", return_value={"env_id": "e1"}
-            ):
+    # Visdom's transport returns the raw HTTP response body without
+    # checking the status code, so any of these can come back from a
+    # rejected/broken request just as truthy as a real window id.
+    NON_WIN_RESPONSES = {
+        "json_object": '{"success": false, "error": "readonly mode"}',
+        "json_array": '["error", "readonly mode"]',
+        "html_error": "<html><title>502 Bad Gateway</title></html>",
+        "plain_text_error": "Internal Server Error",
+    }
+
+    def test_rejection_bodies_are_not_mistaken_for_a_window_id_on_creation(self):
+        """Regression test: none of NON_WIN_RESPONSES -- whatever shape a
+        rejected creation's body takes -- is mistaken for a real window id
+        by params=/run= tracking."""
+        for label, body in self.NON_WIN_RESPONSES.items():
+            with self.subTest(label):
+                run = RunTracker("exp", out_dir=self.out_dir)
+                metric_calls = []
                 with patch.object(
+                    self.vis, "experiment", return_value={"env_id": "e1"}
+                ), patch.object(
+                    self.vis, "finish_experiment", return_value={"env_id": "e1"}
+                ), patch.object(
                     self.vis,
                     "log_metrics",
                     side_effect=lambda metrics, step=None, env=None: metric_calls.append(
                         metrics
                     )
                     or {"env_id": env},
+                ), patch.object(
+                    self.vis, "line", side_effect=lambda *a, **kw: body
                 ):
-                    with patch.object(
-                        self.vis, "line", side_effect=lambda *a, **kw: rejection_body
-                    ):
-                        with VisdomLogger(
-                            self.vis, env="e1", params={"lr": 0.01}, run=run
-                        ) as tracker:
-                            tracker.log("loss", 0.5)  # creation: rejected
-                            tracker.log("loss", 0.4)  # "append": rejected too
-        run.finish()
-        self.assertEqual(metric_calls, [])
-        self.assertEqual(self._plot_update_events(run), [])
+                    with VisdomLogger(
+                        self.vis, env="e1", params={"lr": 0.01}, run=run
+                    ) as tracker:
+                        tracker.log("loss", 0.5)
+                run.finish()
+                self.assertEqual(metric_calls, [])
+                self.assertEqual(self._plot_update_events(run), [])
+
+    def test_rejection_bodies_are_not_mistaken_for_a_window_id_on_append(self):
+        """Same regression, for an append after a genuinely successful
+        creation: the exact-id-match check must reject every shape in
+        NON_WIN_RESPONSES, not just JSON-looking ones."""
+        for label, body in self.NON_WIN_RESPONSES.items():
+            with self.subTest(label):
+                run = RunTracker("exp", out_dir=self.out_dir)
+                results = iter(["win_1", body])
+                with patch.object(
+                    self.vis, "line", side_effect=lambda *a, **kw: next(results)
+                ):
+                    with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                        tracker.log("loss", 0.5)  # creates win_1, tracked
+                        tracker.log("loss", 0.4)  # append rejected, skipped
+                run.finish()
+                updates = self._plot_update_events(run)
+                self.assertEqual(len(updates), 1)
+                self.assertEqual(updates[0]["data"]["value"], 0.5)
 
     def test_failed_send_also_skips_experiment_store_log_metrics(self):
         """The same genuine-failure check guards params=/ExperimentStore

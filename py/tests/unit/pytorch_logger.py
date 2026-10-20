@@ -132,9 +132,8 @@ class TestPlotting(unittest.TestCase):
         self.assertNotIn("loss", self.logger._wins)
 
     def test_window_is_created_again_once_the_server_recovers(self):
-        """Recovery must retry the point that actually failed (0.9), not
-        silently drop it in favor of whatever value arrives next (0.8) --
-        both end up sent, in order, once the server is back."""
+        """Recovery retries the failed 0.9, then sends 0.8 too -- neither
+        value is lost."""
         self.logger.viz.line.side_effect = lambda *a, **kw: False
         self.logger.log("loss", 0.9)
         self.logger.viz.line.side_effect = lambda *a, **kw: Mock()
@@ -142,13 +141,11 @@ class TestPlotting(unittest.TestCase):
         self.logger.log("loss", 0.8)
         calls = self.logger.viz.line.call_args_list
         self.assertEqual(len(calls), 2)
-        # First: the originally-failed creation is retried as-is.
         retry_kwargs = calls[0].kwargs
         self.assertNotIn("win", retry_kwargs)
         self.assertEqual(retry_kwargs["X"], [1])
         self.assertEqual(retry_kwargs["Y"], [0.9])
         self.assertIn("loss", self.logger._wins)
-        # Then: this call's own (newer) value is sent too, as an append.
         append_kwargs = calls[1].kwargs
         self.assertEqual(append_kwargs["win"], self.logger._wins["loss"])
         self.assertEqual(append_kwargs["update"], "append")
@@ -196,13 +193,8 @@ class TestContextManager(unittest.TestCase):
         self.assertEqual(kwargs["Y"], [3.0])
 
     def test_failed_interval_send_is_kept_for_the_exit_flush(self):
-        """A failed send must not clear the buffer, or the value is lost
-        even when the server is back by the time the block exits. The
-        point that actually failed (call 1, the only one that was ever
-        attempted while the server was down -- calls 2-4 are off-interval
-        and never attempt a send, and call 5's due-call retry of call 1
-        also fails) is the one that must survive and eventually get
-        flushed -- not whatever value happened to arrive last."""
+        """The point that actually failed (call 1) survives and is what
+        eventually gets flushed -- not whatever arrived last."""
         logger = _logger(log_every=5)
         logger.viz.line.side_effect = lambda *a, **kw: False
         with logger as tracker:
@@ -215,11 +207,8 @@ class TestContextManager(unittest.TestCase):
         self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [1.0])
 
     def test_failed_exit_flush_warns_and_preserves_the_pending_value(self):
-        """Regression test: __exit__ must not silently ignore _plot()'s
-        return value for the final flush. If the server is still down
-        when the context manager exits, the dropped point must (a) raise
-        a clear warning naming the metric and value, and (b) remain
-        inspectable on tracker._pending rather than vanishing outright."""
+        """A failed final flush warns (naming the metric/value) and stays
+        on tracker._pending instead of vanishing."""
         logger = _logger(log_every=5)
         logger.viz.line.side_effect = lambda *a, **kw: False
         with self.assertWarns(UserWarning) as cm:
@@ -233,8 +222,7 @@ class TestContextManager(unittest.TestCase):
         self.assertIn("loss", tracker._pending_failed)
 
     def test_successful_exit_flush_clears_pending_state(self):
-        """The happy-path complement of the above: once the final flush
-        actually succeeds, nothing is left dangling in _pending."""
+        """A successful final flush leaves nothing dangling in _pending."""
         logger = _logger(log_every=5)
         with logger as tracker:
             tracker.log("loss", 1.0)
@@ -286,23 +274,9 @@ class TestLogEvery(unittest.TestCase):
         self.assertIn("loss", logger._pending)
 
     def test_failed_due_point_is_not_overwritten_by_later_throttled_calls(self):
-        """Regression test for the exact silent-data-loss scenario flagged
-        in review: a point that fails on its due call must survive every
-        off-interval call that follows (which must not overwrite it, nor
-        attempt their own send), and must be the point that is eventually
-        retried -- not replaced by -- once the server recovers.
-
-            log_every = 5
-            call 1 -> plotted (1.0)
-            call 2..4 -> buffered (2.0, 3.0, 4.0 -- each just overwrites
-                         the one before, ordinary throttling)
-            call 5 -> due, send fails -> pending = 5.0
-            call 6 -> throttled: must NOT overwrite pending with 6.0
-            call 7 -> throttled: must NOT overwrite pending with 7.0
-            call 8 -> throttled: must NOT overwrite pending with 8.0
-            call 9 -> throttled: must NOT overwrite pending with 9.0
-            call 10 -> due, server recovered: retries 5.0 (not 10.0)
-        """
+        """A point that fails on its due call (5.0) survives every
+        off-interval call after it (6..9, which must not send or
+        overwrite it) and is what gets retried once due again (10)."""
         logger = _logger(log_every=5)
         for i in range(1, 5):
             logger.log("loss", float(i))  # 1 plotted, 2/3/4 buffered
@@ -334,11 +308,8 @@ class TestLogEvery(unittest.TestCase):
         self.assertNotIn("loss", logger._pending)
 
     def test_repeated_due_call_failures_coalesce_to_the_oldest_point(self):
-        """Documents the deliberate single-slot trade-off: if the retry of
-        a failed point itself keeps failing across several due calls, the
-        newer values seen on each of those calls are not queued anywhere
-        -- only the original failed point keeps getting retried -- until
-        either it succeeds or the context exits."""
+        """If a failed point's retry keeps failing, newer values aren't
+        queued either -- the same point keeps getting retried."""
         logger = _logger(log_every=1)  # every call is "due"
         logger.viz.line.side_effect = lambda *a, **kw: False
         logger.log("loss", 1.0)  # fails -> pending = 1.0
