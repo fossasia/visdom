@@ -500,6 +500,35 @@ def test_confusion_matrix_tolerates_an_unsorted_label_list():
     assert cm.sum() == 2
 
 
+@pytest.mark.parametrize(
+    "y_true, y_pred, labels, expected, skipped",
+    [
+        ([0, None, 1], [0, 1, 1], [0, 1], [[1, 0], [0, 1]], 1),
+        (["a", 1], [1, "a"], ["a", 1], [[0, 1], [1, 0]], 0),
+        ([None, None], [None, None], [None], [[2]], 0),
+    ],
+)
+def test_confusion_matrix_accepts_labels_that_cannot_be_sorted(
+    y_true, y_pred, labels, expected, skipped
+):
+    """Object arrays keep the per-sample lookup, which only needs hashing.
+
+    ``np.unique`` sorts, so an object array holding ``None`` beside numbers,
+    or numbers beside strings, raises a TypeError on comparison. The loop this
+    replaced never ordered anything, so those inputs used to work and still
+    have to.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cm = _compute_confusion_matrix(
+            np.asarray(y_true, dtype=object),
+            np.asarray(y_pred, dtype=object),
+            labels,
+        )
+    np.testing.assert_array_equal(cm, expected)
+    assert len(caught) == (1 if skipped else 0)
+
+
 def test_roc_curve_from_raw_labels_sends_two_traces(capture_send):
     """The curve itself plus the dashed chance baseline."""
     sent = capture_send(

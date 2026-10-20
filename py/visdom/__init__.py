@@ -718,7 +718,17 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
 
         The dict is consulted once per *distinct* value rather than once per
         sample, so a long run of a few labels costs a sort and a gather.
+        Object arrays may hold values that cannot be ordered against each
+        other (``None`` beside numbers, numbers beside strings), which the
+        sort inside ``np.unique`` rejects, so those keep the per-sample
+        lookup, which only ever needs the labels to be hashable.
         """
+        if values.dtype == object:
+            return np.fromiter(
+                (label_to_idx.get(value, -1) for value in values.tolist()),
+                dtype=np.intp,
+                count=values.shape[0],
+            )
         uniq, inverse = np.unique(values, return_inverse=True)
         lookup = np.fromiter(
             (label_to_idx.get(value, -1) for value in uniq.tolist()),
