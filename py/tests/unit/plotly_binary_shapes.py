@@ -6,6 +6,7 @@ import base64
 import copy
 
 import numpy as np
+import plotly.graph_objects as go
 import pytest
 
 from visdom import _decode_binary_arrays
@@ -40,7 +41,6 @@ def test_invalid_string_shape_keeps_original_encoding(shape):
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int32, np.uint8])
 def test_plotly_figure_heatmap_uses_nested_lists(capture_send, dtype):
-    go = pytest.importorskip("plotly.graph_objects")
     array = np.arange(6, dtype=dtype).reshape(2, 3)
     figure = go.Figure(go.Heatmap(z=array))
     sent = capture_send(lambda client: client.plotlyplot(figure))
