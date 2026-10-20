@@ -309,6 +309,17 @@ class TestHeatmapNancolorToggled(NancolorHeatmapMixin, PlotUpdateTestCase):
         for trace in self.traces(win):
             self.assertEqual(trace["y"], ["one", "e"])
 
+    def test_replace_without_nancolor_removes_the_background_trace(self):
+        """A plain 'replace' on a nancolor heatmap drops the background
+        entirely instead of keeping it around as a stale all-zero layer --
+        'replace' means the caller wants exactly what they just sent."""
+        win = self.create_nancolor_heatmap()
+        self.update_heatmap(win, [[9, 10]], "replace", x=["c1", "c2"], y=["one"])
+        traces = self.traces(win)
+        self.assertEqual(len(traces), 1)
+        self.assertIsNot(traces[0].get("showscale"), False)
+        self.assertEqual(traces[0]["z"], [[9, 10]])
+
 
 class TestTraceUpdates(PlotUpdateTestCase):
     """A ``name`` selects which traces the update applies to."""

@@ -683,20 +683,39 @@ class UpdateHandler(BaseHandler):
                 and background_new is None
                 and data_new is not None
             ):
-                # Copy, don't alias: _apply_heatmap_update assigns new_data's
-                # label lists onto the plot directly on 'replace', and a
-                # shared list object would then get a later appendRow's
-                # label pushed onto it twice -- once per trace that "+="s
-                # the same underlying list.
-                background_new = {
-                    "z": [[0] * len(row) for row in data_new["z"]],
-                    "x": (
-                        list(data_new["x"]) if data_new.get("x") is not None else None
-                    ),
-                    "y": (
-                        list(data_new["y"]) if data_new.get("y") is not None else None
-                    ),
-                }
+                if updateDir == "replace":
+                    # A replace rewrites the plot outright, so dropping
+                    # nancolor on one means the caller wants it gone -- not
+                    # kept around as a stale all-zero layer behind the new
+                    # data. (Every replace is valid -- see
+                    # _validate_heatmap_update -- so it's safe to mutate
+                    # pdata here before the validate/apply pass below.)
+                    del pdata[background_plot_idx]
+                    if data_plot_idx > background_plot_idx:
+                        data_plot_idx -= 1
+                    background_plot_idx = None
+                else:
+                    # A directional update still has to keep an existing
+                    # background in sync with the data trace it grows
+                    # alongside, or it goes stale relative to it. Copy,
+                    # don't alias: _apply_heatmap_update assigns new_data's
+                    # label lists onto the plot directly on 'replace', and a
+                    # shared list object would then get a later appendRow's
+                    # label pushed onto it twice -- once per trace that
+                    # "+="s the same underlying list.
+                    background_new = {
+                        "z": [[0] * len(row) for row in data_new["z"]],
+                        "x": (
+                            list(data_new["x"])
+                            if data_new.get("x") is not None
+                            else None
+                        ),
+                        "y": (
+                            list(data_new["y"])
+                            if data_new.get("y") is not None
+                            else None
+                        ),
+                    }
             elif (
                 background_plot_idx is None
                 and background_new is not None
