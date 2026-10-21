@@ -25,6 +25,7 @@ import os
 import errno
 from collections import OrderedDict
 
+import tornado.escape
 import tornado.ioloop
 
 MAX_ENV_NAME_LEN = 25
@@ -489,6 +490,46 @@ def push_deleted_off_loop(handler, eid, win_id, p_data):
     )
 
 
+def push_deleted_many_off_loop(handler, eid, panes):
+    """Record several closed panes off the loop; resolves to the new undo depth.
+
+    The panes are already out of ``state`` -- the close popped them on the loop
+    -- so the worker is the only owner of what it is handed and there is
+    nothing left for the loop to mutate mid-write.
+    """
+    return run_on_storage_executor(
+        handler, push_deleted_many, handler.storage, eid, panes
+    )
+
+
+def drop_deleted_many_off_loop(handler, eid, panes):
+    """Take back the undo entries a close pushed; resolves to the new depth.
+
+    Submitted rather than run here, so it lands on the worker behind the write
+    it is taking back: the executor runs one task at a time, and a close that
+    is rolled back after its push was submitted cannot otherwise tell whether
+    the push has run yet. Cancelling the future the close awaited does not
+    stop the worker, so very often it has not.
+    """
+    return run_on_storage_executor(
+        handler, drop_deleted_many, handler.storage, eid, panes
+    )
+
+
+def forget_closed_panes(handler, eid, panes):
+    """Queue the removal of a rolled-back close's undo entries, logging failure.
+
+    The close that asks for this is on its way out with an exception of its
+    own -- a failed write, or a client that went away -- so the removal is not
+    awaited: the caller has nothing left to tell anyone, and awaiting disk work
+    inside the cancellation it is unwinding would only park it again. Returned
+    all the same, for callers that do want to wait.
+    """
+    future = drop_deleted_many_off_loop(handler, eid, panes)
+    future.add_done_callback(_log_storage_failure)
+    return future
+
+
 def pop_deleted_off_loop(handler, eid):
     """Undo the newest close off the loop; resolves to ``(popped, depth)``."""
     return run_on_storage_executor(
@@ -706,10 +747,6 @@ def window(args):
         p["type"] = "plot"
 
     return p
-
-
-def gather_envs(state, store):
-    return sorted(set(store.list_envs() + list(state.keys())))
 
 
 def _is_named_trace(trace):
@@ -948,15 +985,30 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
 
 
 def broadcast_envs(handler, target_subs=None):
+    """Broadcast the environment list to browser clients.
+
+    Every recipient gets the same bytes, so the list and its encoding are built
+    once here rather than once per subscriber, the way ``broadcast_tags`` below
+    already does it. Writing one shared string to every socket is safe: a
+    ``str`` is immutable, and the polling transport's ``write_message`` only
+    appends it to a deque.
+    """
     if target_subs is None:
         target_subs = handler.subs.values()
+    # Materialized first: a generator is truthy even when it yields nothing, so
+    # an empty one would slip past the check below and pay for the encode.
+    target_subs = list(target_subs)
+    if not target_subs:
+        # Nothing to send to, so do not pay for the encode. Without this the
+        # hoist above would make an empty room cost more than the per-subscriber
+        # loop it replaces, which never ran at all.
+        return
+    message = json.dumps(
+        {"command": "env_update", "data": list(handler.state.keys())},
+        cls=NanSafeEncoder,
+    )
     for sub in target_subs:
-        sub.write_message(
-            json.dumps(
-                {"command": "env_update", "data": list(handler.state.keys())},
-                cls=NanSafeEncoder,
-            )
-        )
+        sub.write_message(message)
 
 
 def broadcast_tags(handler, eid, tags, target_subs=None):
@@ -972,9 +1024,20 @@ def broadcast_tags(handler, eid, tags, target_subs=None):
 
 
 def send_to_sources(handler, msg):
+    """Relay one event to every connected python client.
+
+    The encode is hoisted out of the loop because ``msg`` can be large: a pane
+    close sends the whole closed pane as ``pane_data``, so a plot with many
+    points cost one full encode per connected client. The early return keeps an
+    unattended server from paying that encode for nobody -- the loop it replaces
+    did not run when there were no sources.
+    """
     target_sources = handler.sources.values()
+    if not target_sources:
+        return
+    message = json.dumps(msg, cls=NanSafeEncoder)
     for source in target_sources:
-        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
+        source.write_message(message)
 
 
 def load_env(state, eid, socket, store, undo_count=None, warmed=False):
@@ -1025,13 +1088,46 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
 
 
 def broadcast(self, msg, eid):
+    sent = 0
     for s in self.subs:
         if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
+                sent += 1
         else:
             if self.subs[s].eid == eid:
                 self.subs[s].write_message(msg)
+                sent += 1
+    if sent:
+        record_workspace_broadcast(self, sent, msg)
+
+
+def _sent_size(msg):
+    if isinstance(msg, bytes):
+        return len(msg)
+    if isinstance(msg, dict):
+        msg = tornado.escape.json_encode(msg)
+    if isinstance(msg, str):
+        return len(msg.encode("utf-8"))
+    return 0
+
+
+def record_workspace_broadcast(handler, sent, msg):
+    """Attribute a push to the workspace whose state the handler is bound to.
+
+    Guarded rather than assumed: this is called from the broadcast path, which
+    also runs for a plain single-tenant server and under test doubles that carry
+    no state at all. Counting is not worth failing a broadcast over, so anything
+    unexpected here is simply not counted.
+    """
+    record = getattr(getattr(handler, "server_state", None), "record_broadcast", None)
+    if record is None:
+        return
+    try:
+        size = _sent_size(msg)
+        record(sent, size * sent)
+    except Exception:
+        pass
 
 
 def push_deleted(store, eid, win_id, p_data):
@@ -1047,6 +1143,83 @@ def push_deleted(store, eid, win_id, p_data):
     if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
         stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
     store.save_undo(eid, stack)
+    return len(stack)
+
+
+def push_deleted_many(store, eid, panes):
+    """Append several closed panes to the env's undo stack in one write.
+
+    ``/close`` with no ``win`` closes every pane an environment has. Pushing
+    them one at a time costs a read and a write of the stack per pane, and once
+    the push is off the loop, a round trip to the storage worker per pane with
+    the loop free to change the env in between. They travel together instead:
+    the stack is read once and extended in the order the panes were closed, so
+    what lands is the stack that pushing them in turn would have left --
+    including the trim, which keeps the last ``DEFAULT_MAX_UNDO_HISTORY``
+    either way.
+
+    Returns the depth the stack was left at, as ``push_deleted`` does.
+    """
+    stack = store.load_undo(eid)
+    stack.extend([win_id, p_data] for win_id, p_data in panes)
+    if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
+        stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
+    store.save_undo(eid, stack)
+    return len(stack)
+
+
+def _newest_undo_entry(stack, win_id, p_data):
+    """Where ``stack`` holds the entry a close left for ``win_id``, or ``None``.
+
+    Searched from the newest end, by value first: an id can appear more than
+    once, and the entry wanted here is the one carrying the pane that was
+    closed. The newest entry under the id answers when nothing matches by
+    value, because the stack has been through JSON by then -- a NaN comes back
+    as ``None`` and a tuple comes back as a list -- and the id still names the
+    pane the close took.
+    """
+    by_id = None
+    for index in range(len(stack) - 1, -1, -1):
+        entry = stack[index]
+        if not entry or entry[0] != win_id:
+            continue
+        if list(entry) == [win_id, p_data]:
+            return index
+        if by_id is None:
+            by_id = index
+    return by_id
+
+
+def drop_deleted_many(store, eid, panes):
+    """Remove the undo entries a rolled-back close pushed, keeping the rest.
+
+    A close that puts its panes back has to take its undo entries back with
+    them, or the panes end up in memory and recorded as closed both: an undo
+    would then restore what was never gone, over whatever is in its place.
+
+    One entry per pane, and only if it is there: the write the close awaited
+    may never have landed, the trim may have dropped the entry, or a delete of
+    the env may have taken the whole stack. Entries this close did not push --
+    an older close's, or one from a close that landed behind it -- are left
+    where they are, so what is on the stack afterwards is what the closes that
+    still stand put there.
+
+    Returns the depth the stack was left at, as ``push_deleted_many`` does.
+    """
+    stack = store.load_undo(eid)
+    removed = 0
+    for win_id, p_data in reversed(panes):
+        index = _newest_undo_entry(stack, win_id, p_data)
+        if index is not None:
+            del stack[index]
+            removed += 1
+    if removed:
+        if stack:
+            store.save_undo(eid, stack)
+        else:
+            # Writing an empty stack back would leave an undo file saying the
+            # env has nothing to undo, which is what having no file says.
+            store.clear_undo(eid)
     return len(stack)
 
 

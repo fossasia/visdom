@@ -117,8 +117,12 @@ def _resident_experiments(state, env_ids=None):
     never edited in place once it is stored: :class:`ExperimentStore` writes one
     by rebinding ``env["experiment"]`` to a freshly built ``to_dict``, and
     ``retarget_experiment`` only ever rewrites one belonging to an env that was
-    just deep-copied. The worker therefore reads a blob the loop can replace
-    but cannot alter, so the most it can see is a slightly older experiment.
+    just deep-copied. That rebound dict is shallow, so it can share the metric
+    series of the blob it replaced; the series is append-only and copied before
+    it is appended to (:class:`~visdom.experiments.models.LazyMetricList`), so a
+    list reachable from a stored blob never grows underneath a reader either.
+    The worker therefore reads a blob the loop can replace but cannot alter, so
+    the most it can see is a slightly older experiment.
 
     ``env_ids`` bounds the walk to the ids a selection can reach: an
     ``env_ids`` spec names its destinations up front, so there is no reason to
@@ -316,6 +320,10 @@ class ExperimentHparamsHandler(BaseHandler):
         metadata of every environment the store knows, and an ``env_ids`` one a
         file per id; on the loop, either would stall every other request for
         the whole of it.
+
+        The snapshot the worker reads resident envs from is narrowed to match:
+        an ``env_ids`` selection only ever asks for the ids it names, so only
+        those are named in it.
         """
         wanted = spec["env_ids"] if spec.get("mode") == "env_ids" else None
         return await run_on_storage_executor(

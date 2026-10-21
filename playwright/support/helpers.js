@@ -229,6 +229,7 @@ async function screenshotContent(page, screenshotPath) {
 }
 
 module.exports = {
+  getPythonExecutable,
   runDemo,
   closeEnvs,
   expandAllEnvGroups,
