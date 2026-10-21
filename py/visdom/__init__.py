@@ -4672,17 +4672,22 @@ class Visdom(object):
         _assert_opts(opts)
 
         X = np.asarray(X, dtype=float)
-        assert X.ndim == 2, "X must be a 2D matrix (N experiments x M dimensions)"
+        if X.ndim != 2:
+            raise ValueError("X must be a 2D matrix (N experiments x M dimensions)")
         N, M = X.shape
-        assert N >= 1, "X must have at least 1 experiment (row)"
-        assert M >= 2, "X must have at least 2 dimensions (columns)"
+        if N < 1:
+            raise ValueError("X must have at least 1 experiment (row)")
+        if M < 2:
+            raise ValueError("X must have at least 2 dimensions (columns)")
 
         if Y is not None:
             Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
-            assert Y.ndim == 1, "Y must be a 1D vector"
-            assert (
-                len(Y) == N
-            ), "Length of Y (%d) must match number of rows in X (%d)" % (len(Y), N)
+            if Y.ndim != 1:
+                raise ValueError("Y must be a 1D vector")
+            if len(Y) != N:
+                raise ValueError(
+                    "Length of Y (%d) must match number of rows in X (%d)" % (len(Y), N)
+                )
 
         max_exp = opts.get("max_experiments")
         if max_exp is not None:
@@ -4703,15 +4708,13 @@ class Visdom(object):
         dim_labels = opts.get("dimensions")
         if dim_labels is None:
             dim_labels = ["Dim %d" % (i + 1) for i in range(M)]
-        assert isinstance(dim_labels, (list, tuple)), (
-            "opts.dimensions should be a list/tuple of length %d" % M
-        )
-        assert (
-            len(dim_labels) == M
-        ), "Length of opts.dimensions (%d) must match number of columns in X (%d)" % (
-            len(dim_labels),
-            M,
-        )
+        if not isinstance(dim_labels, (list, tuple)):
+            raise ValueError("opts.dimensions should be a list/tuple of length %d" % M)
+        if len(dim_labels) != M:
+            raise ValueError(
+                "Length of opts.dimensions (%d) must match number of columns in X (%d)"
+                % (len(dim_labels), M)
+            )
 
         opt_ranges = opts.get("ranges") or {}
         opt_constraints = opts.get("constraintranges") or {}

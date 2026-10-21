@@ -136,3 +136,124 @@ client._send.assert_not_called()
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+INVALID_SHAPES = [
+    (dict(X=[1.0, 2.0]), "X must be a 2D matrix"),
+    (dict(X=np.empty((0, 2))), "X must have at least 1 experiment"),
+    (dict(X=np.empty((2, 0))), "X must have at least 2 dimensions"),
+    (dict(X=[[1.0], [2.0]]), "X must have at least 2 dimensions"),
+    (dict(X=np.ones((2, 2)), Y=np.ones((2, 2))), "Y must be a 1D vector"),
+    (dict(X=np.ones((2, 2)), opts={"dimensions": "ab"}), "should be a list/tuple"),
+    (
+        dict(X=np.ones((2, 2)), opts={"dimensions": ["one"]}),
+        "must match number of columns",
+    ),
+    (
+        dict(X=np.ones((2, 2)), opts={"dimensions": ["one", "two", "three"]}),
+        "must match number of columns",
+    ),
+]
+for score_count in (0, 1, 3):
+    for cap in (None, 1, 2, 3):
+        INVALID_SHAPES.append(
+            (
+                dict(
+                    X=np.ones((2, 2)),
+                    Y=np.arange(score_count),
+                    opts={} if cap is None else {"max_experiments": cap},
+                ),
+                "must match number of rows in X",
+            )
+        )
+
+
+@pytest.mark.parametrize("kwargs,message", INVALID_SHAPES)
+def test_invalid_coordinate_shapes_fail_before_sending(offline_client, kwargs, message):
+    from unittest.mock import Mock
+
+    offline_client._send = Mock()
+    with pytest.raises(ValueError, match=message):
+        offline_client.parallel_coordinates(**kwargs)
+    offline_client._send.assert_not_called()
+
+
+@pytest.mark.parametrize("optimized", [False, True])
+def test_coordinate_shape_validation_survives_optimization(optimized):
+    command = [sys.executable]
+    if optimized:
+        command.append("-O")
+    command.extend(
+        [
+            "-c",
+            """
+from unittest.mock import Mock
+import numpy as np
+from visdom import Visdom
+
+client = Visdom.__new__(Visdom)
+client._send = Mock()
+cases = [
+    dict(X=[1., 2.]),
+    dict(X=np.empty((0, 2))),
+    dict(X=np.empty((2, 0))),
+    dict(X=[[1.], [2.]]),
+    dict(X=np.ones((2, 2)), Y=np.ones((2, 2))),
+    dict(X=np.ones((2, 2)), opts={"dimensions": "ab"}),
+    dict(X=np.ones((2, 2)), opts={"dimensions": ["one"]}),
+    dict(X=np.ones((2, 2)), opts={"dimensions": ["one", "two", "three"]}),
+]
+for score_count in (0, 1, 3):
+    for cap in (None, 1, 2, 3):
+        cases.append(dict(X=np.ones((2, 2)), Y=np.arange(score_count),
+                          opts={} if cap is None else {"max_experiments": cap}))
+messages = [
+    "X must be a 2D matrix", "X must have at least 1 experiment",
+    "X must have at least 2 dimensions", "X must have at least 2 dimensions",
+    "Y must be a 1D vector", "opts.dimensions should be a list/tuple",
+    "Length of opts.dimensions", "Length of opts.dimensions",
+] + ["Length of Y"] * 12
+failures = []
+for kwargs, message in zip(cases, messages):
+    try:
+        client.parallel_coordinates(**kwargs)
+    except ValueError as error:
+        if not str(error).startswith(message):
+            failures.append("Wrong validation error: %s" % error)
+    except Exception as error:
+        failures.append("Wrong exception: %r" % error)
+    else:
+        failures.append("Invalid shape accepted: %r" % (kwargs,))
+client._send.assert_not_called()
+if failures:
+    raise RuntimeError("; ".join(failures))
+""",
+        ]
+    )
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("scores", [0.5, [0.5], [[0.5]]])
+def test_single_experiment_accepts_scalar_or_singleton_scores(capture_send, scores):
+    sent = capture_send(
+        lambda client: client.parallel_coordinates([[1.0, 2.0]], Y=scores)
+    )
+    assert sent["payload"]["data"][0]["line"]["color"] == [0.5]
+
+
+@pytest.mark.parametrize("scores", [[[0.1, 0.2]], [[0.1], [0.2]]])
+def test_scores_keep_existing_singleton_axis_support(capture_send, scores):
+    sent = capture_send(
+        lambda client: client.parallel_coordinates([[1.0, 2.0], [3.0, 4.0]], Y=scores)
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["line"]["color"] == [0.1, 0.2]
+    assert trace["dimensions"][0]["values"] == [1.0, 3.0]
