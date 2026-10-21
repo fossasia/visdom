@@ -1190,3 +1190,13 @@ def test_dual_axis_lines_rejects_a_two_dimensional_x(offline_client):
     square = np.zeros((2, 2))
     with pytest.raises(AssertionError, match="values of X should be one-dimensional"):
         offline_client.dual_axis_lines(X=square, Y1=square, Y2=square)
+
+
+def test_dual_axis_lines_accepts_matching_column_vectors(capture_send):
+    """A set of (N, 1) columns plots flat, as the ``float()`` loop had it."""
+    column = np.arange(3).reshape(3, 1)
+    sent = capture_send(lambda v: v.dual_axis_lines(X=column, Y1=column, Y2=column * 2))
+    first, second = sent["payload"]["data"]
+    assert first["x"] == [0.0, 1.0, 2.0]
+    assert first["y"] == [0.0, 1.0, 2.0]
+    assert second["y"] == [0.0, 2.0, 4.0]

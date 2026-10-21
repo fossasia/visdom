@@ -4766,9 +4766,15 @@ class Visdom(object):
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
-        assert X.ndim == 1, "values of X should be one-dimensional"
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
+        if X.ndim == 2 and X.shape[1] == 1:
+            # The shapes match, so all three are column vectors holding one
+            # value per row, which the ``float(value)`` loop this replaced
+            # flattened implicitly. Every other 2-D shape still fails the
+            # assertion below.
+            X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
+        assert X.ndim == 1, "values of X should be one-dimensional"
         if opts is None:
             opts = {}
             opts["height"] = 300
