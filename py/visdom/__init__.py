@@ -3008,14 +3008,19 @@ class Visdom(object):
                 names
             ), "legend should have at least as many entries as metrics"
 
+        # Creation names every trace after the matching legend entry, so the
+        # updates have to address those names. Using the metric keys added
+        # traces instead of updating the ones on the screen.
+        trace_names = list(legend[: len(names)])
+
         if update is not None:
             result = None
             # Send one named update per metric so mapping order cannot swap traces.
-            for name, values in zip(names, series):
+            for trace_name, values in zip(trace_names, series):
                 metric_opts = None
                 if update != "remove":
                     metric_opts = dict(opts)
-                    metric_opts["legend"] = [name]
+                    metric_opts["legend"] = [trace_name]
                 result = self.line(
                     X=X,
                     Y=values,
@@ -3023,7 +3028,7 @@ class Visdom(object):
                     env=env,
                     opts=metric_opts,
                     update=update,
-                    name=name,
+                    name=trace_name,
                 )
             return result
 
