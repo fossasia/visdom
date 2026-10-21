@@ -76,13 +76,32 @@ class TestTheInternalPort(InternalPortCase):
         self.assertEqual(by_token.code, 200)
         self.assertEqual(self.signed_get("/_metrics").code, 200)
 
+    def signed_post(self, path, body, key):
+        raw = json.dumps(body).encode()
+        return self.fetch(
+            path,
+            method="POST",
+            body=raw,
+            headers=internal.signed_headers(key, "POST", path, raw),
+        )
+
+    def test_evicting_needs_the_admin_key(self):
+        body = {"workspace_slug": "alpha"}
+
+        self.assertEqual(self.signed_post("/_evict", body, "read-key").code, 401)
+        allowed = self.signed_post("/_evict", body, "admin-key")
+        self.assertEqual(allowed.code, 200)
+        self.assertEqual(
+            json.loads(allowed.body), {"workspace_slug": "alpha", "closed": 0}
+        )
+
     def test_the_rest_of_visdom_is_not_on_this_port(self):
         self.assertEqual(self.fetch("/events", method="POST", body="{}").code, 404)
 
 
 class TestThePublicPort(KeysSetCase):
     def test_the_internal_endpoints_are_not_served(self):
-        for path in ["/_activity", "/_metrics"]:
+        for path in ["/_activity", "/_metrics", "/_evict"]:
             with self.subTest(path=path):
                 response = self.fetch(
                     path, headers=internal.signed_headers("read-key", "GET", path)
