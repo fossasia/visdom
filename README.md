@@ -422,6 +422,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
+- [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1587,6 +1588,31 @@ This function takes the contents of a visdom log and replays them to the current
 
 Arguments:
 - `log_filename`: log file to replay the contents of.
+
+#### vis.restore_run
+
+Replays a run's plots from the files a `visdom.tracking.RunTracker(..., record_data=True)` run wrote (`RunTracker.track(vis)` wraps a client so its chart calls auto-log to the run): reconstructs every chart the run plotted, in the order it plotted them, into a target environment. `record_data=True` is what makes a run replayable at all — without it, a run's files describe what happened but don't keep the exact data needed to redraw it.
+
+```python
+from visdom import Visdom
+vis = Visdom(server="http://localhost", port=8097)
+result = vis.restore_run(
+    "visdom_runs/mnist_baseline_20261020-123155_a4828e4c.json",
+    env="mnist_replay",
+)
+print(result)
+```
+
+By default every recorded update is sent back-to-back, as fast as the server accepts them, which for a run with many epochs can make the dashboard jump straight to its final state instead of filling in step by step. Pass `delay` (seconds) to instead wait that long between each replayed update, so the dashboard fills in the way the original run did. The server paces this with `asyncio.sleep` on its own event loop rather than blocking it, so other clients' requests are still served normally while a replay with `delay` is running.
+
+Arguments:
+- `json_path`: path to the run's `<run_id>.json` metadata file; its sibling `<run_id>.events.jsonl` (the run's full timeline) must be alongside it.
+- `env`: environment to replay into. Defaults to the env the run's own calls were originally sent to.
+- `delay`: seconds to wait between replayed updates. Defaults to `None` (no delay, replay as fast as possible).
+
+Returns a dict: `run_id`, `name`, `status`, `eid` (the env replayed into), `total` (calls recorded), `replayed` (successfully resent), `failed`, and `errors` (one message per failed call, if any). Raises `visdom.tracking.restore.RunRestoreError` if the run has no replayable data recorded, and `ValueError` up front for an invalid `delay`.
+
+Also available as `POST /restore_run` (body: `{"path": ..., "eid": ..., "delay": ...}`, `path` resolved under the `VISDOM_TRACKING_DIR` environment variable, defaulting to `visdom_runs`), so a run can be replayed directly into a running server without a Python client in between. Refused (`403`) in `-readonly` mode, and subject to the same per-workspace storage limits as any other write.
 
 ### Experiments
 

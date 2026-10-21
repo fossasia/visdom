@@ -33,7 +33,9 @@ same way it is for a line plot.
 
 from __future__ import annotations
 
+import threading
 import warnings
+import weakref
 from typing import Any
 
 from visdom.tracking.core import RunAlreadyFinishedError
@@ -95,6 +97,7 @@ NON_GRAPH_METHODS = frozenset(
         "get_window_data",
         "register_event_handler",
         "replay_log",
+        "restore_run",
         "save",
         "save_plotly_figure",
         "set_window_data",
@@ -114,6 +117,29 @@ NON_GRAPH_METHODS = frozenset(
         "update_hparams",
     }
 )
+
+
+# One lock per underlying Visdom client, guarding that client's `_on_send`
+# hook. `record_data=True` capture (see `_wrap`/`_capture_send` below)
+# installs a hook on `self._vis` for the duration of one wrapped call, then
+# restores whatever was there before. If two `TrackedVisdom` proxies (or two
+# threads driving the same one) shared that client and both captured at
+# once, the second install would stomp the first's hook mid-call and the two
+# calls' sent messages could end up attributed to the wrong run, or to each
+# other. Keyed with a `WeakKeyDictionary` so a client (and therefore its
+# lock) that's dropped is actually reclaimed rather than leaking for the
+# life of the process.
+_hook_lock_registry_lock = threading.Lock()
+_hook_locks: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _hook_lock_for(vis) -> threading.Lock:
+    with _hook_lock_registry_lock:
+        lock = _hook_locks.get(vis)
+        if lock is None:
+            lock = threading.Lock()
+            _hook_locks[vis] = lock
+        return lock
 
 
 def _resolve_win(result: Any, kwargs: dict) -> Any:
@@ -174,6 +200,9 @@ class TrackedVisdom:
         object.__setattr__(self, "_vis", vis)
         object.__setattr__(self, "_run", run)
         object.__setattr__(self, "_wrapped_cache", {})
+        # Populated for the duration of one wrapped call when
+        # `run.record_data` is set -- see `_wrap`/`_capture_send`.
+        object.__setattr__(self, "_captured_calls", None)
 
     def __getattr__(self, item):
         if item in GRAPH_METHODS:
@@ -194,18 +223,68 @@ class TrackedVisdom:
     def __repr__(self):
         return "TrackedVisdom({0!r}, run={1!r})".format(self._vis, self._run.run_id)
 
+    def _capture_send(self, msg, endpoint):
+        """``Visdom._on_send`` callback: record every wire message a
+        wrapped call's ``bound_method`` sends while this hook is installed.
+
+        Several chart methods make more than one ``_send`` call for a
+        single Python-level call (``learning_curve`` sends via an internal
+        ``self.line()``; ``histogram``/``stem``/``quiver`` similarly
+        delegate -- see the class docstring). Appending to a list rather
+        than keeping only the most recent message means every one of those
+        sends survives for replay, not just the last.
+
+        Writes through ``object.__setattr__`` rather than a plain attribute
+        set: ``TrackedVisdom.__setattr__`` is overridden to proxy *every*
+        assignment onto ``self._vis``, so a plain ``self._captured_calls =
+        ...`` here would silently set that attribute on the wrapped client
+        instead of on this proxy.
+        """
+        calls = self._captured_calls
+        if calls is not None:
+            calls.append({"endpoint": endpoint, "msg": msg})
+
     def _wrap(self, method_name, bound_method):
         def wrapper(*args, **kwargs):
+            record_data = bool(getattr(self._run, "record_data", False))
+            # Register this call as in-flight *before* doing any work, so
+            # RunTracker.finish() (if called concurrently from another
+            # thread) knows to wait for it -- see RunTracker._begin_call.
+            began = self._run._begin_call()
+            hook_lock = _hook_lock_for(self._vis) if record_data else None
+            if hook_lock is not None:
+                # Held for the whole wrapped call (including its network
+                # I/O): the hook this installs lives on the shared `_vis`
+                # client, so a second thread/proxy capturing on the same
+                # client at the same time would otherwise race the first's
+                # install/restore and could attribute sent messages to the
+                # wrong call. Only ever acquired when record_data=True, so
+                # callers who don't use replay capture pay nothing extra.
+                hook_lock.acquire()
             try:
-                result = bound_method(*args, **kwargs)
-            except Exception as e:
-                self._log_best_effort(
-                    "plot_error",
-                    win=kwargs.get("win"),
-                    method=method_name,
-                    error="{0}: {1}".format(type(e).__name__, e),
-                )
-                raise
+                if record_data:
+                    object.__setattr__(self, "_captured_calls", [])
+                    prev_hook = self._vis._on_send
+                    self._vis._on_send = self._capture_send
+                try:
+                    try:
+                        result = bound_method(*args, **kwargs)
+                    except Exception as e:
+                        self._log_best_effort(
+                            "plot_error",
+                            win=kwargs.get("win"),
+                            method=method_name,
+                            error="{0}: {1}".format(type(e).__name__, e),
+                        )
+                        raise
+                finally:
+                    if record_data:
+                        self._vis._on_send = prev_hook
+            finally:
+                if hook_lock is not None:
+                    hook_lock.release()
+                if began:
+                    self._run._end_call()
 
             win = _resolve_win(result, kwargs)
             if win is not None:
@@ -214,6 +293,7 @@ class TrackedVisdom:
                     win=win,
                     method=method_name,
                     update=kwargs.get("update"),
+                    calls=self._captured_calls if record_data else None,
                 )
             return result
 
@@ -221,7 +301,7 @@ class TrackedVisdom:
         wrapper.__doc__ = getattr(bound_method, "__doc__", None)
         return wrapper
 
-    def _log_best_effort(self, kind, win, method, **extra):
+    def _log_best_effort(self, kind, win, method, calls=None, **extra):
         """Log to the run, but never let a tracking problem look like a
         plotting problem (or mask a real one -- see the except Exception
         callers above, which always re-raise their own exception after).
@@ -236,6 +316,8 @@ class TrackedVisdom:
         """
         try:
             if kind == "plot_update":
+                if calls:
+                    extra["calls"] = calls
                 self._run.log_plot_update(method, win, **extra)
             else:
                 self._run.log_event(kind, win=win, method=method, **extra)

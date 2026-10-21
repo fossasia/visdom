@@ -266,6 +266,7 @@ class RunTracker:
         tags: Optional[dict] = None,
         capture_environment: bool = True,
         recent_events_limit: int = DEFAULT_RECENT_EVENTS_LIMIT,
+        record_data: bool = False,
     ):
         if not isinstance(name, str) or not name.strip():
             raise ValueError("name must be a non-empty string")
@@ -276,8 +277,24 @@ class RunTracker:
         self.out_dir = out_dir
         self.path = os.path.join(out_dir, self.run_id + ".json")
         self.events_path = os.path.join(out_dir, self.run_id + ".events.jsonl")
+        # When True, visdom.tracking.graphs.TrackedVisdom captures the exact
+        # wire message(s) each tracked chart call produced and attaches them
+        # to its plot_update event, so visdom.tracking.restore can later
+        # replay this run's plots verbatim. Off by default: most runs are
+        # only ever read back as a record, not replayed, and capturing the
+        # wire payloads roughly doubles what a frequent/large plot costs to
+        # log (see _compact_event below for how the small metadata file is
+        # kept from inheriting that cost too).
+        self.record_data = bool(record_data)
 
         self._lock = threading.Lock()
+        # Readers/writers for "how many tracked plot calls are currently
+        # underway". finish() waits on this (see _begin_call/_end_call) so a
+        # call that was already in flight when finish() was requested gets a
+        # chance to record itself instead of silently losing its update to
+        # _reject_if_terminal once the run is terminal.
+        self._active_calls = 0
+        self._active_calls_cv = threading.Condition(self._lock)
         self.status = STATUS_RUNNING
         # _json_safe rebuilds params/tags into fresh, guaranteed-serializable
         # objects, which also means later caller-side mutation of whatever
@@ -386,6 +403,81 @@ class RunTracker:
         with open(self.events_path, "a") as f:
             f.write(line)
 
+    # in-flight call bookkeeping (see finish())
+
+    def _begin_call(self) -> bool:
+        """Register one tracked call as "about to run" before it starts.
+
+        Called by :class:`visdom.tracking.graphs.TrackedVisdom` before it
+        invokes the wrapped plot method, i.e. before any network I/O for
+        that call has happened. Returns ``False`` (without registering
+        anything) if the run is already terminal -- in that case the call
+        was never going to be recorded anyway, so there's nothing for
+        :meth:`finish` to wait for on its account. Returns ``True`` if the
+        call was registered, in which case the caller MUST call
+        :meth:`_end_call` exactly once, however the wrapped call ends
+        (success, exception, or tracking failure).
+        """
+        with self._lock:
+            if self.status in _TERMINAL_STATUSES:
+                return False
+            self._active_calls += 1
+            return True
+
+    def _end_call(self) -> None:
+        """Un-register a call started under :meth:`_begin_call`.
+
+        Wakes :meth:`finish` once the last in-flight call has cleared.
+        """
+        with self._active_calls_cv:
+            self._active_calls = max(0, self._active_calls - 1)
+            if self._active_calls == 0:
+                self._active_calls_cv.notify_all()
+
+    # compact recent_events/metadata representation
+
+    _HEAVY_PAYLOAD_KEYS = ("call", "calls")
+
+    @classmethod
+    def _compact_event(cls, event: dict) -> dict:
+        """Return a copy of ``event`` safe to keep in the capped, in-memory
+        ``recent_events`` (and therefore in the small metadata ``.json``
+        file, which is rewritten in full on every single event -- see the
+        module docstring).
+
+        A ``plot_update`` event optionally carries the exact wire
+        message(s) a tracked call produced under ``data["call"]``/
+        ``data["calls"]`` (see ``tracking.graphs._capture_send``), captured
+        so :mod:`visdom.tracking.restore` can replay them later. Keeping
+        that payload in every entry of ``recent_events`` would make the
+        metadata file's size track the size and frequency of whatever is
+        actually being plotted, which is exactly what the append-only
+        ``.events.jsonl`` file (written by :meth:`_append_event_line`,
+        never the metadata file) exists to absorb instead. Replay reads the
+        full wire payloads back from there (see
+        ``tracking.restore.load_run_events``), so only a lightweight
+        summary -- how many messages, if any -- needs to survive here.
+
+        A no-op (returns ``event`` itself, not a copy) for every event that
+        doesn't carry one of these keys, which is every event type other
+        than ``plot_update`` with ``record_data=True``.
+        """
+        data = event.get("data")
+        if not isinstance(data, dict) or not any(
+            key in data for key in cls._HEAVY_PAYLOAD_KEYS
+        ):
+            return event
+        compact = dict(event)
+        data = dict(data)
+        call = data.get("call")
+        if isinstance(call, dict):
+            data["call"] = {"endpoint": call.get("endpoint")}
+        calls = data.get("calls")
+        if isinstance(calls, list):
+            data["calls"] = {"count": len(calls)}
+        compact["data"] = data
+        return compact
+
     def log_event(self, event_type: str, **data) -> dict:
         """Append a timestamped event to this run's timeline and persist it.
 
@@ -403,12 +495,13 @@ class RunTracker:
         with self._lock:
             self._reject_if_terminal("log an event on")
             event, now_mono = self._build_event(event_type, data)
+            compact = self._compact_event(event)
             # Attempt the durable write with this event included *before*
             # touching self.event_count/_recent_events. If this raises,
             # self is untouched -- no rollback needed, log_event can just
             # be called again.
-            self._write(self.to_dict(pending_event=event))
-            self._commit_event(event, now_mono)
+            self._write(self.to_dict(pending_event=compact))
+            self._commit_event(compact, now_mono)
             self._append_event_line(event)
         return event
 
@@ -467,15 +560,21 @@ class RunTracker:
             }
             data.update(extra)
             event, now_mono = self._build_event("plot_update", data)
+            # The metadata write/recent_events snapshot get the compact
+            # form (see _compact_event); the full event -- heavy replay
+            # payload included -- still goes to the durable .jsonl log via
+            # _append_event_line below, which is what tracking.restore
+            # reads from.
+            compact = self._compact_event(event)
             # Same write-then-commit ordering as log_event/set_param: the
             # per-window counters below are only committed after the
             # metadata write (including this event) has actually
             # succeeded, so a failure can't leave self._window_update_count
             # claiming an update was recorded when it wasn't.
-            self._write(self.to_dict(pending_event=event))
+            self._write(self.to_dict(pending_event=compact))
             self._window_update_count[win] = seq
             self._window_last_update_monotonic[win] = now
-            self._commit_event(event, now_mono)
+            self._commit_event(compact, now_mono)
             self._append_event_line(event)
         return event
 
@@ -510,7 +609,10 @@ class RunTracker:
             )
 
     def finish(
-        self, status: str = STATUS_FINISHED, reason: Optional[str] = None
+        self,
+        status: str = STATUS_FINISHED,
+        reason: Optional[str] = None,
+        timeout: Optional[float] = 5.0,
     ) -> None:
         """Mark the run terminal (``finished`` or ``failed``) and persist it.
 
@@ -518,6 +620,22 @@ class RunTracker:
         doesn't need explaining -- it's ``unfinished`` runs (see
         :meth:`_atexit_finalize` / the context-manager path) where a reason
         actually earns its place in the record.
+
+        A tracked plot call (see ``tracking.graphs.TrackedVisdom``) that
+        started before ``finish()`` was called but is still uploading its
+        data when it is called would otherwise lose its update silently:
+        by the time the call gets around to recording itself, the run is
+        already terminal, ``_reject_if_terminal`` raises
+        ``RunAlreadyFinishedError``, and ``TrackedVisdom._log_best_effort``
+        swallows exactly that exception as expected/benign. To avoid that,
+        ``finish()`` first waits for every call registered via
+        :meth:`_begin_call` to clear via :meth:`_end_call`, so an
+        already-in-flight call gets the chance to record itself before the
+        run becomes terminal. ``timeout`` bounds that wait in seconds
+        (default 5s); pass ``None`` to wait indefinitely, or ``0`` to skip
+        waiting entirely (the old behavior) -- useful if a caller already
+        knows no tracked calls are in flight, or would rather not block
+        ``finish()`` on a slow/hanging one.
 
         Note: in the rare case where the metadata write succeeds but the
         subsequent (best-effort) full-history ``.jsonl`` append then
@@ -534,8 +652,17 @@ class RunTracker:
                     STATUS_FINISHED, STATUS_FAILED, status
                 )
             )
-        with self._lock:
+        with self._active_calls_cv:
             self._reject_if_terminal("finish")
+            if timeout is None or timeout > 0:
+                deadline = None if timeout is None else time.monotonic() + timeout
+                while self._active_calls > 0:
+                    remaining = (
+                        None if deadline is None else deadline - time.monotonic()
+                    )
+                    if remaining is not None and remaining <= 0:
+                        break
+                    self._active_calls_cv.wait(remaining)
             self._finish_locked(status, reason)
 
     def _finish_locked(self, status: str, reason: Optional[str]) -> None:

@@ -959,6 +959,13 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self.use_preflight_checks = use_preflight_checks
+        # Optional hook: visdom.tracking.graphs.TrackedVisdom sets this (for
+        # the duration of one wrapped chart call) to capture the exact wire
+        # message(s) _send() produces, so visdom.tracking.restore can later
+        # replay a recorded run's plots verbatim. None for every ordinary
+        # client -- _send() below only calls it when it's set, so this adds
+        # no overhead for anyone not using run tracking's record_data=True.
+        self._on_send = None
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1439,6 +1446,9 @@ class Visdom(object):
 
         if not from_log:
             self._log(msg, endpoint)
+
+        if self._on_send is not None:
+            self._on_send(msg, endpoint)
 
         if self.offline:
             # If offline, don't even try to post
@@ -2011,6 +2021,46 @@ class Visdom(object):
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
             self._send(msg, endpoint, from_log=True)
+
+    def restore_run(self, json_path, env=None, delay=None):
+        """Replay a :class:`visdom.tracking.RunTracker` run's plots.
+
+        ``json_path`` is the ``<run_id>.json`` metadata file a run tracked
+        with ``record_data=True`` wrote (see ``RunTracker``/
+        ``RunTracker.track``); its sibling ``<run_id>.events.jsonl`` file,
+        which holds the run's full timeline, must be alongside it.
+        Reconstructs every chart the run plotted, in the order it plotted
+        them, into ``env`` (defaults to the run's own recorded env, falling
+        back to this client's own ``env`` if that can't be determined).
+
+            vis = Visdom(server="http://localhost", port=8097)
+            result = vis.restore_run(
+                "visdom_runs/mnist_baseline_20261020-123155_a4828e4c.json",
+                env="mnist_replay",
+            )
+            print(result)
+
+        By default every recorded update is sent back-to-back, as fast as
+        the server accepts them -- for a run with many epochs/updates this
+        can make the dashboard jump straight to its final state rather than
+        visibly filling in step by step. Pass ``delay`` (seconds, e.g.
+        ``delay=1`` or ``delay=0.5``) to instead wait that long between each
+        replayed update, so the dashboard fills in the same way the
+        original run did.
+
+        Raises ``visdom.tracking.restore.RunRestoreError`` if ``json_path``
+        doesn't exist, isn't a run tracked with ``record_data=True``, or has
+        no replayable plot data recorded. Raises ``ValueError`` up front for
+        a negative or non-numeric ``delay``, before anything is replayed.
+
+        Returns a summary dict: ``run_id``, ``name``, ``status``, ``eid``
+        (the env replayed into), ``total`` (calls recorded), ``replayed``
+        (successfully resent), ``failed``, and ``errors`` (one message per
+        failed call, if any).
+        """
+        from visdom.tracking.restore import restore_run
+
+        return restore_run(json_path, self, env=env, delay=delay)
 
     # Content
 
