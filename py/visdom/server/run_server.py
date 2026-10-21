@@ -276,6 +276,7 @@ async def _serve(
     _install_stop_handlers(stop)
 
     app.start_autosave()
+    app.start_ownership_monitor()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
@@ -296,6 +297,7 @@ async def _serve(
         server.stop()
         if internal_server is not None:
             internal_server.stop()
+        app.drain_sockets()
         # Through the state that owns them: rebinding ``app.subs`` left both
         # the live sockets and the dictionaries the handlers share untouched.
         app.server_state.close_connections()
