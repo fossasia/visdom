@@ -65,3 +65,38 @@ def test_learning_curve_remove_deletes_the_legend_named_trace(offline_client):
     (removal,) = updates(send)
     assert removal["name"] == "Training loss"
     assert removal["delete"] is True
+
+
+def test_learning_curve_subset_update_rejects_the_full_legend(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], opts=opts
+        )
+
+    # A subset update cannot be read against a legend longer than its metric
+    # list: the first label would send the values to another metric's trace.
+    with patch.object(offline_client, "_send", return_value="w1"):
+        with pytest.raises(AssertionError, match="one legend entry per metric"):
+            offline_client.learning_curve(
+                {"val": [0.9]}, step=[1], win="w1", opts=opts, update="append"
+            )
+
+
+def test_learning_curve_subset_update_uses_the_label_it_is_given(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9]},
+            step=[1],
+            win="w1",
+            opts={"legend": ["Validation loss"]},
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(send)] == ["Validation loss"]

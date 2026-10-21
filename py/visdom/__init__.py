@@ -2953,6 +2953,10 @@ class Visdom(object):
         `step` can be a scalar or a 1D series matching the metric length. When
         `update='append'`, `step` must be specified to avoid repeatedly appending
         points at the same x-coordinate.
+
+        With a custom `opts['legend']` the traces are created named after the
+        legend entries, so every call that updates the plot has to send the same
+        legend again, with one entry per metric being updated.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3011,9 +3015,18 @@ class Visdom(object):
         # Creation names every trace after the matching legend entry, so the
         # updates have to address those names. Using the metric keys added
         # traces instead of updating the ones on the screen.
-        trace_names = list(legend[: len(names)])
-
         if update is not None:
+            # A trace is named after the position of its metric in the legend,
+            # and an update may carry fewer metrics than the legend has entries.
+            # Then the positions it would take are the positions of other
+            # metrics, and a metric's values land on another metric's trace. One
+            # label per metric being updated is the only legend an update can be
+            # read against.
+            assert len(legend) == len(names), (
+                "an update needs one legend entry per metric, got {} for {} "
+                "metrics".format(len(legend), len(names))
+            )
+            trace_names = list(legend)
             result = None
             # Send one named update per metric so mapping order cannot swap traces.
             for trace_name, values in zip(trace_names, series):
