@@ -247,9 +247,17 @@ class TrackedVisdom:
     def _wrap(self, method_name, bound_method):
         def wrapper(*args, **kwargs):
             record_data = bool(getattr(self._run, "record_data", False))
-            # Register this call as in-flight *before* doing any work, so
-            # RunTracker.finish() (if called concurrently from another
-            # thread) knows to wait for it -- see RunTracker._begin_call.
+            # Register this call as in-flight *before* doing any work, and
+            # only un-register it (_end_call, in the outer finally below)
+            # once this call's own tracking record -- plot_update or
+            # plot_error -- has actually been logged. RunTracker.finish()
+            # (see RunTracker._begin_call/_end_call) waits for
+            # _active_calls to hit zero before going terminal; if _end_call
+            # fired any earlier than this -- e.g. right after the plot
+            # method itself returns, before logging -- finish() could
+            # observe zero in-flight calls and go terminal in the narrow
+            # window before log_plot_update actually runs, making this
+            # call's update silently lose the very race it exists to close.
             began = self._run._begin_call()
             hook_lock = _hook_lock_for(self._vis) if record_data else None
             if hook_lock is not None:
@@ -280,22 +288,22 @@ class TrackedVisdom:
                 finally:
                     if record_data:
                         self._vis._on_send = prev_hook
+
+                win = _resolve_win(result, kwargs)
+                if win is not None:
+                    self._log_best_effort(
+                        "plot_update",
+                        win=win,
+                        method=method_name,
+                        update=kwargs.get("update"),
+                        calls=self._captured_calls if record_data else None,
+                    )
+                return result
             finally:
                 if hook_lock is not None:
                     hook_lock.release()
                 if began:
                     self._run._end_call()
-
-            win = _resolve_win(result, kwargs)
-            if win is not None:
-                self._log_best_effort(
-                    "plot_update",
-                    win=win,
-                    method=method_name,
-                    update=kwargs.get("update"),
-                    calls=self._captured_calls if record_data else None,
-                )
-            return result
 
         wrapper.__name__ = getattr(bound_method, "__name__", method_name)
         wrapper.__doc__ = getattr(bound_method, "__doc__", None)

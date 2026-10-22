@@ -30,6 +30,7 @@ from visdom.tracking.restore import (
     load_run_file,
     resolve_under_root,
     retarget_calls,
+    run_event_consistency_warning,
     validate_delay,
     _replay_one,
 )
@@ -50,6 +51,27 @@ from visdom.utils.server_utils import (
 #: deployment that runs ``RunTracker`` with a non-default ``out_dir`` needs
 #: the server to look in the same place.
 TRACKING_ROOT = os.environ.get("VISDOM_TRACKING_DIR", os.path.abspath(DEFAULT_OUT_DIR))
+
+#: Upper bound on a single request's `delay`, in seconds. `validate_delay`
+#: only rules out nonsensical values (negative, NaN, infinite); this bounds
+#: how long one HTTP request may legitimately pace itself for on this
+#: specific path. A standalone client script replaying `delay=3600` is the
+#: caller's own process to leave running as long as they like, but the same
+#: value here would hold this request (and the asyncio task driving it)
+#: open for an hour, which is a server resource/availability concern this
+#: path alone needs to guard against. Overridable via
+#: `VISDOM_MAX_RESTORE_DELAY_SECONDS` for a deployment that genuinely wants
+#: slower-than-default replays.
+MAX_DELAY_SECONDS = float(os.environ.get("VISDOM_MAX_RESTORE_DELAY_SECONDS", "60"))
+
+#: Upper bound on how many recorded calls one `/restore_run` request will
+#: replay. `load_run_events`/`extract_replayable_calls` materialize the
+#: whole timeline (and then the call list) in memory before anything is
+#: dispatched, so an enormous recorded run -- submitted by an authenticated
+#: caller either deliberately or by accident -- otherwise has no bound on
+#: the memory, latency, or wall-clock time one request can demand.
+#: Overridable via `VISDOM_MAX_RESTORE_CALLS`.
+MAX_RESTORE_CALLS = int(os.environ.get("VISDOM_MAX_RESTORE_CALLS", "20000"))
 
 
 class _CaptureHandler:
@@ -136,11 +158,64 @@ def _load_calls(json_path):
     """Off-loop: read a run's metadata + full event timeline and extract its
     replayable calls. Raises ``RunRestoreError`` (via the functions it
     calls) on anything from a missing file to a run tracked without
-    ``record_data=True``.
+    ``record_data=True``. Returns ``(metadata, events, calls)`` -- ``events``
+    is kept around (not just ``calls``) so the caller can also check
+    ``run_event_consistency_warning`` against it.
     """
     metadata = load_run_file(json_path)
     events = load_run_events(json_path, metadata)
-    return metadata, extract_replayable_calls(events)
+    return metadata, events, extract_replayable_calls(events)
+
+
+#: Endpoints _dispatch_call actually knows how to replay. The client path
+#: (Visdom.restore_run) is endpoint-agnostic -- it just re-sends whatever
+#: was recorded through _send() -- but the server only ever reconstructs
+#: panes through `events`/`update`, so a recorded call naming anything else
+#: can never be dispatched here.
+_SUPPORTED_SERVER_ENDPOINTS = frozenset({"events", "update"})
+
+
+def _validate_calls_for_server_replay(calls):
+    """Structurally validate every call *before* any of them are dispatched.
+
+    ``extract_replayable_calls`` only guarantees ``msg`` is a dict; it
+    can't know this server only replays ``events``/``update``, or that
+    ``_dispatch_call``/``window()`` need a non-empty ``win`` and (for a
+    create) a typed ``data[0]``. Without this upfront pass, a file whose
+    Nth call is malformed or names an endpoint the server can't replay
+    would only fail once dispatch actually reaches that call -- after
+    every call before it has already mutated the target environment, for
+    what is supposed to read as one atomic "restore this run" request.
+    """
+    for index, call in enumerate(calls):
+        endpoint = call.get("endpoint")
+        msg = call.get("msg")
+        if endpoint not in _SUPPORTED_SERVER_ENDPOINTS:
+            raise RunRestoreError(
+                "recorded call {0} has an unsupported endpoint {1!r}; this "
+                "server can only replay {2} calls".format(
+                    index, endpoint, sorted(_SUPPORTED_SERVER_ENDPOINTS)
+                )
+            )
+        if (
+            not isinstance(msg, dict)
+            or not isinstance(msg.get("win"), str)
+            or not msg.get("win")
+        ):
+            raise RunRestoreError(
+                "recorded call {0} is missing a valid window id".format(index)
+            )
+        if endpoint == "events":
+            data = msg.get("data")
+            if (
+                not isinstance(data, list)
+                or not data
+                or not isinstance(data[0], dict)
+                or "type" not in data[0]
+            ):
+                raise RunRestoreError(
+                    "recorded call {0} is missing valid plot data".format(index)
+                )
 
 
 class RestoreRunHandler(BaseHandler):
@@ -179,6 +254,23 @@ class RestoreRunHandler(BaseHandler):
             self.set_status(400)
             self.write_json({"error": str(e)})
             return
+        if delay is not None and delay > MAX_DELAY_SECONDS:
+            self.set_status(400)
+            self.write_json(
+                {
+                    "error": (
+                        "delay must be <= {0!r} seconds on this endpoint, "
+                        "got {1!r}".format(MAX_DELAY_SECONDS, delay)
+                    )
+                }
+            )
+            return
+
+        eid = args.get("eid")
+        if eid is not None and not isinstance(eid, str):
+            self.set_status(400)
+            self.write_json({"error": "eid must be a string, got {0!r}".format(eid)})
+            return
 
         try:
             json_path = resolve_under_root(TRACKING_ROOT, rel_path)
@@ -193,7 +285,7 @@ class RestoreRunHandler(BaseHandler):
             return
 
         try:
-            metadata, calls = await run_on_storage_executor(
+            metadata, events, calls = await run_on_storage_executor(
                 self, _load_calls, json_path
             )
         except RunRestoreError as e:
@@ -214,7 +306,27 @@ class RestoreRunHandler(BaseHandler):
             )
             return
 
-        eid = args.get("eid") or default_target_eid(calls, metadata, None)
+        if len(calls) > MAX_RESTORE_CALLS:
+            self.set_status(413)
+            self.write_json(
+                {
+                    "error": (
+                        "{0!r} has {1} recorded calls, over this server's "
+                        "limit of {2}; set VISDOM_MAX_RESTORE_CALLS to "
+                        "raise it".format(rel_path, len(calls), MAX_RESTORE_CALLS)
+                    )
+                }
+            )
+            return
+
+        try:
+            _validate_calls_for_server_replay(calls)
+        except RunRestoreError as e:
+            self.set_status(422)
+            self.write_json({"error": str(e)})
+            return
+
+        eid = eid or default_target_eid(calls, metadata, None)
         calls = retarget_calls(calls, eid)
 
         await ensure_env_loaded(self, eid)
@@ -234,6 +346,7 @@ class RestoreRunHandler(BaseHandler):
                 "name": metadata.get("name"),
                 "status": metadata.get("status"),
                 "eid": eid,
+                "warning": run_event_consistency_warning(metadata, events),
             }
         )
         self.write_json(summary)

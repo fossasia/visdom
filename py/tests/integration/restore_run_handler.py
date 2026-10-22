@@ -193,6 +193,44 @@ class TestRestoreRunDelay(RestoreRunCase):
         self.assertEqual(resp.code, 400)
         self.assertNotIn("x", self._app.state)
 
+    def test_an_infinite_delay_is_rejected_before_replaying_anything(self):
+        rel_path = self.write_run("run_inf_delay", self._calls(1))
+
+        resp = self.post_json(
+            "/restore_run", {"path": rel_path, "eid": "x", "delay": float("inf")}
+        )
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("x", self._app.state)
+
+    def test_a_nan_delay_is_rejected_before_replaying_anything(self):
+        rel_path = self.write_run("run_nan_delay", self._calls(1))
+
+        resp = self.fetch(
+            "/restore_run",
+            method="POST",
+            body='{"path": %s, "eid": "x", "delay": NaN}' % json.dumps(rel_path),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("x", self._app.state)
+
+    def test_a_delay_over_the_servers_cap_is_rejected(self):
+        rel_path = self.write_run("run_huge_delay", self._calls(1))
+
+        resp = self.post_json(
+            "/restore_run",
+            {
+                "path": rel_path,
+                "eid": "x",
+                "delay": tracking_restore_handler.MAX_DELAY_SECONDS + 1,
+            },
+        )
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("x", self._app.state)
+
 
 class TestRestoreRunRejectsBadInput(RestoreRunCase):
     def test_missing_path_is_400(self):
@@ -251,6 +289,102 @@ class TestRestoreRunRejectsBadInput(RestoreRunCase):
             headers={"Content-Type": "application/json"},
         )
         self.assertEqual(resp.code, 400)
+
+    def test_a_non_string_eid_is_rejected(self):
+        rel_path = self.write_run(
+            "run_bad_eid",
+            [{"endpoint": "events", "msg": content_args("text", "hi", win="w1")}],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": {}})
+
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(self.panes(), {})
+
+    def test_an_unsupported_endpoint_is_rejected_before_any_call_is_dispatched(self):
+        """Finding: a structurally-bad call later in the file must not let
+        earlier, valid calls partially mutate the target environment first
+        -- the whole file is validated before any of it is dispatched."""
+        rel_path = self.write_run(
+            "run_bad_endpoint",
+            [
+                {
+                    "endpoint": "events",
+                    "msg": content_args("text", "first", win="w1"),
+                },
+                {"endpoint": "close", "msg": {"win": "w1"}},
+            ],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "untouched"})
+
+        self.assertEqual(resp.code, 422)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_a_call_missing_a_window_id_is_rejected_before_any_dispatch(self):
+        rel_path = self.write_run(
+            "run_missing_win",
+            [{"endpoint": "events", "msg": {"data": [{"type": "text"}]}}],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "untouched"})
+
+        self.assertEqual(resp.code, 422)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_too_many_recorded_calls_is_rejected(self):
+        rel_path = self.write_run(
+            "run_too_big",
+            [
+                {
+                    "endpoint": "events",
+                    "msg": content_args("text", "v{0}".format(i), win="w{0}".format(i)),
+                }
+                for i in range(5)
+            ],
+        )
+
+        with patch.object(tracking_restore_handler, "MAX_RESTORE_CALLS", 3):
+            resp = self.post_json(
+                "/restore_run", {"path": rel_path, "eid": "untouched"}
+            )
+
+        self.assertEqual(resp.code, 413)
+        self.assertNotIn("untouched", self._app.state)
+
+
+class TestRestoreRunConsistencyWarning(RestoreRunCase):
+    def test_a_run_claiming_more_events_than_it_has_warns_but_still_replays(self):
+        run_id = "run_truncated_history"
+        calls = [{"endpoint": "events", "msg": content_args("text", "hi", win="w1")}]
+        rel_path = self.write_run(run_id, calls)
+        # Pretend the run logged far more events than its .events.jsonl
+        # actually contains -- as if the trailing append(s) had failed.
+        json_path = os.path.join(self._tracking_dir, rel_path)
+        with open(json_path) as f:
+            metadata = json.load(f)
+        metadata["event_count"] = 999
+        with open(json_path, "w") as f:
+            json.dump(metadata, f)
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "warned"})
+
+        self.assertEqual(resp.code, 200, resp.body)
+        body = json.loads(resp.body)
+        self.assertEqual(body["replayed"], 1)
+        self.assertIsNotNone(body["warning"])
+        self.assertIn("999", body["warning"])
+
+    def test_a_consistent_run_has_no_warning(self):
+        rel_path = self.write_run(
+            "run_consistent",
+            [{"endpoint": "events", "msg": content_args("text", "hi", win="w1")}],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "clean"})
+
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertIsNone(json.loads(resp.body)["warning"])
 
 
 class TestRestoreRunReadonly(VisdomHTTPTestCase):

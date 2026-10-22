@@ -26,6 +26,7 @@ from visdom.tracking.restore import (
     resolve_under_root,
     restore_run,
     retarget_calls,
+    run_event_consistency_warning,
     validate_delay,
 )
 
@@ -48,5 +49,6 @@ __all__ = [
     "resolve_under_root",
     "restore_run",
     "retarget_calls",
+    "run_event_consistency_warning",
     "validate_delay",
 ]

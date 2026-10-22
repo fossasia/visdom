@@ -367,6 +367,61 @@ class TestFinishWaitsForInFlightCalls(unittest.TestCase):
         )
         self._tmp.cleanup()
 
+    def test_finish_does_not_go_terminal_while_a_call_is_still_being_logged(self):
+        """Deterministic reproduction of the exact race: the network/plot
+        call itself can be fast -- the gap that matters is between the
+        wrapped method returning and log_plot_update actually committing.
+        Forces that gap open with explicit synchronization (not timing),
+        so this fails reliably if _end_call() ever moves back to firing
+        before logging, rather than only occasionally under GIL scheduling
+        luck."""
+        self._tmp = tempfile.TemporaryDirectory()
+        out_dir = self._tmp.name
+        vis = _unconnected_visdom()
+        run = RunTracker("exp", out_dir=out_dir)
+        tvis = run.track(vis)
+
+        entered_logging = threading.Event()
+        release_logging = threading.Event()
+        original_log_plot_update = run.log_plot_update
+
+        def _blocked_log_plot_update(*args, **kwargs):
+            entered_logging.set()
+            release_logging.wait(timeout=5)
+            return original_log_plot_update(*args, **kwargs)
+
+        with patch.object(run, "log_plot_update", side_effect=_blocked_log_plot_update):
+            plot_thread = threading.Thread(
+                target=lambda: tvis.line(X=np.array([0]), Y=np.array([1.0]), win="loss")
+            )
+            plot_thread.start()
+            self.assertTrue(
+                entered_logging.wait(timeout=5),
+                "plot call never reached log_plot_update",
+            )
+            # The plot method itself has already returned at this point --
+            # under the old, buggy ordering _end_call() would already have
+            # fired here, and finish() below would complete immediately.
+
+            finish_thread = threading.Thread(target=run.finish)
+            finish_thread.start()
+            finish_thread.join(timeout=0.3)
+            self.assertTrue(
+                finish_thread.is_alive(),
+                "finish() returned while the in-flight call was still "
+                "being logged -- _end_call() is firing too early again",
+            )
+            self.assertEqual(run.status, RunTracker.STATUS_RUNNING)
+
+            release_logging.set()
+            plot_thread.join(timeout=5)
+            finish_thread.join(timeout=5)
+
+        events = _read_events_jsonl(os.path.join(out_dir, run.run_id + ".events.jsonl"))
+        updates = [e for e in events if e["type"] == "plot_update"]
+        self.assertEqual(len(updates), 1)
+        self._tmp.cleanup()
+
     def test_finish_timeout_zero_does_not_wait(self):
         """timeout=0 opts back into the old, non-waiting behavior."""
         tmp = tempfile.TemporaryDirectory()
@@ -447,6 +502,48 @@ class TestLoadRunEvents(unittest.TestCase):
         events = load_run_events(run.path)
         self.assertTrue(all(isinstance(e, dict) for e in events))
 
+    def _write_metadata(self, run_id, events_file):
+        path = os.path.join(self.out_dir, run_id + ".json")
+        with open(path, "w") as f:
+            json.dump({"run_id": run_id, "name": "exp", "events_file": events_file}, f)
+        return path
+
+    def test_an_events_file_pointing_outside_the_run_directory_is_rejected(self):
+        """Finding: events_file is read out of the metadata file, which is
+        untrusted the same way the request path is -- a tampered metadata
+        file naming an events_file outside json_path's own directory must
+        be refused, not silently followed."""
+        path = self._write_metadata("tampered", "../outside.jsonl")
+        with self.assertRaises(RunRestoreError):
+            load_run_events(path)
+
+    def test_an_absolute_events_file_is_rejected(self):
+        with tempfile.NamedTemporaryFile(suffix=".jsonl") as secret:
+            secret.write(b'{"type": "created", "data": {}}\n')
+            secret.flush()
+            path = self._write_metadata("tampered_abs", secret.name)
+            with self.assertRaises(RunRestoreError):
+                load_run_events(path)
+
+    def test_a_non_string_events_file_is_rejected(self):
+        path = os.path.join(self.out_dir, "tampered_type.json")
+        with open(path, "w") as f:
+            json.dump(
+                {"run_id": "tampered_type", "name": "exp", "events_file": ["x"]}, f
+            )
+        with self.assertRaises(RunRestoreError):
+            load_run_events(path)
+
+    def test_a_plain_sibling_events_file_still_works(self):
+        """The containment check must not break the ordinary, legitimate
+        case: events_file as RunTracker actually writes it -- a bare
+        basename alongside json_path."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        run.log_event("a")
+        run.finish()
+        events = load_run_events(run.path)
+        self.assertTrue(any(e["type"] == "a" for e in events))
+
 
 class TestExtractReplayableCalls(unittest.TestCase):
     def test_ignores_non_plot_update_events(self):
@@ -521,6 +618,32 @@ class TestValidateDelay(unittest.TestCase):
     def test_non_numeric_raises(self):
         with self.assertRaises(ValueError):
             validate_delay("1")
+
+    def test_positive_infinity_raises(self):
+        with self.assertRaises(ValueError):
+            validate_delay(float("inf"))
+
+    def test_negative_infinity_raises(self):
+        with self.assertRaises(ValueError):
+            validate_delay(float("-inf"))
+
+    def test_nan_raises(self):
+        """NaN compares false against every ordering comparison (including
+        `< 0`), so the negative-value check alone would let it through."""
+        with self.assertRaises(ValueError):
+            validate_delay(float("nan"))
+
+    def test_json_decoded_infinity_and_nan_tokens_are_rejected(self):
+        """Python's json module accepts the bare Infinity/-Infinity/NaN
+        tokens by default (the same tokens NanSafeEncoder writes for a
+        non-finite float), so a request body containing one for "delay"
+        decodes straight to the float it names -- this must still be
+        caught here, not assumed impossible upstream."""
+        for token in ("Infinity", "-Infinity", "NaN"):
+            with self.subTest(token=token):
+                decoded = json.loads('{"delay": %s}' % token)["delay"]
+                with self.assertRaises(ValueError):
+                    validate_delay(decoded)
 
 
 class TestResolveUnderRoot(unittest.TestCase):

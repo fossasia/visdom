@@ -28,6 +28,7 @@ directly rather than round-tripping through a client.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from typing import Any, Callable, Iterable, Optional
@@ -90,15 +91,27 @@ def load_run_events(json_path: str, metadata: Optional[dict] = None) -> list:
     best-effort, if the ``.jsonl`` file is missing. Skips any line that
     fails to parse as JSON rather than failing the whole read over one
     corrupt line (e.g. a process that crashed mid-write).
+
+    ``events_file`` is untrusted the same way ``json_path`` itself is: it
+    comes straight out of the metadata file, which ``resolve_under_root``
+    constrains for the *request's* path but says nothing about what's
+    written inside it. ``RunTracker`` only ever writes a bare basename
+    there, so anything else (an absolute path, a ``..`` segment, a symlink
+    that resolves elsewhere) is refused via ``resolve_under_root`` again,
+    this time scoped to ``json_path``'s own directory -- without this, a
+    tampered or maliciously crafted metadata file could point this read at
+    an arbitrary file on disk, entirely outside the boundary the request's
+    own path was checked against.
     """
     if metadata is None:
         metadata = load_run_file(json_path)
     events_name = metadata.get("events_file")
     events_path = None
     if events_name:
-        candidate = os.path.join(os.path.dirname(json_path), events_name)
-        if os.path.exists(candidate):
-            events_path = candidate
+        run_dir = os.path.dirname(json_path) or "."
+        events_path = resolve_under_root(run_dir, events_name)
+        if not os.path.exists(events_path):
+            events_path = None
     if events_path is None:
         return list(metadata.get("recent_events") or [])
     events = []
@@ -167,17 +180,35 @@ def validate_delay(delay: Optional[float]) -> Optional[float]:
     """Normalize/validate a replay pacing ``delay``.
 
     Raises ``ValueError`` up front -- before anything is replayed -- for a
-    negative, boolean, or otherwise non-numeric ``delay``, rather than
-    failing partway through a replay or silently treating a bad value as "no
-    delay".
+    negative, boolean, non-finite, or otherwise non-numeric ``delay``,
+    rather than failing partway through a replay or silently treating a bad
+    value as "no delay".
+
+    ``NaN``/``inf`` are rejected explicitly (not just "negative"): both
+    compare false against ``< 0``, so without this check they would
+    otherwise pass straight through as "valid". JSON itself has no
+    literal for either, but Python's own decoder accepts the bare tokens
+    ``NaN``/``Infinity``/``-Infinity`` (matching what it *writes* for a
+    non-finite float -- see ``shared_utils.NanSafeEncoder`` -- so a request
+    body containing one of those tokens for ``delay`` decodes straight to
+    the float it names), so this still needs to be checked explicitly
+    rather than assumed impossible by the time it gets here. A ``nan``
+    reaching ``asyncio.sleep``/``time.sleep`` raises there instead -- after
+    some calls may already have been replayed -- and an ``inf`` simply
+    never returns.
     """
     if delay is None:
         return None
     if isinstance(delay, bool) or not isinstance(delay, (int, float)):
         raise ValueError("delay must be a number of seconds, got {0!r}".format(delay))
-    if delay < 0:
+    value = float(delay)
+    if not math.isfinite(value):
+        raise ValueError(
+            "delay must be a finite number of seconds, got {0!r}".format(delay)
+        )
+    if value < 0:
         raise ValueError("delay must be >= 0 seconds, got {0!r}".format(delay))
-    return float(delay)
+    return value
 
 
 def _replay_one(call: dict, send: Callable[[dict, str], Any]) -> Optional[str]:
@@ -251,6 +282,31 @@ def default_target_eid(calls: list, metadata: dict, fallback_eid: Optional[str])
     return metadata.get("name") or fallback_eid or "main"
 
 
+def run_event_consistency_warning(metadata: dict, events: list) -> Optional[str]:
+    """Best-effort check between a run's declared event count and what
+    could actually be read back for it.
+
+    ``RunTracker`` documents a narrow gap of its own: the metadata write
+    (which bumps ``event_count``) can succeed while the following
+    ``.events.jsonl`` append then fails (see ``core.py``'s module
+    docstring). ``load_run_events`` separately falls back to the capped
+    ``recent_events`` entirely if the ``.jsonl`` file is missing outright.
+    Either way, a replay built from fewer events than the run claims to
+    have logged can be silently incomplete; this makes that visible in the
+    result instead, rather than leaving "missing/corrupt history"
+    indistinguishable from "nothing went wrong".
+    """
+    declared = metadata.get("event_count")
+    if isinstance(declared, int) and declared > len(events):
+        return (
+            "run metadata reports {0} event(s) but only {1} could be read "
+            "back -- the full .events.jsonl history may be missing, "
+            "truncated, or unavailable, so this replay may be "
+            "incomplete.".format(declared, len(events))
+        )
+    return None
+
+
 def restore_run(
     json_path: str, vis, env: Optional[str] = None, delay: Optional[float] = None
 ) -> dict:
@@ -280,6 +336,7 @@ def restore_run(
             "name": metadata.get("name"),
             "status": metadata.get("status"),
             "eid": target_eid,
+            "warning": run_event_consistency_warning(metadata, events),
         }
     )
     return summary
