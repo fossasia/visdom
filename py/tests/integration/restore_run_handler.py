@@ -231,6 +231,38 @@ class TestRestoreRunDelay(RestoreRunCase):
         self.assertEqual(resp.code, 400)
         self.assertNotIn("x", self._app.state)
 
+    def test_a_small_per_delay_is_rejected_once_the_total_replay_budget_is_exceeded(
+        self,
+    ):
+        """Review finding: MAX_DELAY_SECONDS only bounds the gap *between*
+        calls, not the request's total pacing time -- a small, individually
+        legal delay across enough calls can still add up to far more than
+        this server is willing to hold one request open for."""
+        rel_path = self.write_run("run_long_total", self._calls(5))
+
+        with patch.object(tracking_restore_handler, "MAX_TOTAL_REPLAY_SECONDS", 1.0):
+            resp = self.post_json(
+                "/restore_run",
+                # 5 calls -> 4 gaps * 0.5s = 2.0s total, over the 1.0s budget.
+                {"path": rel_path, "eid": "x", "delay": 0.5},
+            )
+
+        self.assertEqual(resp.code, 400, resp.body)
+        self.assertIn("total", json.loads(resp.body)["error"])
+        self.assertNotIn("x", self._app.state)
+
+    def test_a_delay_within_the_total_replay_budget_still_replays(self):
+        rel_path = self.write_run("run_short_total", self._calls(3))
+
+        with patch.object(tracking_restore_handler, "MAX_TOTAL_REPLAY_SECONDS", 10.0):
+            # 3 calls -> 2 gaps * 0.05s = 0.1s total, well under the budget.
+            resp = self.post_json(
+                "/restore_run", {"path": rel_path, "eid": "ok", "delay": 0.05}
+            )
+
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(json.loads(resp.body)["replayed"], 3)
+
 
 class TestRestoreRunRejectsBadInput(RestoreRunCase):
     def test_missing_path_is_400(self):
@@ -351,6 +383,126 @@ class TestRestoreRunRejectsBadInput(RestoreRunCase):
 
         self.assertEqual(resp.code, 413)
         self.assertNotIn("untouched", self._app.state)
+
+    def test_too_many_calls_is_rejected_without_reading_the_whole_run(self):
+        """Review finding: the old MAX_RESTORE_CALLS check only ran after
+        load_run_events/extract_replayable_calls had already materialized
+        the whole event timeline and call list in memory -- an enormous
+        recorded run cost that regardless of whether it was ultimately
+        accepted. _load_calls_bounded must stop reading as soon as the
+        limit is exceeded, not merely enforce it afterwards: feeding it an
+        infinite stream of events (one that could never finish, let alone
+        fit in memory, if fully consumed first) and asserting it still
+        returns promptly is a direct demonstration that it does."""
+
+        def _infinite_events():
+            call = {
+                "endpoint": "events",
+                "msg": {"win": "w", "data": [{"type": "text", "content": "x"}]},
+            }
+            while True:
+                yield {"type": "plot_update", "data": {"call": call}}
+
+        with (
+            patch.object(
+                tracking_restore_handler,
+                "iter_run_events",
+                return_value=_infinite_events(),
+            ),
+            patch.object(
+                tracking_restore_handler,
+                "load_run_file",
+                return_value={"run_id": "r"},
+            ),
+        ):
+            start = time.monotonic()
+            with self.assertRaises(tracking_restore_handler._RunTooLargeError):
+                tracking_restore_handler._load_calls_bounded("unused.json", 10, 10**9)
+            elapsed = time.monotonic() - start
+        # Only ever reads 11 events from a source with no end -- if this
+        # were draining the generator into a list before checking the
+        # limit, it would never return.
+        self.assertLess(elapsed, 2.0)
+
+    def test_a_run_file_over_the_byte_size_cap_is_rejected(self):
+        rel_path = self.write_run(
+            "run_big_file",
+            [{"endpoint": "events", "msg": content_args("text", "hi", win="w1")}],
+        )
+
+        with patch.object(tracking_restore_handler, "MAX_RESTORE_FILE_BYTES", 10):
+            resp = self.post_json(
+                "/restore_run", {"path": rel_path, "eid": "untouched"}
+            )
+
+        self.assertEqual(resp.code, 413, resp.body)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_an_update_call_with_no_data_layout_or_opts_is_rejected_before_dispatch(
+        self,
+    ):
+        rel_path = self.write_run(
+            "run_empty_update", [{"endpoint": "update", "msg": {"win": "w1"}}]
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "untouched"})
+
+        self.assertEqual(resp.code, 422)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_an_update_call_with_append_but_no_data_is_rejected_before_dispatch(self):
+        rel_path = self.write_run(
+            "run_append_no_data",
+            [{"endpoint": "update", "msg": {"win": "w1", "append": True, "opts": {}}}],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "untouched"})
+
+        self.assertEqual(resp.code, 422)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_an_update_call_with_a_non_object_layout_create_is_rejected_before_dispatch(
+        self,
+    ):
+        rel_path = self.write_run(
+            "run_bad_layout_create",
+            [
+                {
+                    "endpoint": "update",
+                    "msg": {"win": "w1", "opts": {}, "layout_create": "nope"},
+                }
+            ],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "untouched"})
+
+        self.assertEqual(resp.code, 422)
+        self.assertNotIn("untouched", self._app.state)
+
+    def test_a_structurally_valid_update_call_still_replays(self):
+        """Regression guard: the new, stricter update validation must not
+        reject the ordinary, already-working case."""
+        rel_path = self.write_run(
+            "run_ok_update",
+            [
+                {
+                    "endpoint": "events",
+                    "msg": content_args("text", "epoch 0", win="w1"),
+                },
+                {
+                    "endpoint": "update",
+                    "msg": {
+                        "win": "w1",
+                        "data": [{"type": "text", "content": "epoch 1"}],
+                    },
+                },
+            ],
+        )
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "ok"})
+
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(json.loads(resp.body)["replayed"], 2)
 
 
 class TestRestoreRunConsistencyWarning(RestoreRunCase):

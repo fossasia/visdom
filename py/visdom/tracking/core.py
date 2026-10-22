@@ -47,6 +47,13 @@ _TERMINAL_STATUSES = (STATUS_FINISHED, STATUS_FAILED, STATUS_UNFINISHED)
 
 DEFAULT_OUT_DIR = "visdom_runs"
 
+#: Default ``timeout`` (seconds) both ``finish()`` and ``__exit__`` wait for
+#: in-flight tracked calls to finish recording themselves before marking the
+#: run terminal -- see ``RunTracker._wait_for_active_calls_locked``. A single
+#: named constant so the two lifecycle paths can't quietly drift apart on
+#: how long they're each willing to wait.
+DEFAULT_FINISH_WAIT_TIMEOUT = 5.0
+
 
 DEFAULT_RECENT_EVENTS_LIMIT = 50
 
@@ -612,7 +619,7 @@ class RunTracker:
         self,
         status: str = STATUS_FINISHED,
         reason: Optional[str] = None,
-        timeout: Optional[float] = 5.0,
+        timeout: Optional[float] = DEFAULT_FINISH_WAIT_TIMEOUT,
     ) -> None:
         """Mark the run terminal (``finished`` or ``failed``) and persist it.
 
@@ -654,16 +661,32 @@ class RunTracker:
             )
         with self._active_calls_cv:
             self._reject_if_terminal("finish")
-            if timeout is None or timeout > 0:
-                deadline = None if timeout is None else time.monotonic() + timeout
-                while self._active_calls > 0:
-                    remaining = (
-                        None if deadline is None else deadline - time.monotonic()
-                    )
-                    if remaining is not None and remaining <= 0:
-                        break
-                    self._active_calls_cv.wait(remaining)
+            self._wait_for_active_calls_locked(timeout)
             self._finish_locked(status, reason)
+
+    def _wait_for_active_calls_locked(self, timeout: Optional[float]) -> None:
+        """Block, with ``self._active_calls_cv`` held, until no tracked call
+        is in flight (or ``timeout`` elapses).
+
+        Factored out of ``finish()`` so ``__exit__`` can apply the exact
+        same wait before going terminal -- a tracked call that is still
+        uploading its data when the ``with RunTracker(...)`` block exits
+        needs the same protection an explicit ``finish()`` call already
+        gets (see ``finish()``'s docstring for why the wait exists at all);
+        two independent copies of this loop would only invite them to
+        silently drift apart. Must be called with ``self._active_calls_cv``
+        (equivalently ``self._lock``, since the former is a ``Condition`` on
+        the latter) already held. ``timeout`` of ``None`` waits indefinitely,
+        ``0`` (or negative) skips waiting entirely.
+        """
+        if timeout is not None and timeout <= 0:
+            return
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self._active_calls > 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                break
+            self._active_calls_cv.wait(remaining)
 
     def _finish_locked(self, status: str, reason: Optional[str]) -> None:
         end_time = time.time()
@@ -729,9 +752,24 @@ class RunTracker:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        with self._lock:
+        """End the ``with RunTracker(...)`` block, marking the run terminal.
+
+        Waits for in-flight tracked calls the same way ``finish()`` does
+        (see ``_wait_for_active_calls_locked``) before doing so: without
+        this, a plot call started just before the block exits -- a very
+        common shape, since ``with RunTracker(..., record_data=True) as
+        run:`` is the documented usage pattern -- could have its update
+        silently dropped by exactly the race ``finish()`` was fixed to
+        close, just reached through this path instead. Uses
+        ``DEFAULT_FINISH_WAIT_TIMEOUT``, the same bound ``finish()``
+        defaults to; unlike ``finish()``, ``__exit__`` can't take a
+        ``timeout`` argument of its own, since Python calls it with a fixed
+        signature.
+        """
+        with self._active_calls_cv:
             if self.status in _TERMINAL_STATUSES:
                 return False
+            self._wait_for_active_calls_locked(DEFAULT_FINISH_WAIT_TIMEOUT)
             if exc_type is None:
                 self._finish_locked(STATUS_FINISHED, None)
             else:

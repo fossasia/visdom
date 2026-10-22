@@ -31,7 +31,7 @@ import json
 import math
 import os
 import time
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 
 class RunRestoreError(Exception):
@@ -80,17 +80,15 @@ def load_run_file(json_path: str) -> dict:
     return metadata
 
 
-def load_run_events(json_path: str, metadata: Optional[dict] = None) -> list:
-    """Return every event in a run's full timeline, oldest first.
+def resolve_run_events_path(json_path: str, metadata: dict) -> Optional[str]:
+    """Return the validated path to a run's ``.events.jsonl`` file, or
+    ``None`` if it has none (no ``events_file`` recorded, or the file it
+    names doesn't exist).
 
-    Reads the run's ``<run_id>.events.jsonl`` file (named by
-    ``metadata["events_file"]``, alongside ``json_path``) rather than the
-    capped ``recent_events`` embedded in the metadata file itself -- a run
-    with more events than ``recent_events_limit`` would otherwise silently
-    lose its earliest plots on replay. Falls back to ``recent_events``,
-    best-effort, if the ``.jsonl`` file is missing. Skips any line that
-    fails to parse as JSON rather than failing the whole read over one
-    corrupt line (e.g. a process that crashed mid-write).
+    Factored out of ``iter_run_events`` so a caller that needs to know
+    *where* the file is before reading it (e.g. to check its size -- see
+    ``tracking_restore_handler.MAX_RESTORE_FILE_BYTES``) doesn't have to
+    duplicate this resolution/validation step, which is also not free.
 
     ``events_file`` is untrusted the same way ``json_path`` itself is: it
     comes straight out of the metadata file, which ``resolve_under_root``
@@ -103,32 +101,71 @@ def load_run_events(json_path: str, metadata: Optional[dict] = None) -> list:
     an arbitrary file on disk, entirely outside the boundary the request's
     own path was checked against.
     """
+    events_name = metadata.get("events_file")
+    if not events_name:
+        return None
+    run_dir = os.path.dirname(json_path) or "."
+    events_path = resolve_under_root(run_dir, events_name)
+    if not os.path.exists(events_path):
+        return None
+    return events_path
+
+
+def iter_run_events(json_path: str, metadata: Optional[dict] = None) -> Iterator[dict]:
+    """Yield every event in a run's full timeline, oldest first, one at a
+    time rather than materializing the whole list up front.
+
+    Reads the run's ``<run_id>.events.jsonl`` file (see
+    ``resolve_run_events_path``) rather than the capped ``recent_events``
+    embedded in the metadata file itself -- a run with more events than
+    ``recent_events_limit`` would otherwise silently lose its earliest
+    plots on replay. Falls back to ``recent_events``, best-effort, if the
+    ``.jsonl`` file is missing. Skips any line that fails to parse as JSON
+    rather than failing the whole read over one corrupt line (e.g. a
+    process that crashed mid-write).
+
+    A generator so a caller that only needs to *count* events, or that
+    wants to stop reading early once some other bound is hit (e.g. a
+    replayable-call limit -- see
+    ``tracking_restore_handler._load_calls_bounded``), never has to read
+    further than it needs to, and never holds more than one event in
+    memory at a time. ``load_run_events`` is the convenience wrapper for
+    callers that do want the whole list.
+    """
     if metadata is None:
         metadata = load_run_file(json_path)
-    events_name = metadata.get("events_file")
-    events_path = None
-    if events_name:
-        run_dir = os.path.dirname(json_path) or "."
-        events_path = resolve_under_root(run_dir, events_name)
-        if not os.path.exists(events_path):
-            events_path = None
+    events_path = resolve_run_events_path(json_path, metadata)
     if events_path is None:
-        return list(metadata.get("recent_events") or [])
-    events = []
+        for event in metadata.get("recent_events") or []:
+            yield event
+        return
     with open(events_path, "r") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             try:
-                events.append(json.loads(line))
+                yield json.loads(line)
             except ValueError:
                 continue
-    return events
 
 
-def extract_replayable_calls(events: Iterable[dict]) -> list:
-    """Pull out, in order, every captured wire message from ``events``.
+def load_run_events(json_path: str, metadata: Optional[dict] = None) -> list:
+    """Return every event in a run's full timeline, oldest first.
+
+    The whole-list convenience form of ``iter_run_events`` -- see its
+    docstring for the file this reads and the fallback/error-tolerance
+    behavior. Prefer ``iter_run_events`` directly when the whole list
+    doesn't actually need to exist in memory at once (e.g. while also
+    enforcing a bound on how much gets read -- see
+    ``tracking_restore_handler.MAX_RESTORE_CALLS``).
+    """
+    return list(iter_run_events(json_path, metadata))
+
+
+def _iter_calls_from_event(event: dict) -> Iterator[dict]:
+    """Yield each captured wire message from one event, in the same order
+    ``extract_replayable_calls`` would include them.
 
     A ``plot_update`` event optionally carries the message(s)
     ``tracking.graphs._capture_send`` recorded, under ``data["call"]`` (one
@@ -136,26 +173,40 @@ def extract_replayable_calls(events: Iterable[dict]) -> list:
     ``tracking.graphs.TrackedVisdom``, which can produce more than one wire
     message for a single Python-level call, e.g. ``learning_curve`` sending
     through an internal ``self.line()``). Only present when the run was
-    tracked with ``record_data=True``; events from a run tracked without it
-    are silently skipped, which is how ``restore_run`` ends up raising one
-    clear "no replayable plot data recorded" error rather than a confusing
-    per-event one.
+    tracked with ``record_data=True``; any other event yields nothing.
+
+    Factored out of ``extract_replayable_calls`` so a caller can extract
+    calls while streaming events one at a time -- see
+    ``tracking_restore_handler._load_calls_bounded``, which needs to stop
+    reading once a call-count limit is hit rather than only after every
+    event has already been read into one list.
+    """
+    if not isinstance(event, dict) or event.get("type") != "plot_update":
+        return
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return
+    call = data.get("call")
+    if isinstance(call, dict) and isinstance(call.get("msg"), dict):
+        yield call
+    raw_calls = data.get("calls")
+    if isinstance(raw_calls, list):
+        for one in raw_calls:
+            if isinstance(one, dict) and isinstance(one.get("msg"), dict):
+                yield one
+
+
+def extract_replayable_calls(events: Iterable[dict]) -> list:
+    """Pull out, in order, every captured wire message from ``events``.
+
+    Events from a run tracked without ``record_data=True`` contribute
+    nothing, which is how ``restore_run`` ends up raising one clear "no
+    replayable plot data recorded" error rather than a confusing per-event
+    one. See ``_iter_calls_from_event`` for what one event can yield.
     """
     calls = []
     for event in events:
-        if not isinstance(event, dict) or event.get("type") != "plot_update":
-            continue
-        data = event.get("data")
-        if not isinstance(data, dict):
-            continue
-        call = data.get("call")
-        if isinstance(call, dict) and isinstance(call.get("msg"), dict):
-            calls.append(call)
-        raw_calls = data.get("calls")
-        if isinstance(raw_calls, list):
-            for one in raw_calls:
-                if isinstance(one, dict) and isinstance(one.get("msg"), dict):
-                    calls.append(one)
+        calls.extend(_iter_calls_from_event(event))
     return calls
 
 
@@ -282,27 +333,31 @@ def default_target_eid(calls: list, metadata: dict, fallback_eid: Optional[str])
     return metadata.get("name") or fallback_eid or "main"
 
 
-def run_event_consistency_warning(metadata: dict, events: list) -> Optional[str]:
-    """Best-effort check between a run's declared event count and what
-    could actually be read back for it.
+def run_event_consistency_warning(metadata: dict, event_count: int) -> Optional[str]:
+    """Best-effort check between a run's declared event count and how many
+    events could actually be read back for it (``event_count`` -- a count,
+    not the events themselves, so a caller that streamed the events rather
+    than keeping the full list -- see
+    ``tracking_restore_handler._load_calls_bounded`` -- doesn't have to
+    retain it just to call this).
 
     ``RunTracker`` documents a narrow gap of its own: the metadata write
     (which bumps ``event_count``) can succeed while the following
     ``.events.jsonl`` append then fails (see ``core.py``'s module
-    docstring). ``load_run_events`` separately falls back to the capped
-    ``recent_events`` entirely if the ``.jsonl`` file is missing outright.
-    Either way, a replay built from fewer events than the run claims to
-    have logged can be silently incomplete; this makes that visible in the
-    result instead, rather than leaving "missing/corrupt history"
-    indistinguishable from "nothing went wrong".
+    docstring). ``load_run_events``/``iter_run_events`` separately fall
+    back to the capped ``recent_events`` entirely if the ``.jsonl`` file is
+    missing outright. Either way, a replay built from fewer events than the
+    run claims to have logged can be silently incomplete; this makes that
+    visible in the result instead, rather than leaving "missing/corrupt
+    history" indistinguishable from "nothing went wrong".
     """
     declared = metadata.get("event_count")
-    if isinstance(declared, int) and declared > len(events):
+    if isinstance(declared, int) and declared > event_count:
         return (
             "run metadata reports {0} event(s) but only {1} could be read "
             "back -- the full .events.jsonl history may be missing, "
             "truncated, or unavailable, so this replay may be "
-            "incomplete.".format(declared, len(events))
+            "incomplete.".format(declared, event_count)
         )
     return None
 
@@ -336,7 +391,7 @@ def restore_run(
             "name": metadata.get("name"),
             "status": metadata.get("status"),
             "eid": target_eid,
-            "warning": run_event_consistency_warning(metadata, events),
+            "warning": run_event_consistency_warning(metadata, len(events)),
         }
     )
     return summary

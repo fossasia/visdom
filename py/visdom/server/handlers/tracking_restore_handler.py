@@ -24,15 +24,16 @@ from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.tracking.core import DEFAULT_OUT_DIR
 from visdom.tracking.restore import (
     RunRestoreError,
+    _iter_calls_from_event,
+    _replay_one,
     default_target_eid,
-    extract_replayable_calls,
-    load_run_events,
+    iter_run_events,
     load_run_file,
+    resolve_run_events_path,
     resolve_under_root,
     retarget_calls,
     run_event_consistency_warning,
     validate_delay,
-    _replay_one,
 )
 from visdom.utils.server_utils import (
     broadcast_envs,
@@ -65,13 +66,39 @@ TRACKING_ROOT = os.environ.get("VISDOM_TRACKING_DIR", os.path.abspath(DEFAULT_OU
 MAX_DELAY_SECONDS = float(os.environ.get("VISDOM_MAX_RESTORE_DELAY_SECONDS", "60"))
 
 #: Upper bound on how many recorded calls one `/restore_run` request will
-#: replay. `load_run_events`/`extract_replayable_calls` materialize the
-#: whole timeline (and then the call list) in memory before anything is
-#: dispatched, so an enormous recorded run -- submitted by an authenticated
-#: caller either deliberately or by accident -- otherwise has no bound on
-#: the memory, latency, or wall-clock time one request can demand.
-#: Overridable via `VISDOM_MAX_RESTORE_CALLS`.
+#: replay. Enforced *while* `_load_calls_bounded` streams a run's event
+#: timeline (see its docstring) -- an enormous recorded run, submitted by
+#: an authenticated caller either deliberately or by accident, stops being
+#: read the moment this is exceeded, rather than only being checked after
+#: its whole timeline (and then its whole call list) has already been
+#: materialized in memory. Overridable via `VISDOM_MAX_RESTORE_CALLS`.
 MAX_RESTORE_CALLS = int(os.environ.get("VISDOM_MAX_RESTORE_CALLS", "20000"))
+
+#: Upper bound, in bytes, on the recorded-run files one `/restore_run`
+#: request will read. Checked with a cheap `os.path.getsize()` against both
+#: the run's `<run_id>.json` and `<run_id>.events.jsonl`, before either is
+#: opened. `MAX_RESTORE_CALLS` already bounds memory regardless of file
+#: size, since `_load_calls_bounded` streams rather than materializing the
+#: whole timeline -- but a file dominated by lines that never produce a
+#: replayable call (and so never trip that limit) could still cost
+#: unbounded time to simply read and parse line by line; this bounds that
+#: cost up front instead. Overridable via `VISDOM_MAX_RESTORE_FILE_BYTES`.
+MAX_RESTORE_FILE_BYTES = int(
+    os.environ.get("VISDOM_MAX_RESTORE_FILE_BYTES", str(256 * 1024 * 1024))
+)
+
+#: Upper bound, in seconds, on the *total* time one `/restore_run` request
+#: will spend pacing its replay -- i.e. on `(len(calls) - 1) * delay`, not
+#: on `delay` alone. `MAX_DELAY_SECONDS` only bounds the gap *between*
+#: consecutive calls; paired with `MAX_RESTORE_CALLS`, a request can still
+#: legally ask for up to roughly `(MAX_RESTORE_CALLS - 1) *
+#: MAX_DELAY_SECONDS` seconds of total pacing (with their current
+#: defaults, nearly two weeks) without this second, independent bound.
+#: Checked once the actual call count is known, before replay starts.
+#: Overridable via `VISDOM_MAX_RESTORE_TOTAL_SECONDS`.
+MAX_TOTAL_REPLAY_SECONDS = float(
+    os.environ.get("VISDOM_MAX_RESTORE_TOTAL_SECONDS", str(15 * 60))
+)
 
 
 class _CaptureHandler:
@@ -154,17 +181,85 @@ async def _replay_calls_paced(calls, send, delay=None):
     }
 
 
-def _load_calls(json_path):
-    """Off-loop: read a run's metadata + full event timeline and extract its
-    replayable calls. Raises ``RunRestoreError`` (via the functions it
-    calls) on anything from a missing file to a run tracked without
-    ``record_data=True``. Returns ``(metadata, events, calls)`` -- ``events``
-    is kept around (not just ``calls``) so the caller can also check
-    ``run_event_consistency_warning`` against it.
+class _RunTooLargeError(RunRestoreError):
+    """A recorded run exceeded this endpoint's resource bounds -- too many
+    bytes to read, or too many replayable calls -- mapped to HTTP 413.
+
+    A dedicated subclass (rather than a plain ``RunRestoreError``, which
+    the handler maps to 400) so ``post()`` can tell "this run is too big"
+    apart from "this run's files are missing or malformed" without
+    inspecting the message text.
+    """
+
+
+def _check_run_file_sizes(json_path: str, metadata: dict, max_bytes: int) -> None:
+    """Reject a run up front, via a cheap ``os.path.getsize()``, if either
+    of its files is implausibly large -- see ``MAX_RESTORE_FILE_BYTES``.
+
+    Checked before either file is opened for reading. A metadata file this
+    large would already be surprising (``RunTracker`` keeps it small/capped
+    by design), but it's checked alongside the events file for the same
+    reason: a cheap check is worth having even where it's expected to never
+    trigger, since "expected to never happen" is exactly the condition an
+    adversarial or corrupted input is free to violate.
+    """
+    candidates = [("run file", json_path)]
+    events_path = resolve_run_events_path(json_path, metadata)
+    if events_path is not None:
+        candidates.append(("events file", events_path))
+    for label, path in candidates:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > max_bytes:
+            raise _RunTooLargeError(
+                "{0} {1!r} is {2} bytes, over this server's limit of {3}; "
+                "set VISDOM_MAX_RESTORE_FILE_BYTES to raise it".format(
+                    label, path, size, max_bytes
+                )
+            )
+
+
+def _load_calls_bounded(json_path, max_calls, max_bytes):
+    """Off-loop: read a run's metadata and extract its replayable calls,
+    enforcing ``max_calls``/``max_bytes`` while doing so rather than after
+    the fact.
+
+    Replaces materializing the whole event timeline (``load_run_events``)
+    and then the whole call list (``extract_replayable_calls``) before
+    checking anything: ``_check_run_file_sizes`` rejects an implausibly
+    large run file before either file is opened, and the loop below streams
+    ``iter_run_events`` one event at a time, extracting calls as it goes
+    and bailing out via ``_RunTooLargeError`` (mapped to HTTP 413) the
+    moment ``max_calls`` is exceeded -- so an enormous recorded run, whether
+    submitted by an authenticated caller deliberately or by accident, is
+    never fully read into memory (or, past the size cap, read at all)
+    before this endpoint's resource bounds are enforced.
+
+    Raises ``RunRestoreError`` (via ``load_run_file``) for a missing or
+    malformed metadata file, or ``_RunTooLargeError`` once either bound is
+    exceeded. Returns ``(metadata, event_count, calls)`` -- ``event_count``
+    (how many events were read, not the events themselves) is kept around
+    so the caller can still compute ``run_event_consistency_warning``
+    without this function retaining every event's full payload for the
+    whole read.
     """
     metadata = load_run_file(json_path)
-    events = load_run_events(json_path, metadata)
-    return metadata, events, extract_replayable_calls(events)
+    _check_run_file_sizes(json_path, metadata, max_bytes)
+    calls = []
+    event_count = 0
+    for event in iter_run_events(json_path, metadata):
+        event_count += 1
+        for call in _iter_calls_from_event(event):
+            calls.append(call)
+            if len(calls) > max_calls:
+                raise _RunTooLargeError(
+                    "{0!r} has more than {1} recorded calls, over this "
+                    "server's limit; set VISDOM_MAX_RESTORE_CALLS to raise "
+                    "it".format(json_path, max_calls)
+                )
+    return metadata, event_count, calls
 
 
 #: Endpoints _dispatch_call actually knows how to replay. The client path
@@ -178,14 +273,31 @@ _SUPPORTED_SERVER_ENDPOINTS = frozenset({"events", "update"})
 def _validate_calls_for_server_replay(calls):
     """Structurally validate every call *before* any of them are dispatched.
 
-    ``extract_replayable_calls`` only guarantees ``msg`` is a dict; it
-    can't know this server only replays ``events``/``update``, or that
-    ``_dispatch_call``/``window()`` need a non-empty ``win`` and (for a
-    create) a typed ``data[0]``. Without this upfront pass, a file whose
-    Nth call is malformed or names an endpoint the server can't replay
-    would only fail once dispatch actually reaches that call -- after
-    every call before it has already mutated the target environment, for
-    what is supposed to read as one atomic "restore this run" request.
+    ``extract_replayable_calls``/``_iter_calls_from_event`` only guarantee
+    ``msg`` is a dict; they can't know this server only replays
+    ``events``/``update``, or what each of those two needs structurally to
+    avoid being rejected by the real dispatch code
+    (``register_window``/``window()`` for ``events``,
+    ``UpdateHandler.wrap_func`` for ``update``) before it ever gets the
+    chance to apply anything. Without this upfront pass, a file whose Nth
+    call is malformed or names an endpoint the server can't replay would
+    only fail once dispatch actually reaches that call -- after every call
+    before it has already mutated the target environment, for what is
+    supposed to read as one atomic "restore this run" request.
+
+    This guarantees every call is free of the specific structural defects
+    checked for here -- not that every call will apply cleanly. Deeper,
+    semantic validity (e.g. an ``update`` whose trace count or shape
+    doesn't match the window it targets) is still the dispatch layer's own
+    job: ``_dispatch_call``/``_replay_one`` already treat each call's
+    replay as independent and best-effort, catching whatever it raises and
+    recording it in the result's ``errors`` list rather than aborting the
+    rest of the replay. That's a different, and fundamentally weaker,
+    guarantee than "validated before dispatch" -- a malformed-but-plausible
+    ``update`` can still fail at dispatch time -- but it does mean a
+    structurally-bad call, including a malformed ``update``, can never
+    itself mutate the target environment; it either gets dispatched and
+    applies, or it doesn't apply at all.
     """
     for index, call in enumerate(calls):
         endpoint = call.get("endpoint")
@@ -215,6 +327,28 @@ def _validate_calls_for_server_replay(calls):
             ):
                 raise RunRestoreError(
                     "recorded call {0} is missing valid plot data".format(index)
+                )
+        elif endpoint == "update":
+            # Mirrors UpdateHandler.wrap_func's own upfront checks (see
+            # web_handlers.py) -- the exact conditions under which it
+            # raises HTTPError(400) before touching any state -- so a call
+            # that would fail there fails here first, before anything has
+            # been dispatched.
+            if "data" not in msg and "layout" not in msg and "opts" not in msg:
+                raise RunRestoreError(
+                    "recorded call {0} (update) has none of data, layout, "
+                    "or opts".format(index)
+                )
+            if "data" not in msg and msg.get("append"):
+                raise RunRestoreError(
+                    "recorded call {0} (update) has append set but no "
+                    "data".format(index)
+                )
+            layout_create = msg.get("layout_create", {})
+            if not isinstance(layout_create, dict):
+                raise RunRestoreError(
+                    "recorded call {0} (update) has a non-object "
+                    "layout_create".format(index)
                 )
 
 
@@ -285,9 +419,17 @@ class RestoreRunHandler(BaseHandler):
             return
 
         try:
-            metadata, events, calls = await run_on_storage_executor(
-                self, _load_calls, json_path
+            metadata, event_count, calls = await run_on_storage_executor(
+                self,
+                _load_calls_bounded,
+                json_path,
+                MAX_RESTORE_CALLS,
+                MAX_RESTORE_FILE_BYTES,
             )
+        except _RunTooLargeError as e:
+            self.set_status(413)
+            self.write_json({"error": str(e)})
+            return
         except RunRestoreError as e:
             self.set_status(400)
             self.write_json({"error": str(e)})
@@ -306,18 +448,27 @@ class RestoreRunHandler(BaseHandler):
             )
             return
 
-        if len(calls) > MAX_RESTORE_CALLS:
-            self.set_status(413)
-            self.write_json(
-                {
-                    "error": (
-                        "{0!r} has {1} recorded calls, over this server's "
-                        "limit of {2}; set VISDOM_MAX_RESTORE_CALLS to "
-                        "raise it".format(rel_path, len(calls), MAX_RESTORE_CALLS)
-                    )
-                }
-            )
-            return
+        if delay and len(calls) > 1:
+            total_replay_seconds = (len(calls) - 1) * delay
+            if total_replay_seconds > MAX_TOTAL_REPLAY_SECONDS:
+                self.set_status(400)
+                self.write_json(
+                    {
+                        "error": (
+                            "replaying {0} calls with delay={1!r} would take "
+                            "about {2:.0f}s total, over this server's limit "
+                            "of {3:.0f}s; set VISDOM_MAX_RESTORE_TOTAL_SECONDS "
+                            "to raise it, or request fewer calls/a shorter "
+                            "delay".format(
+                                len(calls),
+                                delay,
+                                total_replay_seconds,
+                                MAX_TOTAL_REPLAY_SECONDS,
+                            )
+                        )
+                    }
+                )
+                return
 
         try:
             _validate_calls_for_server_replay(calls)
@@ -346,7 +497,7 @@ class RestoreRunHandler(BaseHandler):
                 "name": metadata.get("name"),
                 "status": metadata.get("status"),
                 "eid": eid,
-                "warning": run_event_consistency_warning(metadata, events),
+                "warning": run_event_consistency_warning(metadata, event_count),
             }
         )
         self.write_json(summary)

@@ -435,6 +435,78 @@ class TestFinishWaitsForInFlightCalls(unittest.TestCase):
         run._end_call()
         tmp.cleanup()
 
+    def test_context_manager_exit_does_not_go_terminal_while_a_call_is_still_being_logged(
+        self,
+    ):
+        """Review finding: ``finish()`` waits for in-flight calls, but
+        ``with RunTracker(...) as run:`` -- the usage pattern the feature's
+        own docs lead with -- exits through ``__exit__``, not ``finish()``.
+        Before this fix, ``__exit__`` called ``_finish_locked`` directly, so
+        the exact race ``finish()`` closes was still wide open on this path.
+        Same deterministic-interleaving reproduction as
+        ``test_finish_does_not_go_terminal_while_a_call_is_still_being_logged``
+        (forcing the exact gap open with ``threading.Event`` rather than
+        relying on timing), just exercised through ``__exit__`` -- called
+        directly, as the ``with`` statement itself would, rather than
+        through ``finish()`` -- instead of through ``finish()``."""
+        self._tmp = tempfile.TemporaryDirectory()
+        out_dir = self._tmp.name
+        vis = _unconnected_visdom()
+        run = RunTracker("exp", out_dir=out_dir)
+        tvis = run.track(vis)
+
+        entered_logging = threading.Event()
+        release_logging = threading.Event()
+        original_log_plot_update = run.log_plot_update
+
+        def _blocked_log_plot_update(*args, **kwargs):
+            entered_logging.set()
+            release_logging.wait(timeout=5)
+            return original_log_plot_update(*args, **kwargs)
+
+        with patch.object(run, "log_plot_update", side_effect=_blocked_log_plot_update):
+            run.__enter__()
+            plot_thread = threading.Thread(
+                target=lambda: tvis.line(X=np.array([0]), Y=np.array([1.0]), win="loss")
+            )
+            plot_thread.start()
+            self.assertTrue(
+                entered_logging.wait(timeout=5),
+                "plot call never reached log_plot_update",
+            )
+            # The wrapped plot method has already returned at this point --
+            # under the old, buggy __exit__ (calling _finish_locked
+            # directly) the block below would have gone terminal
+            # immediately instead of blocking here.
+
+            exit_thread = threading.Thread(
+                target=lambda: run.__exit__(None, None, None)
+            )
+            exit_thread.start()
+            exit_thread.join(timeout=0.3)
+            self.assertTrue(
+                exit_thread.is_alive(),
+                "__exit__ returned while the in-flight call was still "
+                "being logged -- it is not waiting for active calls the "
+                "way finish() does",
+            )
+            self.assertEqual(run.status, RunTracker.STATUS_RUNNING)
+
+            release_logging.set()
+            plot_thread.join(timeout=5)
+            exit_thread.join(timeout=5)
+
+        events = _read_events_jsonl(os.path.join(out_dir, run.run_id + ".events.jsonl"))
+        updates = [e for e in events if e["type"] == "plot_update"]
+        self.assertEqual(
+            len(updates),
+            1,
+            "the in-flight plot call's update was dropped by __exit__ "
+            "instead of being waited for",
+        )
+        self.assertEqual(run.status, RunTracker.STATUS_FINISHED)
+        self._tmp.cleanup()
+
 
 class TestLoadRunFile(unittest.TestCase):
     def setUp(self):
