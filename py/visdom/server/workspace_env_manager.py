@@ -24,8 +24,10 @@ local visdom behaves exactly as before.
 import asyncio
 import json
 import os
+import shutil
 import threading
 import time
+import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -219,6 +221,7 @@ class WorkspaceEnvManager:
         None returns the server's own (default) state."""
         if workspace_id is None:
             return self._states[None]
+        workspace_id = canonical_id(workspace_id)
         with self._lock:
             state = self._states.get(workspace_id)
             if state is None:
@@ -318,7 +321,7 @@ class WorkspaceEnvManager:
         been dormant, so a tidy-up would leave a file behind everywhere it went.
         """
         with self._lock:
-            return self._states.get(workspace_id)
+            return self._states.get(canonical_id(workspace_id))
 
     def workspace_storage(self, workspace_id):
         """A store over one workspace's directory, without building its state.
@@ -330,6 +333,34 @@ class WorkspaceEnvManager:
         if self.base_env_path is None:
             return JSONStore(None)
         return JSONStore(self._workspace_path(workspace_id))
+
+    def workspace_directory(self, workspace_id):
+        """Where one workspace's files live, or ``None`` for anything else.
+
+        Only a well-formed workspace id names a directory, so an id arriving
+        over the wire cannot point this anywhere else on the disk.
+        """
+        if self.base_env_path is None:
+            return None
+        try:
+            canonical = str(uuid.UUID(str(workspace_id)))
+        except ValueError:
+            return None
+        return os.path.join(self.base_env_path, "workspaces", canonical)
+
+    def forget(self, workspace_id):
+        """Stop holding a workspace, returning the state it had, or ``None``.
+
+        Autosave walks the states held here, so a forgotten workspace is never
+        written out again.
+        """
+        if workspace_id is None:
+            return None
+        with self._lock:
+            state = self._states.pop(canonical_id(workspace_id), None)
+        with self._disk_lock:
+            self._disk_scanned_at = None
+        return state
 
     def expired_envs(self, workspace_id, older_than_days, keep=("main",)):
         """Environments in one workspace nobody has written to for that long.
@@ -370,7 +401,7 @@ class WorkspaceEnvManager:
         return sorted(expired, key=lambda item: item["last_written"])
 
     def _workspace_path(self, workspace_id):
-        name = str(workspace_id)
+        name = canonical_id(workspace_id)
         root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
         path = os.path.join(root, name)
         if (
@@ -419,6 +450,37 @@ class WorkspaceEnvManager:
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def canonical_id(workspace_id):
+    if workspace_id is None:
+        return None
+    try:
+        return str(uuid.UUID(str(workspace_id)))
+    except ValueError:
+        return str(workspace_id)
+
+
+def remove_directory(path):
+    """Delete a workspace directory, returning the bytes it held.
+
+    ``None`` when there was no directory, which is the normal answer from every
+    instance but the first one asked, since they share the disk.
+    """
+    if path is None or not os.path.isdir(path):
+        return None
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return None
+    return total
 
 
 def _stored_eid(entry):
