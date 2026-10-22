@@ -1297,7 +1297,7 @@ paths:
                 type: string
               description: Secure session cookie.
         "400":
-          description: Invalid credentials.
+          description: Invalid credentials, malformed request, or login disabled.
 
   /socket:
     get:

@@ -203,6 +203,91 @@ class TestLoginCredentials(LoginTestCase):
         self.assertNotIn(CLIENT_HASH, stored)
         self.assertEqual(len(stored.split("$")), 2)
 
+    def test_malformed_json_body_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=b"not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_empty_body_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=b"",
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_non_object_json_body_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps(["username", "password"]),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_missing_username_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"password": CLIENT_HASH}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_missing_password_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": USERNAME}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_non_string_username_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": 12345, "password": CLIENT_HASH}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_non_string_password_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": USERNAME, "password": ["secret"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_post_to_unknown_subpath_returns_404(self):
+        resp = self.fetch(
+            "/unknown_path",
+            method="POST",
+            body=json.dumps({"username": USERNAME, "password": CLIENT_HASH}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 404)
+
+
+class TestLoginDisabled(VisdomHTTPTestCase):
+    """Server started with default options (login disabled)."""
+
+    def test_post_login_when_disabled_returns_400(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": USERNAME, "password": CLIENT_HASH}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+
 
 # -- Authorization on the routes ---------------------------------------------
 

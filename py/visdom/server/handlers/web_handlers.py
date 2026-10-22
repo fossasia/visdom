@@ -1396,18 +1396,37 @@ class IndexHandler(BaseHandler):
             )
 
     async def post(self, arg, **kwargs):
-        json_obj = tornado.escape.json_decode(self.request.body)
+        if arg not in ("", "/"):
+            raise tornado.web.HTTPError(
+                404, reason=f"Path '{self.request.path}' not found"
+            )
+
+        if not self.login_enabled or not self.user_credential:
+            raise tornado.web.HTTPError(400, reason="login is disabled on this server")
+
+        json_obj = _decode_json_body(self.request.body)
+        if "username" not in json_obj or "password" not in json_obj:
+            raise tornado.web.HTTPError(
+                400, reason="request body must include 'username' and 'password'"
+            )
+
         username = json_obj["username"]
+        raw_password = json_obj["password"]
+        if not isinstance(username, str) or not isinstance(raw_password, str):
+            raise tornado.web.HTTPError(
+                400, reason="'username' and 'password' must be strings"
+            )
+
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
-        password = await hash_password_off_loop(json_obj["password"], salt)
+        password = await hash_password_off_loop(raw_password, salt)
 
         # Constant-time comparison: `==` on the derived key returns as soon as
         # two characters differ, so response timing tells an attacker how much
         # of a guess was right. Both halves are always compared, which keeps a
         # wrong username costing the same as a wrong password.
         username_ok = hmac.compare_digest(
-            str(username).encode("utf-8"),
+            username.encode("utf-8"),
             self.user_credential["username"].encode("utf-8"),
         )
         password_ok = hmac.compare_digest(
