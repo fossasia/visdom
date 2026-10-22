@@ -19,6 +19,7 @@ import hmac
 import json
 import jsonpatch
 import logging
+import math
 import os
 import uuid
 from collections import OrderedDict
@@ -62,6 +63,7 @@ from visdom.utils.server_utils import (
     notify,
     LazyEnvData,
 )
+from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
@@ -1177,6 +1179,9 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
+            if self.readonly:
+                reject_readonly(self)
+                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
@@ -1687,26 +1692,26 @@ class ExperimentLogHandler(BaseHandler):
                 def apply_metrics(store):
                     """Apply the request's observations, holding back a rejection.
 
-                    Each is applied in turn, as it was when every observation
-                    was its own read-append-write, so a metric the store
-                    refuses still leaves the ones before it recorded. The
-                    refusal is held rather than raised so that what did apply
-                    is persisted before the request reports it.
+                    The whole batch shares one read-append-write. Nothing can
+                    refuse a single observation -- an experiment that will not
+                    read, or one already finished, refuses the request before
+                    any of them is appended -- so either every observation in
+                    it is recorded or none is and nothing is written.
+
+                    The refusal is held rather than raised out of the mutation
+                    so that a refused request leaves the environment exactly
+                    as every other refused write leaves it: unfiled, unqueued,
+                    and answered from the one place that chooses a status.
                     """
-                    experiment = None
-                    for key, value in metrics.items():
-                        try:
-                            experiment = store.log_metric(
-                                eid, key, value, args.get("step")
-                            )
-                        except (
-                            ExperimentFinishedError,
-                            TypeError,
-                            ValueError,
-                        ) as error:
-                            rejected.append(error)
-                            break
-                    return experiment
+                    try:
+                        return store.log_metrics(eid, metrics, args.get("step"))
+                    except (
+                        ExperimentFinishedError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
+                        rejected.append(error)
+                        return None
 
                 experiment, is_new_env = await _write_experiment_metadata(
                     handler, eid, apply_metrics
@@ -2175,3 +2180,225 @@ class TagsHandler(BaseHandler):
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
+
+
+class InternalHandler(BaseHandler):
+    scope = internal.READ
+
+    def allowed(self):
+        return internal.is_signed(self.request, self.scope)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
+
+class ActivityHandler(InternalHandler):
+    """Reports who is connected to each workspace this instance currently holds.
+
+    Only ever the instance's own share of them: the proxy hashes each workspace
+    onto exactly one instance, so a caller wanting the whole deployment asks every
+    instance and concatenates. Carries no environment data or plot contents, only
+    counts, but it does name every workspace on the instance, so it is served only
+    on the internal port, and only to a request signed with a read key.
+    """
+
+    # Registered against the application rather than a state, because it
+    # reports on every workspace rather than acting inside one. Named apart from
+    # the inherited accessor so it does not collide with that read-only view.
+    _manager = None
+
+    def initialize(self, app=None):
+        """Take only the workspace manager, not a state to act within.
+
+        This endpoint reports counts and never touches environments or
+        rendering, so it has no use for the rest and no reason to fail if one is
+        missing.
+        """
+        self._manager = getattr(app, "workspace_env_manager", None)
+
+    def gather(self, stored=None):
+        """Every workspace this instance can say anything about.
+
+        Split out from get so the metrics endpoint reports the same numbers
+        rather than collecting them a second way, which is how two endpoints end
+        up disagreeing about the same deployment.
+        """
+        manager = self._manager
+        workspaces = {}
+        if manager is not None:
+            for workspace_id, space in manager.workspace_spaces():
+                entry = space.activity()
+                entry["workspace_id"] = str(workspace_id)
+                workspaces[entry["workspace_id"]] = entry
+
+            # Every instance shares the env volume, so the disk pass also turns up
+            # workspaces this instance does not serve. Reporting them is harmless
+            # and it is what lets a caller see a workspace nobody has touched since
+            # the last restart, which the socket pass alone cannot show.
+            if stored is None:
+                stored = manager.stored_workspaces()
+            for workspace_id, on_disk in stored.items():
+                entry = workspaces.setdefault(
+                    workspace_id,
+                    {
+                        "workspace_id": workspace_id,
+                        "slug": None,
+                        "viewers": 0,
+                        "writers": 0,
+                        "last_active_at": None,
+                        # Zero rather than absent. This instance counts, and a
+                        # workspace it has not served since starting has had no
+                        # work done on it, which is a real answer. Leaving them
+                        # out would say the counters are unavailable, which is
+                        # what a caller should be told about an older server.
+                        "writes": 0,
+                        "broadcasts": 0,
+                        "broadcast_bytes": 0,
+                        "active_hour": None,
+                        "active_minutes_mask": 0,
+                    },
+                )
+                entry["bytes"] = on_disk["bytes"]
+                if not entry.get("last_active_at"):
+                    entry["last_active_at"] = on_disk["last_active_at"]
+
+        return list(workspaces.values())
+
+    async def stored(self):
+        if self._manager is None:
+            return {}
+        return await self._manager.stored_workspaces_off_loop()
+
+    async def get(self):
+        self.write({"workspaces": self.gather(await self.stored())})
+
+
+class MetricsHandler(ActivityHandler):
+    """The same workspace numbers, in the format a Prometheus scrape wants.
+
+    Inherits the gathering rather than repeating it. Like the activity endpoint
+    it names every workspace on the instance, so it is served only on the
+    internal port. Prometheus cannot sign a request, so a metrics token is
+    accepted here as well as a read signature.
+    """
+
+    def allowed(self):
+        return internal.has_metrics_token(self.request) or super().allowed()
+
+    async def get(self):
+        stored = await self.stored()
+        samples = [metrics.sample_from_activity(entry) for entry in self.gather(stored)]
+        # The version parameter is part of the format's content type. Scrapers
+        # accept a bare text/plain, but tools that inspect the header expect it.
+        self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.write(metrics.render(samples))
+
+
+class EvictHandler(InternalHandler):
+    """Closes the sockets a workspace still has open on this instance.
+
+    The gateway calls this the moment a workspace is suspended or moved to the
+    trash. Without it the refusal only takes effect at the next resolve, and a
+    socket already open never resolves again, so a tab that was watching when
+    the workspace was switched off carries on watching.
+
+    Served on the internal port only, to a request signed with an admin key: it
+    acts on a workspace by name and nothing outside the deployment has any
+    business asking for that.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        slug = (payload.get("workspace_slug") or "").strip()
+        if not slug:
+            self.set_status(400)
+            self.write({"error": "workspace_slug is required"})
+            return
+
+        reason = (payload.get("reason") or "").strip() or None
+        evict = getattr(self._app, "evict_workspace", None)
+        if evict is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        closed = evict(slug, reason) if reason else evict(slug)
+        self.write({"workspace_slug": slug, "closed": closed})
+
+
+class RetireHandler(InternalHandler):
+    """Removes the environments a workspace's plan no longer keeps.
+
+    The gateway decides who is due and how far back their plan reaches, because
+    it is the one holding plans and workspaces. This end only knows how to find
+    a workspace's aged environments and remove them properly, which is why the
+    retention window arrives in the request rather than being configured here.
+
+    Internal, like the other underscore endpoints. It names a workspace and
+    deletes work inside it, so it is served on the internal port only, to a
+    request signed with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        workspace_id = (str(payload.get("workspace_id") or "")).strip()
+        if not workspace_id:
+            self.set_status(400)
+            self.write({"error": "workspace_id is required"})
+            return
+
+        older_than_days = payload.get("older_than_days")
+        try:
+            older_than_days = float(older_than_days)
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.write({"error": "older_than_days must be a number"})
+            return
+        if not math.isfinite(older_than_days) or older_than_days <= 0:
+            self.set_status(400)
+            self.write({"error": "older_than_days must be greater than zero"})
+            return
+
+        retire = getattr(self._app, "retire_workspace_off_loop", None)
+        if retire is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer = await retire(
+                workspace_id,
+                older_than_days,
+                dry_run=bool(payload.get("dry_run", True)),
+            )
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "invalid workspace id"})
+            return
+        self.write(answer)
