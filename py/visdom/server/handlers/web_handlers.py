@@ -1396,7 +1396,7 @@ class IndexHandler(BaseHandler):
             )
 
     async def post(self, arg, **kwargs):
-        if arg not in ("", "/"):
+        if arg.strip("/") not in ("", "login"):
             raise tornado.web.HTTPError(
                 404, reason=f"Path '{self.request.path}' not found"
             )
@@ -1417,6 +1417,14 @@ class IndexHandler(BaseHandler):
                 400, reason="'username' and 'password' must be strings"
             )
 
+        try:
+            username_bytes = username.encode("utf-8")
+            raw_password.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise tornado.web.HTTPError(
+                400, reason="'username' and 'password' must be valid UTF-8 strings"
+            ) from exc
+
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
         password = await hash_password_off_loop(raw_password, salt)
@@ -1426,7 +1434,7 @@ class IndexHandler(BaseHandler):
         # of a guess was right. Both halves are always compared, which keeps a
         # wrong username costing the same as a wrong password.
         username_ok = hmac.compare_digest(
-            username.encode("utf-8"),
+            username_bytes,
             self.user_credential["username"].encode("utf-8"),
         )
         password_ok = hmac.compare_digest(
