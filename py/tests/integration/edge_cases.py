@@ -521,6 +521,26 @@ class TestWinExistsEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("'eid' must be a string or number", resp.reason)
 
+    def test_structured_win_returns_400(self):
+        """A win_exists request with structured 'win' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": [1, 2], "eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'win' must be a string or number", resp.reason)
+
+        resp2 = self.post_json("/win_exists", {"win": {"a": 1}, "eid": "main"})
+        self.assertEqual(resp2.code, 400)
+        self.assertIn("'win' must be a string or number", resp2.reason)
+
+    def test_null_or_boolean_win_returns_400(self):
+        """A win_exists request with null or boolean 'win' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": None, "eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'win' must be a string or number", resp.reason)
+
+        resp2 = self.post_json("/win_exists", {"win": True, "eid": "main"})
+        self.assertEqual(resp2.code, 400)
+        self.assertIn("'win' must be a string or number", resp2.reason)
+
 
 if __name__ == "__main__":
     unittest.main()
