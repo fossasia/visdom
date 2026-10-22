@@ -180,16 +180,12 @@ def _normalize_table_data(data, headers):
     return headers, rows
 
 
-#: The types a JSON document's scalars arrive as, matched by exact type for the
-#: single-pass check over a list. Every one of them is immutable, so a copy can
-#: hand back the original object rather than build another -- which is what
-#: ``copy.deepcopy`` does with them too.
+#: The types a JSON document's scalars arrive as. Matched by exact type, never
+#: by ``isinstance``: each of these is immutable, so a copy can hand back the
+#: original object rather than build another -- which is what ``copy.deepcopy``
+#: does with them too -- but a *subclass* of one carries instance state that is
+#: not, and must be copied like any other object.
 _JSON_SCALAR_TYPES = frozenset((str, int, float, bool, type(None)))
-
-#: The same set as an ``isinstance`` tuple, which also admits the subclasses:
-#: ``True`` is an ``int``, and ``np.float64`` is a ``float``. Both are
-#: immutable as well, so sharing them is as safe as sharing a ``float``.
-_JSON_SCALARS = tuple(_JSON_SCALAR_TYPES)
 
 
 def copy_json_data(value):
@@ -209,10 +205,12 @@ def copy_json_data(value):
       the way ``copy.deepcopy`` memoises them, so a pane reachable twice is
       copied once and still reachable twice, and a cycle terminates instead of
       exhausting the stack.
-    * **Anything that is not JSON.** A tuple, a numpy array, a ``datetime`` --
-      none of them can reach the fast paths, and each goes to
-      ``copy.deepcopy``, sharing this call's memo so a value that appears both
-      inside and outside the JSON part is still copied once.
+    * **Anything that is not JSON.** A tuple, a numpy array, a ``datetime``,
+      and a subclass of a JSON scalar, whose instance state is no more
+      immutable than any other object's -- none of them can reach the fast
+      paths, and each goes to ``copy.deepcopy``, sharing this call's memo so a
+      value that appears both inside and outside the JSON part is still copied
+      once.
     * **Mutable leaves.** The slice shortcut is taken only when *every* element
       is one of the immutable JSON scalar types, not merely when none of them is a
       dict or a list, so a list of tuples is not quietly shared with the copy.
@@ -253,7 +251,7 @@ def _copy_json_value(value, memo):
         for item in value:
             copied.append(_copy_json_value(item, memo))
         return copied
-    if isinstance(value, _JSON_SCALARS):
+    if kind in _JSON_SCALAR_TYPES:
         return value
     return copy.deepcopy(value, memo)
 

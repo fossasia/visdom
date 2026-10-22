@@ -814,3 +814,27 @@ def test_copy_json_data_does_not_rebuild_an_immutable_scalar():
 
     assert copied["title"] is text
     assert copied["points"][0] is live["points"][0]
+
+
+def test_copy_json_data_copies_a_scalar_subclass_rather_than_sharing_it():
+    """A ``str`` subclass is only as immutable as its instance state.
+
+    Sharing one would hand the copy an object whose attributes the live env
+    can still rewrite -- the very thing the copy exists to prevent -- so a
+    subclass takes the deepcopy fallback like any other non-JSON value, and
+    only the exact built-in scalar types are handed back as they are.
+    """
+
+    class Tagged(str):
+        pass
+
+    tagged = Tagged("loss")
+    tagged.history = [1]
+    live = {"title": tagged, "panes": [tagged]}
+
+    copied = shared_utils.copy_json_data(live)
+    copied["title"].history.append(2)
+
+    assert tagged.history == [1]
+    assert copied["title"] == "loss"
+    assert copied["panes"][0] is copied["title"]
