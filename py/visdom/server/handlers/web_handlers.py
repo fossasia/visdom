@@ -142,8 +142,16 @@ class ExistsHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
+        win = args["win"]
+        if (
+            win is None
+            or isinstance(win, bool)
+            or not isinstance(win, (str, int, float))
+            or (isinstance(win, float) and (win != win or abs(win) == float("inf")))
+        ):
+            raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
         eid = extract_eid(args)
-        if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
+        if eid in handler.state and win in handler.state[eid]["jsons"]:
             handler.write("true")
         else:
             handler.write("false")
