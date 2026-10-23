@@ -111,6 +111,17 @@ class TestLoginPage(LoginTestCase):
         self.assertEqual(resp.code, 200)
         self.assertNotIn("Visdom Login", resp.body.decode())
 
+    def test_get_login_subpath_serves_login_page_to_a_stranger(self):
+        resp = self.fetch("/login")
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("Visdom Login", resp.body.decode())
+
+    def test_get_login_subpath_returns_404_once_logged_in(self):
+        resp = self.fetch("/login", headers=self.session_headers())
+
+        self.assertEqual(resp.code, 404)
+
 
 class TestLoginPageReadsNothing(LoginTestCase):
     """Serving the login form touches no environment file.
@@ -316,6 +327,10 @@ class TestLoginDisabled(VisdomHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
         self.assertEqual(resp.code, 400)
+
+    def test_get_login_when_disabled_returns_404(self):
+        resp = self.fetch("/login")
+        self.assertEqual(resp.code, 404)
 
 
 # -- Authorization on the routes ---------------------------------------------

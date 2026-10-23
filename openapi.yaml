@@ -1314,18 +1314,20 @@ paths:
       tags: [Authentication]
       summary: Render the login page
       description: >
-        Renders the Visdom login page (`login.html`) when login is enabled,
-        or the main Visdom UI if already authenticated or login is disabled.
+        Renders the Visdom login page (`login.html`) when login is enabled
+        and the user is not authenticated. If login is disabled or the user
+        is already authenticated, returns 404 (the main UI is served at `/`).
       security: []
       responses:
         "200":
-          description: HTML page (index.html or login.html).
+          description: Login HTML page (`login.html`).
           content:
             text/html:
               schema:
                 type: string
-        "400":
-          description: Bad request.
+        "404":
+          description: Path not found (when login is disabled or user is already authenticated).
+
     post:
       operationId: loginAlt
       tags: [Authentication]
