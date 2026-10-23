@@ -25,6 +25,7 @@ import os
 import errno
 from collections import OrderedDict
 
+import tornado.escape
 import tornado.ioloop
 
 MAX_ENV_NAME_LEN = 25
@@ -981,15 +982,30 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
 
 
 def broadcast_envs(handler, target_subs=None):
+    """Broadcast the environment list to browser clients.
+
+    Every recipient gets the same bytes, so the list and its encoding are built
+    once here rather than once per subscriber, the way ``broadcast_tags`` below
+    already does it. Writing one shared string to every socket is safe: a
+    ``str`` is immutable, and the polling transport's ``write_message`` only
+    appends it to a deque.
+    """
     if target_subs is None:
         target_subs = handler.subs.values()
+    # Materialized first: a generator is truthy even when it yields nothing, so
+    # an empty one would slip past the check below and pay for the encode.
+    target_subs = list(target_subs)
+    if not target_subs:
+        # Nothing to send to, so do not pay for the encode. Without this the
+        # hoist above would make an empty room cost more than the per-subscriber
+        # loop it replaces, which never ran at all.
+        return
+    message = json.dumps(
+        {"command": "env_update", "data": list(handler.state.keys())},
+        cls=NanSafeEncoder,
+    )
     for sub in target_subs:
-        sub.write_message(
-            json.dumps(
-                {"command": "env_update", "data": list(handler.state.keys())},
-                cls=NanSafeEncoder,
-            )
-        )
+        sub.write_message(message)
 
 
 def broadcast_tags(handler, eid, tags, target_subs=None):
@@ -1005,9 +1021,20 @@ def broadcast_tags(handler, eid, tags, target_subs=None):
 
 
 def send_to_sources(handler, msg):
+    """Relay one event to every connected python client.
+
+    The encode is hoisted out of the loop because ``msg`` can be large: a pane
+    close sends the whole closed pane as ``pane_data``, so a plot with many
+    points cost one full encode per connected client. The early return keeps an
+    unattended server from paying that encode for nobody -- the loop it replaces
+    did not run when there were no sources.
+    """
     target_sources = handler.sources.values()
+    if not target_sources:
+        return
+    message = json.dumps(msg, cls=NanSafeEncoder)
     for source in target_sources:
-        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
+        source.write_message(message)
 
 
 def load_env(state, eid, socket, store, undo_count=None, warmed=False):
@@ -1058,13 +1085,46 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
 
 
 def broadcast(self, msg, eid):
+    sent = 0
     for s in self.subs:
         if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
+                sent += 1
         else:
             if self.subs[s].eid == eid:
                 self.subs[s].write_message(msg)
+                sent += 1
+    if sent:
+        record_workspace_broadcast(self, sent, msg)
+
+
+def _sent_size(msg):
+    if isinstance(msg, bytes):
+        return len(msg)
+    if isinstance(msg, dict):
+        msg = tornado.escape.json_encode(msg)
+    if isinstance(msg, str):
+        return len(msg.encode("utf-8"))
+    return 0
+
+
+def record_workspace_broadcast(handler, sent, msg):
+    """Attribute a push to the workspace whose state the handler is bound to.
+
+    Guarded rather than assumed: this is called from the broadcast path, which
+    also runs for a plain single-tenant server and under test doubles that carry
+    no state at all. Counting is not worth failing a broadcast over, so anything
+    unexpected here is simply not counted.
+    """
+    record = getattr(getattr(handler, "server_state", None), "record_broadcast", None)
+    if record is None:
+        return
+    try:
+        size = _sent_size(msg)
+        record(sent, size * sent)
+    except Exception:
+        pass
 
 
 def push_deleted(store, eid, win_id, p_data):
