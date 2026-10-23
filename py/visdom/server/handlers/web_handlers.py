@@ -13,12 +13,14 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import asyncio
 import copy
 import getpass
 import hmac
 import json
 import jsonpatch
 import logging
+import math
 import os
 import uuid
 from collections import OrderedDict
@@ -49,7 +51,6 @@ from visdom.utils.server_utils import (
     warm_env,
     window,
     register_window,
-    gather_envs,
     broadcast_envs,
     broadcast_tags,
     escape_eid,
@@ -58,10 +59,12 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    push_deleted,
+    push_deleted_many_off_loop,
+    forget_closed_panes,
     notify,
     LazyEnvData,
 )
+from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
@@ -123,6 +126,168 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
+    #: Trace types whose append is a plain push onto the end of each axis.
+    #: ``heatmap`` is not one of them: its own branch rewrites ``z`` and the
+    #: axis labels rather than extending a series.
+    APPENDABLE_TRACE_TYPES = frozenset(("scatter", "scatter3d", "scattergl", "custom"))
+
+    #: Marker properties ``update`` appends to, rather than replaces. Shared
+    #: with ``appendable`` so the question it asks about them cannot drift from
+    #: what the append actually does.
+    APPENDABLE_MARKER_PROPS = ("color",)
+
+    @staticmethod
+    def resolve_trace_idxs(pdata, name):
+        """Which traces of ``pdata`` an update naming ``name`` applies to.
+
+        An unnamed update applies to every trace in order, a named one to the
+        traces carrying that name. O(traces) either way, so the append fast
+        path can ask the question before anything has been mutated.
+        """
+        if name is None:
+            return list(range(len(pdata)))
+        return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
+
+    @staticmethod
+    def window_args_are_noops(p, args):
+        """Whether ``update_window`` would leave the pane exactly as it is.
+
+        It writes every non-``None`` ``opts`` entry onto the pane and every
+        non-``None`` ``layout`` entry into the pane's layout, and ``legend``
+        renames traces on top of that. A value already equal to what the pane
+        holds writes the same bytes back, so it produces no patch operation --
+        which is the case every append after the first one hits, because the
+        client resends the same ``opts`` each time. ``legend`` has to clear
+        both halves of what it does, so it is asked about separately.
+        """
+        content = p.get("content")
+        if isinstance(content, dict) and isinstance(content.get("layout"), dict):
+            current = content["layout"]
+            for key, val in (args.get("layout") or {}).items():
+                if val is not None and current.get(key) != val:
+                    return False
+        for key, val in (args.get("opts") or {}).items():
+            if val is None:
+                continue
+            if key == "caption":
+                if not isinstance(content, dict) or content.get("caption") != val:
+                    return False
+                continue
+            if p.get(key) != val:
+                return False
+            if key == "legend" and not UpdateHandler.legend_renames_nothing(p, args):
+                return False
+        return True
+
+    @staticmethod
+    def legend_renames_nothing(p, args):
+        """Whether ``update_window``'s ``legend`` pass leaves every name as it is.
+
+        A legend equal to the one already on the pane still has to be walked
+        against the traces: the two are written at different times -- the opts
+        loop stores ``legend`` on the pane, the pass below copies its entries
+        onto ``name`` -- so a pane can carry the legend while a trace added
+        since does not carry its name. Only when the pass would write back the
+        names already there is the append still a pure append.
+
+        Mirrors ``update_window`` exactly, including the named form's "rename
+        the traces called ``name``", so the answer cannot drift from what the
+        rename actually does.
+        """
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return True
+        pdata = content.get("data")
+        if not isinstance(pdata, list):
+            return True
+        legend = args["opts"]["legend"]
+        name = args.get("name")
+        if name is not None:
+            if not legend:
+                return True
+            return all(
+                d.get("name") == legend[0] for d in pdata if d.get("name") == name
+            )
+        return all(
+            d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
+        )
+
+    @staticmethod
+    def appendable(p, args):
+        """Whether ``args`` appends to ``p`` in a way whose patch is predictable.
+
+        True only for a pure append: new points pushed onto the end of traces
+        that already exist, with nothing else about the pane changing. Every
+        check is O(traces), never O(points), so asking costs nothing against
+        the deepcopy and the diff it saves.
+
+        An update that also changes an opt, a layout entry or a trace name
+        takes the general path below. The first append after a plot is created
+        is one of those -- the client's ``opts`` carry keys the fresh pane does
+        not have yet -- and every append after it is not, which is the case
+        that matters for a plot being appended to in a loop.
+        """
+        if not args.get("append") or args.get("delete"):
+            return False
+        new_data = args.get("data")
+        if not isinstance(new_data, list) or not new_data:
+            return False
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return False
+        pdata = content.get("data")
+        if not isinstance(pdata, list) or not pdata:
+            return False
+        if not UpdateHandler.window_args_are_noops(p, args):
+            return False
+        name = args.get("name")
+        if name is not None and len(new_data) != 1:
+            # ``update`` answers this with a 400; leave the rejecting to it.
+            return False
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
+        if not idxs:
+            # Nothing matched, so ``update`` injects a new trace rather than
+            # appending to an existing one.
+            return False
+        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
+        # actually touched.
+        for i, new_trace in zip(idxs, new_data):
+            target = pdata[i]
+            if not isinstance(target, dict) or not isinstance(new_trace, dict):
+                return False
+            if target.get("type") not in UpdateHandler.APPENDABLE_TRACE_TYPES:
+                return False
+            if not UpdateHandler.marker_is_appendable(target, new_trace):
+                return False
+        return True
+
+    @staticmethod
+    def marker_is_appendable(target, new_trace):
+        """Whether appending ``new_trace``'s marker only extends what is there.
+
+        ``update`` creates ``target["marker"]`` and the property list inside it
+        when they are missing, and those are structural changes an index-form
+        ``add`` cannot describe: the client's copy has no ``marker`` object, so
+        ``add /content/data/0/marker/color/0`` has nothing to land on and the
+        whole patch fails to apply. The diffed path did not have this problem,
+        because ``make_patch`` emits the parent ``add`` carrying the container.
+
+        So an append that has to create one takes the general path, exactly as
+        the first append after a plot is created does. The one after it, with
+        the container now in place, is a plain extend and takes the fast path.
+        """
+        if "marker" not in new_trace:
+            return True
+        new_marker = new_trace["marker"]
+        target_marker = target.get("marker")
+        if not isinstance(new_marker, dict) or not isinstance(target_marker, dict):
+            return False
+        return all(
+            prop in target_marker
+            for prop in UpdateHandler.APPENDABLE_MARKER_PROPS
+            if prop in new_marker
+        )
+
     @staticmethod
     def bump_version(p):
         """Advance the pane's broadcast sequence number and return the new value.
@@ -151,6 +316,55 @@ class UpdateHandler(BaseHandler):
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        # A pure append's patch is known before the append happens: it adds the
+        # new points at the end of the traces they belong to. Building it
+        # directly skips both the deepcopy of the pane and the diff of the two
+        # copies, which are the two costs in #1805 that grow with the data
+        # already plotted. Everything else keeps the general path below.
+        if UpdateHandler.appendable(p, args):
+            ops = []
+            p = UpdateHandler.update(
+                p,
+                args,
+                max_text_lines,
+                max_old_content,
+                max_image_history,
+                max_plot_history,
+                record_ops=ops,
+            )
+            # An append whose axis lists are empty, or hold nothing but missing
+            # values, appends no points: ``update`` skips the trace and records
+            # no op. Nothing about the pane changed, so there is no revision to
+            # announce -- bumping the version and rerolling ``contentID`` for
+            # one makes the frontend redraw a pane it already has, and marks the
+            # environment dirty for a write that would save nothing. The diffed
+            # path below says nothing at all for an update it applied nothing
+            # of; this one has to agree, or ``vis.line(X=[], Y=[],
+            # update="append")`` in a loop repaints on every empty batch.
+            if not ops:
+                return p, []
+            # ``update_window`` does not advance the version; ``update_packet``
+            # does it once per accepted update, so the fast path has to as well
+            # -- and the patch has to carry the new value, or the frontend
+            # discards it and reloads the whole environment (``bump_version``).
+            # ``bump_version`` creates the field on a pane persisted before
+            # panes carried one, and JSON Patch ``replace`` requires the path to
+            # already exist on the client's copy -- so that pane needs the
+            # ``add`` the diffed path would have emitted, or its first append
+            # arrives as a patch that cannot be applied.
+            version_existed = "version" in p
+            version = UpdateHandler.bump_version(p)
+            p["contentID"] = get_rand_id()
+            ops.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
+            ops.append(
+                {
+                    "op": "replace" if version_existed else "add",
+                    "path": "/version",
+                    "value": version,
+                }
+            )
+            return p, ops
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -234,8 +448,21 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(
-        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+        p,
+        args,
+        max_text_lines,
+        max_old_content,
+        max_image_history,
+        max_plot_history,
+        *,
+        record_ops=None,
     ):
+        """Apply ``args`` to pane ``p`` in place.
+
+        ``record_ops``, when given a list, collects the JSON Patch operations
+        describing an append as it is performed -- see ``appendable``, which is
+        what decides whether the caller may ask for them.
+        """
         if not args.get("data") and not args.get("delete") and args.get("name") is None:
             # opts/layout-only update (e.g. update_window_opts): works for
             # any pane type. A delete/named update also carries no data but
@@ -316,14 +543,11 @@ class UpdateHandler(BaseHandler):
             return p  # we only updated the opts or layout
         append = args.get("append")
 
-        idxs = list(range(len(pdata)))
-
-        if name is not None:
-            if not delete and len(new_data) != 1:
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
-            idxs = [i for i in idxs if pdata[i]["name"] == name]
+        if name is not None and not delete and len(new_data) != 1:
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
 
         # Delete a trace
         if delete:
@@ -441,9 +665,26 @@ class UpdateHandler(BaseHandler):
             if pdata[idx]["type"] == "scatter3d":
                 axes.append("z")
             for axis in axes:
-                pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
-                )
+                if not append:
+                    pdata[idx][axis] = new_trace[axis]
+                    continue
+                series = pdata[idx][axis]
+                if record_ops is not None:
+                    path = "/content/data/%d/%s" % (idx, axis)
+                    for at, value in enumerate(new_trace[axis], len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                # ``series = series + new_trace[axis]`` reallocated the whole
+                # series and copied every existing point on every append, an
+                # O(n^2) of its own on top of the diff #1805 measured. ``+=``
+                # extends a list in place, and still rebinds anything else
+                # exactly as the concatenation did.
+                series += new_trace[axis]
 
             # handle marker properties
             if "marker" not in new_trace:
@@ -451,16 +692,27 @@ class UpdateHandler(BaseHandler):
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
-            for marker_prop in ["color"]:
+            for marker_prop in UpdateHandler.APPENDABLE_MARKER_PROPS:
                 if marker_prop not in new_trace["marker"]:
                     continue
-                if marker_prop not in pdata[idx]["marker"]:
-                    pdata[idx]["marker"][marker_prop] = []
-                pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
-                    if append
-                    else new_trace["marker"][marker_prop]
-                )
+                if marker_prop not in pdata_marker:
+                    pdata_marker[marker_prop] = []
+                new_marker = new_trace["marker"][marker_prop]
+                if not append:
+                    pdata_marker[marker_prop] = new_marker
+                    continue
+                series = pdata_marker[marker_prop]
+                if record_ops is not None:
+                    path = "/content/data/%d/marker/%s" % (idx, marker_prop)
+                    for at, value in enumerate(new_marker, len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                series += new_marker
 
         return p
 
@@ -494,14 +746,24 @@ class UpdateHandler(BaseHandler):
         """A lower bound on the encoded size of ``p``, without encoding it.
 
         In a ``json.dumps`` array every element costs at least one character
-        and every element after the first also carries the two-character ``,``
-        separator, so a trace array of ``k`` values cannot encode to fewer than
+        and every element after the first also carries a separator. That
+        separator is ``", "`` -- two characters, the default whenever no
+        ``separators`` argument is passed, which is how both broadcast encodes
+        call it -- so a trace array of ``k`` values cannot encode to fewer than
         ``3k - 2`` characters. That bounds the pane from below in O(traces)
         where encoding it is O(points). Every element type clears the one-char
         floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
         keys, layout and envelope are ignored, so the bound only ever
         understates -- which costs an exact comparison that could have been
         skipped, never a wrong answer.
+
+        The one-character elements an array of small integers is made of --
+        ``[0, 1, 2]`` encodes to ``3k - 2`` characters between the brackets --
+        are where the bound is exactly tight rather than loose. Compact
+        separators would make it an overestimate instead, and an overestimate
+        here is a real bug: it would skip the encode of a pane that was in fact
+        smaller than the patch. ``test_pane_min_bytes_is_tight_for_one_char_values``
+        pins that, so the assumption fails loudly rather than silently.
 
         A pane with no trace arrays to count -- text, HTML, an image, anything
         whose ``content`` is not a dict of traces -- bounds to zero, which is
@@ -605,7 +867,7 @@ class UpdateHandler(BaseHandler):
                     handler, args, eid, p, diff_packet
                 )
                 handler.mark_dirty(eid)
-            handler.write(p["id"])
+            handler.write_text(p["id"])
             return
 
         try:
@@ -645,7 +907,7 @@ class UpdateHandler(BaseHandler):
                     msg = pane_msg
             broadcast(handler, msg, eid)
             handler.mark_dirty(eid)
-        handler.write(p["id"])
+        handler.write_text(p["id"])
 
     @check_auth
     @check_readonly
@@ -662,19 +924,97 @@ class UpdateHandler(BaseHandler):
 
 class CloseHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
+        """Close one pane, or every pane in an env, recording the undo off the loop.
+
+        The panes leave ``state`` here, on the loop, before anything is
+        awaited, so a close is still all-or-nothing as far as any other request
+        can tell -- and a pane that was already gone is still announced, as it
+        always was. Their undo entries then go to the storage worker as one
+        write rather than one per pane: closing an env with many panes used to
+        read and rewrite its undo file once per pane, inline.
+
+        If that write fails the panes go back where they came from: the only
+        copy of a closed pane between the pop and the write is the one this
+        call is holding, so a close that cannot be recorded has to be a close
+        that did not happen rather than one nothing can undo. A close that did
+        not happen also leaves no undo entry, so whatever the write may still
+        manage to record for the panes that came back is taken out again.
+
+        What is announced is decided after that write, against the env as it
+        stands then: the loop kept serving while the undo stack was written, so
+        a pane id this close popped may have been written again in the
+        meantime. Announcing its close would take that new pane off every
+        client while the server still holds it.
+        """
         eid = extract_eid(args)
         if eid not in handler.state:
             return
         win = args.get("win")
 
-        keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
-        for win in keys:
-            p_data = handler.state[eid]["jsons"].pop(win, None)
+        env = handler.state[eid]
+        keys = list(env["jsons"].keys()) if win is None else [win]
+        closed = []
+        for key in keys:
+            p_data = env["jsons"].pop(key, None)
+            closed.append((key, p_data))
             if p_data is not None:
-                push_deleted(handler.storage, eid, win, p_data)
                 handler.mark_dirty(eid)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+
+        panes = [(key, p_data) for key, p_data in closed if p_data is not None]
+        if panes:
+            try:
+                await push_deleted_many_off_loop(handler, eid, panes)
+            except BaseException:
+                # ``BaseException`` because a cancelled request loses the panes
+                # exactly as a failed write does: the await is where the close
+                # is interrupted either way, and the handler is the only thing
+                # holding them. Nothing is swallowed -- every one is re-raised.
+                #
+                # The panes are already out of ``state``: the only copy of
+                # them left is the one in this frame. Dropping it loses them
+                # for good -- the close is not announced, so clients keep
+                # showing panes the server no longer has, and the next autosave
+                # writes the env without them. They go back instead, and the
+                # env is marked so that save records the env as it still is.
+                #
+                # Only ids that are still missing are restored. A pane written
+                # back under one of them while this write was out is newer than
+                # what the close popped, and overwriting it here would undo a
+                # live window. If the env itself is gone, there is nothing to
+                # restore it into.
+                restored = []
+                if handler.state.get(eid) is env:
+                    for key, p_data in panes:
+                        if env["jsons"].setdefault(key, p_data) is p_data:
+                            restored.append((key, p_data))
+                    handler.mark_dirty(eid)
+                if restored:
+                    # Cancelling the future above does not stop the worker: the
+                    # push can still be queued, or running, and land after this
+                    # -- leaving the pane back in the env and recorded as
+                    # closed both, for an undo to restore over whatever holds
+                    # its id by then. The entries go back out behind the write
+                    # that may yet make them, which the single worker orders
+                    # for us. Only for the panes that actually came back: an id
+                    # taken by a newer window keeps the close that took it,
+                    # because the undo stack is then the one place the pane it
+                    # closed still exists.
+                    forget_closed_panes(handler, eid, restored)
+                raise
+            if handler.state.get(eid) is not env:
+                # A delete_env landed while the undo stack was being written:
+                # the env these panes belonged to is gone, along with the file
+                # just written, so there is nothing left to announce.
+                return
+
+        for key, _p_data in closed:
+            if key in env["jsons"]:
+                # A pane was written back under this id while the undo stack
+                # was: the window there now is a new one, not the one this
+                # close popped, and it is not this close's to announce.
+                continue
+            broadcast(handler, json.dumps({"command": "close", "data": key}), eid)
 
     @check_auth
     @check_readonly
@@ -683,7 +1023,7 @@ class CloseHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         await ensure_env_loaded(self, extract_eid(args))
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DeleteEnvHandler(BaseHandler):
@@ -842,6 +1182,9 @@ class EnvHandler(BaseHandler):
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
+                if self.readonly:
+                    reject_readonly(self)
+                    return
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
 
@@ -1044,12 +1387,12 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, self.storage)
+            # No env listing is passed: ``login.html`` has never rendered one,
+            # and building it here read the environment directory on the loop
+            # for every unauthenticated request that reached the server.
             self.render(
                 "login.html",
                 user=getpass.getuser(),
-                items=items,
-                active_item="",
                 base_url=self.base_url,
             )
 
@@ -1350,26 +1693,26 @@ class ExperimentLogHandler(BaseHandler):
                 def apply_metrics(store):
                     """Apply the request's observations, holding back a rejection.
 
-                    Each is applied in turn, as it was when every observation
-                    was its own read-append-write, so a metric the store
-                    refuses still leaves the ones before it recorded. The
-                    refusal is held rather than raised so that what did apply
-                    is persisted before the request reports it.
+                    The whole batch shares one read-append-write. Nothing can
+                    refuse a single observation -- an experiment that will not
+                    read, or one already finished, refuses the request before
+                    any of them is appended -- so either every observation in
+                    it is recorded or none is and nothing is written.
+
+                    The refusal is held rather than raised out of the mutation
+                    so that a refused request leaves the environment exactly
+                    as every other refused write leaves it: unfiled, unqueued,
+                    and answered from the one place that chooses a status.
                     """
-                    experiment = None
-                    for key, value in metrics.items():
-                        try:
-                            experiment = store.log_metric(
-                                eid, key, value, args.get("step")
-                            )
-                        except (
-                            ExperimentFinishedError,
-                            TypeError,
-                            ValueError,
-                        ) as error:
-                            rejected.append(error)
-                            break
-                    return experiment
+                    try:
+                        return store.log_metrics(eid, metrics, args.get("step"))
+                    except (
+                        ExperimentFinishedError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
+                        rejected.append(error)
+                        return None
 
                 experiment, is_new_env = await _write_experiment_metadata(
                     handler, eid, apply_metrics
@@ -1838,3 +2181,267 @@ class TagsHandler(BaseHandler):
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
+
+
+class InternalHandler(BaseHandler):
+    scope = internal.READ
+
+    def allowed(self):
+        return internal.is_signed(self.request, self.scope)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
+
+class ActivityHandler(InternalHandler):
+    """Reports who is connected to each workspace this instance currently holds.
+
+    Only ever the instance's own share of them: the proxy hashes each workspace
+    onto exactly one instance, so a caller wanting the whole deployment asks every
+    instance and concatenates. Carries no environment data or plot contents, only
+    counts, but it does name every workspace on the instance, so it is served only
+    on the internal port, and only to a request signed with a read key.
+    """
+
+    # Registered against the application rather than a state, because it
+    # reports on every workspace rather than acting inside one. Named apart from
+    # the inherited accessor so it does not collide with that read-only view.
+    _manager = None
+
+    def initialize(self, app=None):
+        """Take only the workspace manager, not a state to act within.
+
+        This endpoint reports counts and never touches environments or
+        rendering, so it has no use for the rest and no reason to fail if one is
+        missing.
+        """
+        self._manager = getattr(app, "workspace_env_manager", None)
+
+    def gather(self, stored=None):
+        """Every workspace this instance can say anything about.
+
+        Split out from get so the metrics endpoint reports the same numbers
+        rather than collecting them a second way, which is how two endpoints end
+        up disagreeing about the same deployment.
+        """
+        manager = self._manager
+        workspaces = {}
+        if manager is not None:
+            for workspace_id, space in manager.workspace_spaces():
+                entry = space.activity()
+                entry["workspace_id"] = str(workspace_id)
+                workspaces[entry["workspace_id"]] = entry
+
+            # Every instance shares the env volume, so the disk pass also turns up
+            # workspaces this instance does not serve. Reporting them is harmless
+            # and it is what lets a caller see a workspace nobody has touched since
+            # the last restart, which the socket pass alone cannot show.
+            if stored is None:
+                stored = manager.stored_workspaces()
+            for workspace_id, on_disk in stored.items():
+                entry = workspaces.setdefault(
+                    workspace_id,
+                    {
+                        "workspace_id": workspace_id,
+                        "slug": None,
+                        "viewers": 0,
+                        "writers": 0,
+                        "last_active_at": None,
+                        # Zero rather than absent. This instance counts, and a
+                        # workspace it has not served since starting has had no
+                        # work done on it, which is a real answer. Leaving them
+                        # out would say the counters are unavailable, which is
+                        # what a caller should be told about an older server.
+                        "writes": 0,
+                        "broadcasts": 0,
+                        "broadcast_bytes": 0,
+                        "active_hour": None,
+                        "active_minutes_mask": 0,
+                    },
+                )
+                entry["bytes"] = on_disk["bytes"]
+                if not entry.get("last_active_at"):
+                    entry["last_active_at"] = on_disk["last_active_at"]
+
+        return list(workspaces.values())
+
+    async def stored(self):
+        if self._manager is None:
+            return {}
+        return await self._manager.stored_workspaces_off_loop()
+
+    async def get(self):
+        self.write({"workspaces": self.gather(await self.stored())})
+
+
+class MetricsHandler(ActivityHandler):
+    """The same workspace numbers, in the format a Prometheus scrape wants.
+
+    Inherits the gathering rather than repeating it. Like the activity endpoint
+    it names every workspace on the instance, so it is served only on the
+    internal port. Prometheus cannot sign a request, so a metrics token is
+    accepted here as well as a read signature.
+    """
+
+    def allowed(self):
+        return internal.has_metrics_token(self.request) or super().allowed()
+
+    async def get(self):
+        stored = await self.stored()
+        samples = [metrics.sample_from_activity(entry) for entry in self.gather(stored)]
+        # The version parameter is part of the format's content type. Scrapers
+        # accept a bare text/plain, but tools that inspect the header expect it.
+        self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.write(metrics.render(samples))
+
+
+class EvictHandler(InternalHandler):
+    """Closes the sockets a workspace still has open on this instance.
+
+    The gateway calls this the moment a workspace is suspended or moved to the
+    trash. Without it the refusal only takes effect at the next resolve, and a
+    socket already open never resolves again, so a tab that was watching when
+    the workspace was switched off carries on watching.
+
+    Served on the internal port only, to a request signed with an admin key: it
+    acts on a workspace by name and nothing outside the deployment has any
+    business asking for that.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        slug = (payload.get("workspace_slug") or "").strip()
+        if not slug:
+            self.set_status(400)
+            self.write({"error": "workspace_slug is required"})
+            return
+
+        reason = (payload.get("reason") or "").strip() or None
+        evict = getattr(self._app, "evict_workspace", None)
+        if evict is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        closed = evict(slug, reason) if reason else evict(slug)
+        self.write({"workspace_slug": slug, "closed": closed})
+
+
+class RetireHandler(InternalHandler):
+    """Removes the environments a workspace's plan no longer keeps.
+
+    The gateway decides who is due and how far back their plan reaches, because
+    it is the one holding plans and workspaces. This end only knows how to find
+    a workspace's aged environments and remove them properly, which is why the
+    retention window arrives in the request rather than being configured here.
+
+    Internal, like the other underscore endpoints. It names a workspace and
+    deletes work inside it, so it is served on the internal port only, to a
+    request signed with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        workspace_id = (str(payload.get("workspace_id") or "")).strip()
+        if not workspace_id:
+            self.set_status(400)
+            self.write({"error": "workspace_id is required"})
+            return
+
+        older_than_days = payload.get("older_than_days")
+        try:
+            older_than_days = float(older_than_days)
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.write({"error": "older_than_days must be a number"})
+            return
+        if not math.isfinite(older_than_days) or older_than_days <= 0:
+            self.set_status(400)
+            self.write({"error": "older_than_days must be greater than zero"})
+            return
+
+        retire = getattr(self._app, "retire_workspace_off_loop", None)
+        if retire is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer = await retire(
+                workspace_id,
+                older_than_days,
+                dry_run=bool(payload.get("dry_run", True)),
+            )
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "invalid workspace id"})
+            return
+        self.write(answer)
+
+
+class DropHandler(InternalHandler):
+    """Removes a whole workspace from this instance, files included.
+
+    Called by the gateway once a workspace's rows are gone for good: emptied
+    from the trash, or taken with a deleted account. Internal like the other
+    underscore endpoints: served on the internal port only, to a request signed
+    with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        drop = getattr(self._app, "drop_workspace", None)
+        if drop is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer, pending = drop(payload.get("workspace_id"))
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "workspace_id is not a workspace id"})
+            return
+
+        freed = await asyncio.wrap_future(pending)
+        answer["removed"] = freed is not None
+        answer["bytes"] = freed or 0
+        self.write(answer)
