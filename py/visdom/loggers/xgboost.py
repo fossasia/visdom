@@ -82,6 +82,7 @@ class VisdomXGBLogger(TrainingCallback):
         self._new_windows = False  # set by autolog for a new top-level run
         self._run_start = None  # rounds the model had when this run began
         self._run_pending = False  # a run began but hasn't logged a round yet
+        self._silent_end = None  # rounds after an unevaluated continuation
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -283,10 +284,14 @@ class VisdomXGBLogger(TrainingCallback):
         self._run_pending = True
         return model
 
+    def _continues(self, start):
+        return bool(start) and start in (self._next_round, self._silent_end)
+
     def _start_run(self):
         # Matched by round count only, so an unrelated model of that size appends.
         start, self._run_pending = self._run_start, False
-        continues = bool(start) and start == self._next_round
+        continues = self._continues(start)
+        self._silent_end = None
         self._fresh = not continues
         if self._new_windows and not continues:
             self._wins = {}
@@ -350,6 +355,11 @@ class VisdomXGBLogger(TrainingCallback):
         return False
 
     def after_training(self, model):
+        if self._run_pending:
+            # Nothing was plotted; remember where a continuation left the model.
+            self._run_pending = False
+            if self._continues(self._run_start):
+                self._silent_end = self._rounds(model)
         try:
             best_iteration = model.best_iteration
             best_score = model.best_score

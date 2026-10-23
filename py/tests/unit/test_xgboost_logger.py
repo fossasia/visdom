@@ -343,6 +343,40 @@ class TestRunsWithoutEvals(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(logger._next_round, 0)
 
+    def _continue_through_runs_without_evals(self, silent_runs, **callbacks):
+        with patch.object(self.viz, "line", side_effect=self.line):
+            model = self._train(5, **callbacks)
+            for _ in range(silent_runs):
+                model = self._train(3, evals=False, xgb_model=model, **callbacks)
+            self._train(2, xgb_model=model, **callbacks)
+        later = self.calls[5:]
+        start = 5 + 3 * silent_runs
+        self.assertEqual([c["X"][0] for c in later], [start, start + 1])
+        self.assertEqual([c.get("update") for c in later], ["append", "append"])
+        self.assertEqual({c["win"] for c in later}, {"win1"})
+
+    def test_continuing_after_an_unevaluated_continuation_appends(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(1, callbacks=[logger])
+
+    def test_continuing_after_two_unevaluated_continuations_appends(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(2, callbacks=[logger])
+
+    def test_autolog_appends_after_an_unevaluated_continuation(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(1)
+
+    def test_an_unrelated_unevaluated_model_still_starts_a_new_curve(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3, callbacks=[logger])
+            other = self._train(7, evals=False, callbacks=[logger])
+            self._train(2, xgb_model=other, callbacks=[logger])
+        later = self.calls[3:]
+        self.assertEqual([c["X"][0] for c in later], [7, 8])
+        self.assertEqual([c.get("update") for c in later], ["replace", "append"])
+
 
 class TestContinuationIsMatchedByRoundCount(unittest.TestCase):
     """Only the round count is compared, as before_training documents."""
