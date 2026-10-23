@@ -77,13 +77,11 @@ class VisdomXGBLogger(TrainingCallback):
         )
         self._wins = {}
         self._depth = 0
-        # Round after the last one plotted, and whether the current run starts
-        # a new curve (None until before_training has seen a run).
-        self._next_round = 0
-        self._fresh = None
-        # Set by the autolog wrappers for a new top-level run; before_training
-        # opens new windows for it unless it continues the plotted curve.
-        self._new_windows = False
+        self._next_round = 0  # round after the last one plotted
+        self._fresh = None  # whether this run starts a new curve
+        self._new_windows = False  # set by autolog for a new top-level run
+        self._run_start = None  # rounds the model had when this run began
+        self._run_pending = False  # a run began but hasn't logged a round yet
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -280,21 +278,26 @@ class VisdomXGBLogger(TrainingCallback):
         return rounds() if callable(rounds) else None
 
     def before_training(self, model):
-        # A run continues the plotted curve when its model already holds as
-        # many rounds as were plotted, as with xgb_model= from the last run.
-        # Only the round count is compared, so an unrelated model with that
-        # many rounds is appended as well; any other run starts a new curve.
-        start = self._rounds(model)
+        # Decided on the first logged round, so a run without evals changes nothing.
+        self._run_start = self._rounds(model)
+        self._run_pending = True
+        return model
+
+    def _start_run(self):
+        # Matched by round count only, so an unrelated model of that size appends.
+        start, self._run_pending = self._run_start, False
         continues = bool(start) and start == self._next_round
         self._fresh = not continues
         if self._new_windows and not continues:
             self._wins = {}
         self._new_windows = False
-        return model
 
     def after_iteration(self, model, epoch, evals_log):
-        # xgboost restarts epoch at 0 when training continues from xgb_model,
-        # so take the round from the model itself.
+        if not evals_log:
+            return False
+        if self._run_pending:
+            self._start_run()
+        # xgboost restarts epoch at 0 on xgb_model=, so read the round from the model.
         rounds = self._rounds(model)
         step = rounds - 1 if rounds is not None else epoch
         fresh = self._fresh if self._fresh is not None else step == 0

@@ -296,6 +296,54 @@ class TestAutologContinuedTraining(unittest.TestCase):
         self.assertEqual(self.created, ["win0"])
 
 
+class TestRunsWithoutEvals(unittest.TestCase):
+    """A run that logs no eval data leaves the plotted curve as it was."""
+
+    PARAMS = {"objective": "binary:logistic", "verbosity": 0}
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+        rng = np.random.RandomState(0)
+        self.dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        self.calls = []
+
+    def line(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs.get("win") or "win%d" % len(self.calls)
+
+    def _train(self, rounds, evals=True, **kwargs):
+        evals = [(self.dtrain, "eval")] if evals else []
+        return xgb.train(
+            self.PARAMS, self.dtrain, rounds, evals=evals, verbose_eval=False, **kwargs
+        )
+
+    def _continue_after_a_run_without_evals(self, **callbacks):
+        with patch.object(self.viz, "line", side_effect=self.line):
+            first = self._train(3, **callbacks)
+            self._train(2, evals=False, **callbacks)
+            self._train(2, xgb_model=first, **callbacks)
+        later = self.calls[3:]
+        self.assertEqual([c["X"][0] for c in later], [3, 4])
+        self.assertEqual([c.get("update") for c in later], ["append", "append"])
+        self.assertEqual({c["win"] for c in later}, {"win1"})
+
+    def test_manual_callback_keeps_the_curve(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_after_a_run_without_evals(callbacks=[logger])
+
+    def test_autolog_keeps_the_curve(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        self._continue_after_a_run_without_evals()
+
+    def test_a_run_without_evals_plots_nothing(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3, evals=False, callbacks=[logger])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(logger._next_round, 0)
+
+
 class TestContinuationIsMatchedByRoundCount(unittest.TestCase):
     """Only the round count is compared, as before_training documents."""
 
