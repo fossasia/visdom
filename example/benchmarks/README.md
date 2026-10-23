@@ -19,18 +19,29 @@ them. A number produced here can be re-run on any two commits.
 | `update_append.py` | What does the server spend appending one point to a plot? |
 | `payload_build.py` | What does the Python client spend building one payload? |
 | `encode.py` | What do `NanSafeEncoder` and `stringify` cost over `json.dumps`? |
+| `experiment_scan.py` | What does a search over every environment on disk cost? |
 
 ```bash
 python example/benchmarks/update_append.py
 python example/benchmarks/update_append.py --breakdown
 python example/benchmarks/payload_build.py
 python example/benchmarks/encode.py
+python example/benchmarks/experiment_scan.py
 ```
 
 Each accepts `--sizes` (comma-separated workload sizes), `--repeat` (timed
 calls per size) and `--warmup` (untimed calls first). `--breakdown` re-runs the
 append with the operations on the update path wrapped in timers, for a tenth
-of `--repeat`.
+of `--repeat`. `experiment_scan.py` also takes `--envs`, how many environments
+to put on disk.
+
+`experiment_scan.py` is the one script here that compares two commits in a
+single process: it reads the baseline's `json_store.py` out of git with
+`git show` and imports it as a second live module, then times the two
+alternately. Reading one side per process would measure the machine's drift
+between the two runs as much as the code, which is the trap that makes import-
+and scan-time comparisons look like wins. It needs an `upstream` remote, since
+the baseline is `git merge-base upstream/dev HEAD`.
 
 ## How they measure
 
