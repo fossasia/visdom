@@ -856,14 +856,32 @@ def test_experiment_accepts_tensor_params(offline_client):
     json.dumps(msg)
 
 
+def test_experiment_accepts_tensor_and_numpy_tags(offline_client):
+    """Tags get the same scalar conversion as params."""
+    torch = pytest.importorskip("torch")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(
+            tags={
+                "seed": torch.tensor(3),
+                "lr": np.float32(0.5),
+                "epochs": np.array(10),
+                "ds": "mnist",
+            }
+        )
+    assert msg["tags"] == {"seed": 3, "lr": 0.5, "epochs": 10, "ds": "mnist"}
+    assert type(msg["tags"]["seed"]) is int and type(msg["tags"]["lr"]) is float
+    json.dumps(msg)
+
+
 @pytest.mark.parametrize(
     "call",
     [
         lambda v: v.log_metrics({"loss": np.array([0.1, 0.2])}),
         lambda v: v.log_metrics({"loss": 0.1}, step=np.arange(3)),
         lambda v: v.experiment(params={"lr": np.zeros((2, 2))}),
+        lambda v: v.experiment(tags={"seed": np.arange(3)}),
     ],
-    ids=["metric", "step", "param"],
+    ids=["metric", "step", "param", "tag"],
 )
 def test_experiment_methods_reject_multi_value_arrays(offline_client, call):
     """Several values are not one observation; say so instead of a JSON error."""

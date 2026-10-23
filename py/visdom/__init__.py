@@ -1371,6 +1371,8 @@ class Visdom(object):
             params = {
                 k: _plain_scalar(v, "param {!r}".format(k)) for k, v in params.items()
             }
+        if tags is not None:
+            tags = {k: _plain_scalar(v, "tag {!r}".format(k)) for k, v in tags.items()}
         return self._experiment_send(
             {
                 "action": "log",
