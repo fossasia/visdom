@@ -36,6 +36,7 @@ import logging
 import warnings
 import time
 import errno
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -80,41 +81,75 @@ def _get_perplexity(num_entities):
     return min(base, max_perplexity)
 
 
-try:
-    from openTSNE import TSNE as TSNE_OPEN
+NO_TSNE_BACKEND = (
+    "In order to use the embeddings feature, you'll "
+    "need to install a backend to support the calculation. "
+    "Currently we support openTSNE "
+    "(https://github.com/pavlin-policar/openTSNE) for "
+    "t-SNE computation, or the bhtsne implementation at "
+    "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+    "pip install openTSNE, or install bhtsne by cloning it into "
+    "the /py/visdom/extra_deps/ directory and running the "
+    "installation steps as listed on that github "
+    "in the created /py/visdom/extra_deps/bhtsne directory."
+)
 
-    def do_tsne(X):
-        perplexity = _get_perplexity(len(X))
-        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
-        Y = tsne.fit(X)
-        return _normalize_tsne(Y)
+#: The t-SNE backend, resolved on first use and kept. ``None`` means the
+#: search has not run yet, which is not the same as having run and found
+#: nothing -- that is recorded as a function that raises.
+_tsne_backend = None
 
-except ImportError:
+
+def _resolve_tsne_backend():
+    """Pick a t-SNE backend, preferring openTSNE over the bundled bhtsne.
+
+    The search used to run at import time, which meant every ``import visdom``
+    paid for openTSNE -- and so for scikit-learn and SciPy underneath it --
+    to support ``embeddings()``, the one call that needs them. Running it here
+    keeps the same preference order and the same error, and charges it to the
+    callers that actually reach for a backend.
+    """
+    try:
+        from openTSNE import TSNE as TSNE_OPEN
+    except ImportError:
+        pass
+    else:
+
+        def with_opentsne(X):
+            perplexity = _get_perplexity(len(X))
+            tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+            Y = tsne.fit(X)
+            return _normalize_tsne(Y)
+
+        return with_opentsne
+
     try:
         import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    except ImportError:
+        pass
+    else:
 
-        def do_tsne(X):
+        def with_bhtsne(X):
             perplexity = _get_perplexity(len(X))
             Y = bhtsne.run_bh_tsne(
                 X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
             )
             return _normalize_tsne(Y)
 
-    except ImportError:
+        return with_bhtsne
 
-        def do_tsne(X):
-            raise Exception(
-                "In order to use the embeddings feature, you'll "
-                "need to install a backend to support the calculation. "
-                "Currently we support openTSNE "
-                "(https://github.com/pavlin-policar/openTSNE) for "
-                "t-SNE computation, or the bhtsne implementation at "
-                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
-                "pip install openTSNE, or install bhtsne by cloning it into "
-                "the /py/visdom/extra_deps/ directory and running the "
-                "installation steps as listed on that github "
-                "in the created /py/visdom/extra_deps/bhtsne directory."
-            )
+    def without_a_backend(X):
+        raise Exception(NO_TSNE_BACKEND)
+
+    return without_a_backend
+
+
+def do_tsne(X):
+    """Embed ``X`` in two dimensions with whichever backend is installed."""
+    global _tsne_backend
+    if _tsne_backend is None:
+        _tsne_backend = _resolve_tsne_backend()
+    return _tsne_backend(X)
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -128,6 +163,30 @@ except Exception:
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
+REFUSED_STATUSES = (401, 402, 403)
+REFUSALS_REMEMBERED = 100
+
+
+def _one_line(text):
+    return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
+
+
+def _refusal_reason(body):
+    """The reason a server gave for turning a request down, as one line."""
+    text = (body or "").strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("detail", "error", "message"):
+            if isinstance(parsed.get(key), str) and _one_line(parsed[key]):
+                return _one_line(parsed[key])[:200]
+    if not text or text.startswith("<"):
+        return "no reason given"
+    return _one_line(text)[:200]
+
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
@@ -552,14 +611,40 @@ def _assert_sunburst_opts(opts):
         ), "branchvalues must be 'total' or 'remainder'"
 
 
+#: Extra types ``_to_numpy`` should unwrap, beyond the torch ones it finds on
+#: its own. Left here as the extension point the module-scope list used to be.
 torch_types = []
-try:
-    import torch
 
-    torch_types.append(torch.Tensor)
-    torch_types.append(torch.nn.Parameter)
-except (ImportError, AttributeError):
-    pass
+
+def _resolve_torch_types():
+    """Return the torch tensor types to unwrap, without importing torch.
+
+    ``import torch`` at module scope cost every ``import visdom`` well over a
+    second, to build an isinstance tuple. It is not needed: a caller cannot be
+    holding a tensor unless they imported torch themselves, so torch being
+    absent from ``sys.modules`` is proof there is nothing here to unwrap. When
+    it is present this is three attribute reads, not an import.
+
+    The types are read fresh every call rather than cached. A cache would have
+    to be invalidated whenever torch rebinds them -- a reload keeps the same
+    module object, and a torch caught mid-import has no ``nn`` yet but grows
+    one moments later -- and a stale entry there is silent: tensors would stop
+    being converted and reach the server as unserialisable objects. Rereading
+    costs a dict lookup per plotted argument, which is what the old
+    module-scope list cost to iterate.
+
+    Each type is resolved on its own. A partially initialised torch -- an
+    ``import visdom`` from inside torch's own import, or a stub standing in
+    for it -- can have ``Tensor`` without ``nn`` yet, and dropping the type it
+    does have would pass a real tensor through unconverted, to reach the
+    server as an object it cannot serialise.
+    """
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return ()
+    nn = getattr(torch, "nn", None)
+    kinds = (getattr(torch, "Tensor", None), getattr(nn, "Parameter", None))
+    return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
 def _pil_to_chw(img, batch=False):
@@ -639,9 +724,14 @@ def _to_numpy(a):
             # Each item on its own, so PIL images can sit next to arrays.
             return _stack_image_list(a)
         return np.array(a)
-    for kind in torch_types:
-        if isinstance(a, kind):
-            return a.detach().cpu().numpy()
+    # one isinstance against the whole tuple rather than a Python loop: this
+    # runs per argument of every plot call, and with no torch imported and
+    # nothing registered in torch_types it is a single dict lookup.
+    kinds = _resolve_torch_types()
+    if torch_types:
+        kinds = tuple(torch_types) + kinds
+    if kinds and isinstance(a, kinds):
+        return a.detach().cpu().numpy()
     return a
 
 
@@ -1327,6 +1417,35 @@ class Visdom(object):
                         + "\n"
                     )
 
+    def _note_refusal(self, status, body):
+        """Say so when the server turns a request down.
+
+        A hosted server answers 401, 402 or 403 for a key that is wrong,
+        revoked or read-only, for a workspace this key may not reach, and for a
+        plan that is out of storage. The body still goes back to the caller,
+        as it does for any status, but on its own it reads as a window id, so a
+        script whose every plot was refused ran to the end looking as if it had
+        worked.
+
+        A warning and never an exception, whatever ``raise_exceptions`` says:
+        a refused write has to look the way it does for ``requests``, which
+        does not raise on a 4xx. Each distinct reason is logged once, so a
+        training loop is not flooded.
+        """
+        if status not in REFUSED_STATUSES:
+            return
+        message = "The visdom server refused this request ({0}): {1}".format(
+            status, _refusal_reason(body)
+        )
+        seen = self.__dict__.setdefault("_refusals_seen", OrderedDict())
+        if message in seen:
+            seen.move_to_end(message)
+            return
+        seen[message] = True
+        if len(seen) > REFUSALS_REMEMBERED:
+            seen.popitem(last=False)
+        logger.warning(message)
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1339,6 +1458,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
             raise
@@ -1354,6 +1474,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
 
     def _send(
