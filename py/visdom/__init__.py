@@ -174,6 +174,12 @@ def _audio_sample_rate(rate, channels=1):
     in 32 bits each. The range is checked before anything turns ``rate`` into
     a float, so a huge int, NaN and inf are all rejected.
     """
+    # A 0-d numpy array or a one-element tensor holds a plain number.
+    size = rate.size if isinstance(rate, np.ndarray) else None
+    if size is None and callable(getattr(rate, "numel", None)):
+        size = rate.numel()
+    if size == 1 and callable(getattr(rate, "item", None)):
+        rate = rate.item()
     limit = 0xFFFFFFFF // (2 * channels)
     if (
         isinstance(rate, (bool, np.bool_))

@@ -634,7 +634,8 @@ def _wav_rate(sent):
 
 
 @pytest.mark.parametrize(
-    "rate", [16000, 16e3, 22050.0, np.float32(16000), np.int64(8000)]
+    "rate",
+    [16000, 16e3, 22050.0, np.float32(16000), np.int64(8000), np.array(16000)],
 )
 def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
     """16e3 or a rate read from a config is a float, which used to crash."""
@@ -642,6 +643,22 @@ def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
         lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
     )
     assert _wav_rate(sent) == int(rate)
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize("make", ["int", "float", "one_element"])
+def test_audio_accepts_a_sample_rate_tensor(capture_send, make):
+    """torch.tensor(16000) worked before; float and 1-element tensors too now."""
+    torch = pytest.importorskip("torch")
+    rate = {
+        "int": torch.tensor(16000),
+        "float": torch.tensor(16000.0),
+        "one_element": torch.tensor([16000]),
+    }[make]
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == 16000
     assert type(sent["payload"]["opts"]["sample_frequency"]) is int
 
 
