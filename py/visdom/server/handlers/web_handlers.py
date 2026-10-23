@@ -13,12 +13,14 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import asyncio
 import copy
 import getpass
 import hmac
 import json
 import jsonpatch
 import logging
+import math
 import os
 import uuid
 from collections import OrderedDict
@@ -2337,3 +2339,109 @@ class EvictHandler(InternalHandler):
 
         closed = evict(slug, reason) if reason else evict(slug)
         self.write({"workspace_slug": slug, "closed": closed})
+
+
+class RetireHandler(InternalHandler):
+    """Removes the environments a workspace's plan no longer keeps.
+
+    The gateway decides who is due and how far back their plan reaches, because
+    it is the one holding plans and workspaces. This end only knows how to find
+    a workspace's aged environments and remove them properly, which is why the
+    retention window arrives in the request rather than being configured here.
+
+    Internal, like the other underscore endpoints. It names a workspace and
+    deletes work inside it, so it is served on the internal port only, to a
+    request signed with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        workspace_id = (str(payload.get("workspace_id") or "")).strip()
+        if not workspace_id:
+            self.set_status(400)
+            self.write({"error": "workspace_id is required"})
+            return
+
+        older_than_days = payload.get("older_than_days")
+        try:
+            older_than_days = float(older_than_days)
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.write({"error": "older_than_days must be a number"})
+            return
+        if not math.isfinite(older_than_days) or older_than_days <= 0:
+            self.set_status(400)
+            self.write({"error": "older_than_days must be greater than zero"})
+            return
+
+        retire = getattr(self._app, "retire_workspace_off_loop", None)
+        if retire is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer = await retire(
+                workspace_id,
+                older_than_days,
+                dry_run=bool(payload.get("dry_run", True)),
+            )
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "invalid workspace id"})
+            return
+        self.write(answer)
+
+
+class DropHandler(InternalHandler):
+    """Removes a whole workspace from this instance, files included.
+
+    Called by the gateway once a workspace's rows are gone for good: emptied
+    from the trash, or taken with a deleted account. Internal like the other
+    underscore endpoints: served on the internal port only, to a request signed
+    with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        drop = getattr(self._app, "drop_workspace", None)
+        if drop is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer, pending = drop(payload.get("workspace_id"))
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "workspace_id is not a workspace id"})
+            return
+
+        freed = await asyncio.wrap_future(pending)
+        answer["removed"] = freed is not None
+        answer["bytes"] = freed or 0
+        self.write(answer)
