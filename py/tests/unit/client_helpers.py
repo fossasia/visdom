@@ -31,6 +31,7 @@ import binascii
 import builtins
 import sys
 import types
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -42,6 +43,7 @@ from visdom import (
     _axisformat3d,
     _dashCheck,
     _decode_binary_arrays,
+    _finite_range,
     _lineColorCheck,
     _markerColorCheck,
     _markerSizeCheck,
@@ -673,6 +675,7 @@ def test_assert_opts_accepts_a_fully_populated_opts():
             "columnnames": ["a"],
             "rownames": ["b"],
             "jpgquality": 100,
+            "compresslevel": 6,
             "opacity": 1,
             "fps": 30,
         }
@@ -704,6 +707,17 @@ def test_assert_opts_accepts_scalar_and_sequence_marker_sizes(markersize):
         ({"rownames": "abc"}, "rownames should be a list"),
         ({"jpgquality": "high"}, "JPG quality should be a number"),
         ({"jpgquality": 101}, "JPG quality should be number between 0 and 100"),
+        ({"compresslevel": 6.5}, "PNG compress level should be an integer"),
+        ({"compresslevel": "fast"}, "PNG compress level should be an integer"),
+        ({"compresslevel": True}, "PNG compress level should be an integer"),
+        (
+            {"compresslevel": 10},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
+        (
+            {"compresslevel": -1},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
         ({"opacity": "half"}, "opacity should be a number"),
         ({"opacity": 1.5}, "opacity should be a number between 0 and 1"),
         ({"fps": "fast"}, "fps should be a number"),
@@ -721,6 +735,8 @@ def test_assert_opts_rejects_bad_input(opts, message):
     [
         {"jpgquality": 100},
         {"jpgquality": 0},
+        {"compresslevel": 0},
+        {"compresslevel": 9},
         {"opacity": 0},
         {"opacity": 1},
         {"fps": 1},
@@ -730,7 +746,9 @@ def test_assert_opts_accepts_the_boundaries(opts):
     """The inclusive ends of each range are valid.
 
     ``opacity=0`` and ``jpgquality=0`` reach no assertion at all, since the
-    guards are ``if opts.get(...)`` and zero is falsy.
+    guards are ``if opts.get(...)`` and zero is falsy. ``compresslevel`` is
+    guarded on ``is not None`` instead, precisely because 0 is a level there
+    rather than an unset value, so its boundary really is validated.
     """
     _assert_opts(opts)
 
@@ -998,3 +1016,82 @@ def test_torch_types_is_still_an_extension_point(monkeypatch):
     monkeypatch.setattr(visdom, "torch_types", [_FakeTensor])
     array = np.arange(3)
     assert _to_numpy(_FakeTensor(array)) is array
+
+
+# ------------------------------------------------------------ _finite_range ----
+
+
+def _reference_finite_range(ar):
+    """What the call sites did before ``_finite_range`` existed."""
+    finite = ar[np.isfinite(ar)]
+    if finite.size > 0:
+        return float(finite.min()), float(finite.max())
+    return None
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [1.0, 2.0, 3.0],
+        [-5.0, 0.0, 5.0],
+        [0.0],
+        [np.nan, 3.0, 1.0],
+        [np.nan],
+        [np.nan, np.nan],
+        [np.inf, 2.0, 1.0],
+        [-np.inf, 2.0, 1.0],
+        [-np.inf, np.inf],
+        [-np.inf, np.inf, 4.0],
+        [np.inf, np.nan],
+        [-np.inf, np.nan],
+        [np.inf, np.nan, -np.inf],
+        [np.inf],
+        [-np.inf],
+        [],
+        [1, 2, 3],
+    ],
+)
+def test_finite_range_matches_the_mask_it_replaces(values):
+    """Every combination of NaN, infinities and emptiness agrees with the mask.
+
+    ``fmin``/``fmax`` skip NaN but *propagate* infinities, which is the one
+    case the fast path cannot answer on its own -- so the interesting rows here
+    are the ones mixing an infinity with a finite value, and the ones holding
+    nothing finite at all.
+    """
+    ar = np.asarray(values, dtype=np.float64)
+    assert _finite_range(ar) == _reference_finite_range(ar)
+
+
+def test_finite_range_reads_a_multidimensional_array_whole():
+    """The reduction is over every axis, as the mask was."""
+    ar = np.arange(24, dtype=np.float64).reshape(2, 3, 4)
+    assert _finite_range(ar) == (0.0, 23.0)
+
+
+def test_finite_range_handles_an_integer_array():
+    """``histogram`` may be handed ints, which have no NaN to skip."""
+    assert _finite_range(np.array([3, -1, 7])) == (-1.0, 7.0)
+
+
+def test_finite_range_returns_floats_not_numpy_scalars():
+    """The call sites compare against Python floats and put them in payloads."""
+    low, high = _finite_range(np.array([1.5, 2.5], dtype=np.float32))
+    assert type(low) is float and type(high) is float
+
+
+def test_finite_range_builds_no_mask_without_an_infinity():
+    """The whole point is that the common case allocates nothing.
+
+    The mask is what the helper exists to avoid -- ``np.isfinite`` followed by
+    a fancy index builds a compacted copy of every finite element. It stays
+    reachable for arrays holding an infinity, which the reduction cannot answer
+    on its own, so the assertion is that an array without one never reaches it.
+    """
+    with patch.object(np, "isfinite", side_effect=AssertionError("built a mask")):
+        assert _finite_range(np.array([1.0, np.nan, 3.0])) == (1.0, 3.0)
+
+
+def test_finite_range_falls_back_to_the_mask_for_an_infinity():
+    """The slow path is the only way to get the finite extremes past an inf."""
+    assert _finite_range(np.array([-np.inf, 1.0, 4.0, np.inf])) == (1.0, 4.0)
