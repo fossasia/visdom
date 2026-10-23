@@ -1300,8 +1300,6 @@ class CompareHandler(BaseHandler):
                 return
 
 
-
-
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
