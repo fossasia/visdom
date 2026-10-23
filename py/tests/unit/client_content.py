@@ -438,6 +438,24 @@ def test_learning_curve_append_to_an_existing_window_sends_no_defaults(
     assert "title" not in msg["opts"]
 
 
+def test_learning_curve_append_without_preflight_sends_defaults_to_create_only(
+    offline_client,
+):
+    """The server may create the window from this append; only then are they used."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0]}, step=[1], win="w1", update="append", opts={"xlabel": "epoch"}
+        )
+
+    (msg,) = sends_to(send, "update")
+    assert not {"title", "ylabel", "_create_defaults"} & set(msg["opts"])
+    assert msg["layout"] == {}
+    assert msg["layout_create"]["title"] == {"text": "Learning Curve"}
+    assert msg["layout_create"]["xaxis"]["title"] == {"text": "epoch"}
+    assert msg["layout_create"]["yaxis"]["title"] == {"text": "metric"}
+
+
 def test_learning_curve_update_sends_opts_the_caller_passed(offline_client):
     with patch.object(offline_client, "_send", return_value="w1") as send:
         offline_client.learning_curve(

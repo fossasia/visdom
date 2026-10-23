@@ -663,7 +663,14 @@ def create_args_for_append(args):
     layout = args.get("layout")
     if not layout:
         layout = args.get("layout_create")
-    return dict(args, layout=layout if isinstance(layout, dict) else {})
+    created = dict(args, layout=layout if isinstance(layout, dict) else {})
+    # The pane title comes from opts; fall back to the title being laid out.
+    title = created["layout"].get("title")
+    title = title.get("text") if isinstance(title, dict) else title
+    opts = args.get("opts") if isinstance(args.get("opts"), dict) else {}
+    if title and not opts.get("title"):
+        created["opts"] = dict(opts, title=title)
+    return created
 
 
 def window(args):
