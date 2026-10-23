@@ -234,10 +234,7 @@ class TestOptunaIntermediateValues(unittest.TestCase):
         warning_callback = OptunaCallback(warning_viz, dashboard_env="optuna_quadratic")
         with self.assertWarnsRegex(RuntimeWarning, "failed to log trial 0: offline"):
             warning_callback(study, trial)
-        # The created experiment is closed as failed rather than left running.
-        warning_viz.finish_experiment.assert_called_once_with(
-            status="failed", env="optuna_quadratic_trial_000000"
-        )
+        warning_viz.finish_experiment.assert_not_called()
         self.assertEqual(warning_callback._trial_envs, [])
 
         raising_viz = recording_viz()
@@ -322,6 +319,26 @@ class TestOptunaRejectedWrites(unittest.TestCase):
         viz.finish_experiment.assert_called_once_with(
             status="failed", env="optuna_quadratic_trial_000000"
         )
+
+    @staticmethod
+    def _unreachable_metric_write(viz):
+        viz.log_metrics.return_value = False
+
+    @staticmethod
+    def _metric_write_raises(viz):
+        viz.log_metrics.side_effect = ConnectionError("network down")
+
+    def test_a_transient_metric_failure_leaves_the_trial_open(self):
+        """A network error isn't final, so the trial isn't closed as failed."""
+        for break_it in (self._unreachable_metric_write, self._metric_write_raises):
+            viz = recording_viz()
+            break_it(viz)
+            trial = make_trial()
+            callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+            with self.assertWarns(RuntimeWarning):
+                callback(make_study([trial]), trial)
+            viz.finish_experiment.assert_not_called()
+            self.assertEqual(callback._trial_envs, [])
 
     def test_a_rejected_finish_is_not_sent_again(self):
         viz = recording_viz()

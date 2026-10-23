@@ -40,6 +40,10 @@ _OPTUNA_TAG_NAMES = {
 }
 
 
+class _WriteRejected(RuntimeError):
+    """The server answered a trial write with an error."""
+
+
 class OptunaCallback:
     """Log completed Optuna trials and optionally maintain a study dashboard.
 
@@ -603,9 +607,14 @@ class OptunaCallback:
         """
         if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
             return
+        if reply is None or reply is False:
+            raise RuntimeError(
+                "visdom did not record it in env {!r}: the server could not be "
+                "reached".format(env)
+            )
         # Trial envs come from dashboard_env when it is set, else from study_name.
         rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
-        raise RuntimeError(
+        raise _WriteRejected(
             "visdom did not record it in env {!r}. If an earlier run already "
             "finished there, use a new {} or delete the old trial envs".format(
                 env, rename
@@ -646,8 +655,9 @@ class OptunaCallback:
                 self.viz.finish_experiment(status=payload["status"], env=env), env
             )
         except Exception as error:
-            if unfinished:
-                # Don't leave a half-written trial looking like it's still running.
+            if unfinished and isinstance(error, _WriteRejected):
+                # Only a refused write is final; after a network error the
+                # trial is left as it is so it can still be logged.
                 try:
                     self.viz.finish_experiment(status="failed", env=env)
                 except Exception:
