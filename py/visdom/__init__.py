@@ -563,22 +563,20 @@ except (ImportError, AttributeError):
 
 
 def _pil_to_chw(img, batch=False):
-    """A PIL image as visdom's CxHxW (or HxW) array; PIL is always channels last."""
+    """A PIL image as a CxHxW (or HxW) array."""
     if img.mode == "F" or img.mode == "I" or img.mode.startswith("I;"):
-        # Float and 16/32-bit integer pixels keep their values as floats, so
-        # image() can scale them (opts.normalize) instead of clipping to 255.
+        # Keep float and 16/32-bit values so image() can scale them.
         arr = np.asarray(img, dtype=np.float64)
         return arr[None] if batch else arr
     if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
-        # Alpha comes from an alpha mode, a transparency key or an RGBA
-        # palette. Band names can't be used: LAB's "A" is a colour band.
+        # Read alpha from the mode, not band names: LAB has an "A" colour band.
         alpha = (
             img.mode in ("RGBA", "LA", "PA", "RGBa", "La")
             or "transparency" in img.info
             or (img.mode == "P" and getattr(img.palette, "mode", "") == "RGBA")
         )
         if img.mode == "La":
-            img = img.convert("LA")  # Pillow can't turn La into RGBA directly
+            img = img.convert("LA")  # Pillow can't convert La to RGBA directly
         img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
     arr = np.asarray(img)
     if arr.ndim == 2:
@@ -586,17 +584,33 @@ def _pil_to_chw(img, batch=False):
     return arr.transpose(2, 0, 1)
 
 
-def _float_tile_to_bytes(x):
-    """A float tile in 0..255 by image()'s float rules, so tiles share a range."""
-    finite = x[np.isfinite(x)]
-    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0, 0)
-    if lo >= -1e-5 and hi <= 1.0 + 1e-5:
+def _tile_to_bytes(x):
+    """A tile in 0..255, scaled rather than clipped when it doesn't fit."""
+    if x.dtype == np.uint8:
+        return x
+    if x.dtype == bool:
+        return x.astype(np.uint8) * 255
+    is_float = np.issubdtype(x.dtype, np.floating)
+    finite = x[np.isfinite(x)] if is_float else x
+    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
+    x = x.astype(np.float64)
+    if is_float and lo >= -1e-5 and hi <= 1 + 1e-5:
         x = x * 255.0
-    elif lo >= -1.0 - 1e-5 and hi <= 1.0 + 1e-5:
+    elif is_float and lo >= -1 - 1e-5 and hi <= 1 + 1e-5:
         x = (x + 1.0) / 2.0 * 255.0
-    return np.uint8(
-        np.clip(np.nan_to_num(x, nan=0.0, posinf=255.0, neginf=0.0), 0, 255)
-    )
+    elif lo < 0 or hi > 255:
+        x = (x - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(x)
+    x = np.nan_to_num(x, nan=0.0, posinf=255.0, neginf=0.0)
+    return np.uint8(np.clip(x, 0, 255))
+
+
+def _match_channels(tile, channels):
+    """Pad a byte tile to ``channels``: gray to RGB, then an opaque alpha."""
+    if tile.shape[0] == 1 and channels > 1:
+        tile = np.repeat(tile, 3, axis=0)
+    if tile.shape[0] == 3 and channels == 4:
+        tile = np.concatenate([tile, np.full_like(tile[:1], 255)])
+    return tile
 
 
 def _list_image_to_chw(x):
@@ -608,17 +622,13 @@ def _list_image_to_chw(x):
 
 
 def _stack_image_list(items):
-    """Stack an image list that holds PIL images.
-
-    When 8-bit and float tiles are mixed, each float tile is brought to 0..255
-    first; otherwise a [0, 1] tile is read as 0..255 next to the 8-bit ones
-    and looks black. All-float lists keep one scale, so opts.normalize works.
-    """
+    """Stack a list holding PIL images, giving mixed tiles one range and shape."""
     tiles = [_list_image_to_chw(x) for x in items]
     floats = [np.issubdtype(t.dtype, np.floating) for t in tiles]
-    if any(floats) and not all(floats):
-        tiles = [_float_tile_to_bytes(t) if f else t for t, f in zip(tiles, floats)]
-    return np.stack(tiles)
+    channels = max(t.shape[0] for t in tiles)
+    if all(floats) and all(t.shape[0] == channels for t in tiles):
+        return np.stack(tiles)  # one scale, so opts.normalize spans the grid
+    return np.stack([_match_channels(_tile_to_bytes(t), channels) for t in tiles])
 
 
 def _to_numpy(a):

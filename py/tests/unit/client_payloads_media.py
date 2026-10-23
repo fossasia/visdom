@@ -340,6 +340,68 @@ def test_images_normalizes_a_list_of_16_bit_pngs_together(capture_send, tmp_path
     np.testing.assert_array_equal(shown[:, :9], shown[:, 9:])
 
 
+def test_images_scales_a_16_bit_tile_next_to_an_8_bit_one(capture_send, tmp_path):
+    """The 16-bit tile is scaled to fit, not clipped to white."""
+    path = tmp_path / "depth.png"
+    depth = np.linspace(500, 60000, 54).reshape(6, 9).astype(np.uint16)
+    Image.fromarray(depth).save(path)
+    rgb = Image.fromarray(np.full((6, 9, 3), 120, np.uint8))
+    shown = decode(
+        capture_send(lambda v: v.images([rgb, Image.open(path)], padding=0))
+    )[1]
+    assert (shown[:, :9] == 120).all()
+    tile = shown[:, 9:]
+    assert (tile[..., 0] == tile[..., 1]).all() and (tile[..., 1] == tile[..., 2]).all()
+    assert tile.min() == 0 and tile.max() == 255
+    assert (np.diff(tile[..., 0].ravel().astype(int)) >= 0).all()
+
+
+def test_images_scales_a_float_tile_that_does_not_fit_bytes(capture_send):
+    pil = Image.fromarray(np.full((6, 9, 3), 50, np.uint8))
+    tile = np.linspace(0, 1000, 162, dtype=np.float32).reshape(3, 6, 9)
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    values = shown[:, 9:]
+    assert values.min() == 0 and values.max() == 255
+    assert (values == 255).sum() == 1  # clipping would saturate most of it
+
+
+@pytest.mark.parametrize(
+    "tile, expected",
+    [
+        (np.full((3, 6, 9), 90, np.int64), 90),
+        (np.full((3, 6, 9), True), 255),
+    ],
+    ids=["int_in_byte_range", "bool_mask"],
+)
+def test_images_keeps_byte_valued_tiles_next_to_pil(capture_send, tile, expected):
+    pil = Image.fromarray(np.full((6, 9, 3), 30, np.uint8))
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert (shown[:, :9] == 30).all() and (shown[:, 9:] == expected).all()
+
+
+def test_images_scales_an_int_tile_that_does_not_fit_bytes(capture_send):
+    pil = Image.fromarray(np.full((6, 9, 3), 30, np.uint8))
+    tile = np.arange(162, dtype=np.int64).reshape(3, 6, 9) * 10
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert shown[:, 9:].min() == 0 and (shown[:, 9:] == 255).sum() == 1
+
+
+def test_images_gives_an_rgb_tile_opaque_alpha_next_to_rgba(capture_send):
+    rgb = Image.fromarray(np.full((6, 9, 3), 80, np.uint8))
+    rgba = Image.fromarray(np.full((6, 9, 4), 160, np.uint8), "RGBA")
+    shown = decode(capture_send(lambda v: v.images([rgb, rgba], padding=0)))[1]
+    assert shown.shape == (6, 18, 4)
+    assert (shown[:, :9, :3] == 80).all() and (shown[:, :9, 3] == 255).all()
+    assert (shown[:, 9:] == 160).all()
+
+
+def test_images_shows_a_grayscale_pil_tile_next_to_rgb(capture_send):
+    gray = Image.fromarray(np.full((6, 9), 70, np.uint8))
+    rgb = Image.fromarray(np.full((6, 9, 3), 200, np.uint8))
+    shown = decode(capture_send(lambda v: v.images([gray, rgb], padding=0)))[1]
+    assert (shown[:, :9] == 70).all() and (shown[:, 9:] == 200).all()
+
+
 def test_images_accepts_a_pil_image_next_to_a_torch_tensor(capture_send):
     torch = pytest.importorskip("torch")
     rng = np.random.RandomState(0)
