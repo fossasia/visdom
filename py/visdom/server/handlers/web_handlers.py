@@ -1419,7 +1419,7 @@ class IndexHandler(BaseHandler):
 
         try:
             username_bytes = username.encode("utf-8")
-            raw_password.encode("utf-8")
+            password_bytes = raw_password.encode("utf-8")
         except UnicodeEncodeError as exc:
             raise tornado.web.HTTPError(
                 400, reason="'username' and 'password' must be valid UTF-8 strings"
@@ -1427,7 +1427,7 @@ class IndexHandler(BaseHandler):
 
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
-        password = await hash_password_off_loop(raw_password, salt)
+        password = await hash_password_off_loop(password_bytes, salt)
 
         # Constant-time comparison: `==` on the derived key returns as soon as
         # two characters differ, so response timing tells an attacker how much
