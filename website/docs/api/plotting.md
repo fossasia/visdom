@@ -268,10 +268,15 @@ vis.boxplot(X, win=None, env=None, opts=None)
 ```
 
 This function draws boxplots. It takes as input an `N` or an `NxM` tensor `X`.
-Each column is a separate boxplot, including when `X` contains only one row.
+Each column of a multi-row matrix is a separate boxplot. A single-row matrix
+keeps the legacy behavior of one box containing all its observations, unless
+`opts.legend` explicitly labels each column as a separate series.
 
 ```python
 import numpy as np
+
+# A single-row matrix still produces one box with three observations:
+vis.boxplot(X=np.array([[1.0, 2.0, 3.0]]))
 
 vis.boxplot(
     X=np.random.randn(100, 3),
