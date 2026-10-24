@@ -254,6 +254,27 @@ def test_stem_is_sent_as_a_line_mode_scatter(capture_send):
     assert sent["payload"]["opts"]["mode"] == "lines"
 
 
+def test_stem_handles_single_timestamp_multi_series_matrix(capture_send):
+    """A (1, M) matrix specifies 1 timestamp across M series and must not collapse to (M, 1)."""
+    sent = capture_send(
+        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([100.0]))
+    )
+    assert len(sent["payload"]["data"]) == 2
+    traces = sent["payload"]["data"]
+    assert traces[0]["name"] == "1"
+    assert traces[1]["name"] == "2"
+    assert segments(traces[0]["x"]) == [[100.0, 100.0]]
+    assert segments(traces[1]["x"]) == [[100.0, 100.0]]
+    assert segments(traces[0]["y"]) == [[0.0, 10.0]]
+    assert segments(traces[1]["y"]) == [[0.0, 20.0]]
+
+
+def test_stem_does_not_mutate_caller_opts(capture_send):
+    opts = {"title": "Custom Stem Plot"}
+    capture_send(lambda v: v.stem(X=np.array([1.0, 2.0]), opts=opts))
+    assert "mode" not in opts
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
