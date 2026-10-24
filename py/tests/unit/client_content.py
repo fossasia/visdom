@@ -804,6 +804,91 @@ def test_experiment_methods_reject_malformed_input(offline_client, call):
         call(offline_client)
 
 
+def test_log_metrics_accepts_torch_tensors(offline_client):
+    """A loss tensor is what a PyTorch loop has at hand; send it as a number."""
+    torch = pytest.importorskip("torch")
+    weight = torch.ones(2, requires_grad=True)
+    loss = (weight * 0.25).sum()
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {
+                "loss": loss,
+                "correct": torch.tensor(7),
+                "lr": torch.tensor(0.5, dtype=torch.bfloat16),
+            },
+            step=torch.tensor(3),
+        )
+    assert msg["metrics"] == {"loss": 0.5, "correct": 7, "lr": 0.5}
+    assert type(msg["metrics"]["correct"]) is int
+    assert msg["step"] == 3 and type(msg["step"]) is int
+    json.dumps(msg)
+
+
+def test_log_metrics_accepts_numpy_values(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"acc": np.array(0.75), "top1": np.array([0.5]), "n": np.int64(4)},
+            step=np.int64(2),
+        )
+    assert msg["metrics"] == {"acc": 0.75, "top1": 0.5, "n": 4}
+    assert msg["step"] == 2
+    json.dumps(msg)
+
+
+def test_log_metrics_sends_a_longdouble_as_a_float(offline_client):
+    """np.longdouble(...).item() is still a numpy scalar."""
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"loss": np.longdouble(0.5), "acc": np.array([0.25], dtype=np.longdouble)}
+        )
+    assert msg["metrics"] == {"loss": 0.5, "acc": 0.25}
+    assert all(type(v) is float for v in msg["metrics"].values())
+    json.dumps(msg)
+
+
+def test_experiment_accepts_tensor_params(offline_client):
+    torch = pytest.importorskip("torch")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(
+            params={"lr": torch.tensor(0.25), "seed": np.int64(1), "opt": "adam"}
+        )
+    assert msg["params"] == {"lr": 0.25, "seed": 1, "opt": "adam"}
+    json.dumps(msg)
+
+
+def test_experiment_accepts_tensor_and_numpy_tags(offline_client):
+    """Tags get the same scalar conversion as params."""
+    torch = pytest.importorskip("torch")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(
+            tags={
+                "seed": torch.tensor(3),
+                "lr": np.float32(0.5),
+                "epochs": np.array(10),
+                "ds": "mnist",
+            }
+        )
+    assert msg["tags"] == {"seed": 3, "lr": 0.5, "epochs": 10, "ds": "mnist"}
+    assert type(msg["tags"]["seed"]) is int and type(msg["tags"]["lr"]) is float
+    json.dumps(msg)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.log_metrics({"loss": np.array([0.1, 0.2])}),
+        lambda v: v.log_metrics({"loss": 0.1}, step=np.arange(3)),
+        lambda v: v.experiment(params={"lr": np.zeros((2, 2))}),
+        lambda v: v.experiment(tags={"seed": np.arange(3)}),
+    ],
+    ids=["metric", "step", "param", "tag"],
+)
+def test_experiment_methods_reject_multi_value_arrays(offline_client, call):
+    """Several values are not one observation; say so instead of a JSON error."""
+    with pytest.raises(TypeError, match="must be a single value"):
+        call(offline_client)
+
+
 def test_experiment_decodes_a_json_reply(offline_client):
     with replies(offline_client, json.dumps({"name": "r1", "status": "running"})):
         assert offline_client.experiment(name="r1") == {
