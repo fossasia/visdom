@@ -785,6 +785,82 @@ def test_boxplot_size_one_x_renders(capture_send):
     assert sent["payload"]["data"][0]["y"] == [10.5]
 
 
+def test_boxplot_single_row_matrix_one_box_per_column(capture_send):
+    """Regression test: an unconditional np.squeeze() used to collapse a
+    single-row (1, M) matrix to a 1D vector, merging its columns into one
+    box. A single-row matrix should still produce M one-observation boxes."""
+    X = np.array([[1.0, 2.0, 3.0]])
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert len(sent["payload"]["data"]) == 3
+    assert [trace["y"] for trace in sent["payload"]["data"]] == [[1.0], [2.0], [3.0]]
+
+
+def test_boxplot_single_row_matrix_with_legend(capture_send):
+    """A single-row matrix with a legend assigns one label per column,
+    rather than raising a length mismatch against a collapsed vector."""
+    X = np.array([[1.0, 2.0, 3.0]])
+    sent = capture_send(
+        lambda v: v.boxplot(X, opts={"legend": ["train", "validation", "test"]})
+    )
+    names = [trace["name"] for trace in sent["payload"]["data"]]
+    assert names == ["train", "validation", "test"]
+
+
+def test_boxplot_single_column_matrix_one_box(capture_send):
+    """A single-column (N, 1) matrix still produces one box with all N
+    observations."""
+    X = np.array([[1.0], [2.0], [3.0]])
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0, 3.0]
+
+
+def test_boxplot_scalar_x_one_box(capture_send):
+    """A bare scalar still means one series with a single observation."""
+    sent = capture_send(lambda v: v.boxplot(np.float64(42.0)))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [42.0]
+
+
+def test_boxplot_all_singleton_shape_one_box(capture_send):
+    """Regression: an all-singleton shape like (1, 1, 1) squeezes straight
+    to 0-D, which used to fail the ndim assert instead of rendering one box
+    with one observation."""
+    sent = capture_send(lambda v: v.boxplot(np.array([[[7.0]]])))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [7.0]
+
+
+@pytest.mark.parametrize("shape", [(1, 3, 1), (3, 1, 1), (1, 1, 3)])
+def test_boxplot_non_singleton_3d_shape_raises(offline_client, shape):
+    """Regression: a >2D shape with more than one real value used to be
+    silently squeezed down to whichever axis survived, so (1, 3, 1) and
+    (3, 1, 1) -- the same three numbers -- disagreed on box count purely
+    because of which axes happened to be 1. Only a shape with exactly one
+    value is unambiguous enough to collapse automatically; anything else
+    with more than two dimensions is rejected instead of guessed at.
+
+    Matching the specific message, not just AssertionError: offline_client
+    also raises AssertionError for any call that reaches the network, so a
+    bare ``pytest.raises(AssertionError)`` would pass even if the old,
+    buggy squeeze let the call through to ``_send``.
+    """
+    with pytest.raises(AssertionError, match="one or two-dimensional"):
+        offline_client.boxplot(np.array([1.0, 2.0, 3.0]).reshape(shape))
+
+
+def test_boxplot_masked_array_excludes_masked_observations(capture_send):
+    """Regression: np.asarray() used to silently drop a masked array's mask,
+    so masked-out observations were serialized as if they were real data."""
+    X = np.ma.MaskedArray(
+        np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]),
+        mask=[[False, True], [False, False], [True, False]],
+    )
+    sent = capture_send(lambda v: v.boxplot(X))
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0]
+    assert sent["payload"]["data"][1]["y"] == [20.0, 30.0]
+
+
 # ---------------------------------------------------------------------- surf ----
 
 
