@@ -88,7 +88,7 @@ Click the button again to close the property list.
 
 Click a window's title to open it full-screen. The detail view shows a larger version of the chart with a control rail: toggle markers, smooth noisy lines, show or hide individual metrics, switch the Y-axis to log scale, and download the visible data as CSV. A table below the chart lists the exact value at every logged step. Press `Esc`, click the close button, or use your browser's Back button to return to the grid.
 
-> **Note**: The full control rail and table are available for `line`/`scatter` plots; other pane types open in a simple full-screen view.
+> **Note**: The full-screen view is only offered on `line`/`scatter` plots; other pane types, such as bar charts and heatmaps, do not get the title button.
 </details>
 
 

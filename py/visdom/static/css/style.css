@@ -1070,8 +1070,18 @@ button[title="export latex"].active {
   white-space: nowrap;
 }
 
+.metric-detail-stats tbody tr {
+  height: 36px;
+}
+
 .metric-detail-stats td {
   padding: 8px;
   border-bottom: 1px solid var(--vis-border);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metric-detail-stats td.stats-spacer {
+  padding: 0;
+  border: 0;
 }

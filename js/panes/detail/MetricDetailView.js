@@ -47,6 +47,24 @@ const COLORWAY = [
 const isLineTrace = (t) =>
   t && (t.type === undefined || t.type === 'scatter' || t.type === 'scattergl');
 
+const isLineFrame = (frame) =>
+  !!frame &&
+  Array.isArray(frame.data) &&
+  frame.data.length > 0 &&
+  frame.data.every(isLineTrace);
+
+// the server stores every plotly chart as a plot pane, so the trace types
+// decide whether the line-chart controls make sense for it
+const canExpand = (pane) => {
+  if (pane.type === 'plot') return isLineFrame(pane.content);
+  return (
+    pane.type === 'plot_history' &&
+    Array.isArray(pane.content) &&
+    pane.content.length > 0 &&
+    pane.content.every(isLineFrame)
+  );
+};
+
 // a per-point marker.color array isn't a valid line.color, so only reuse a
 // scalar color and fall back to the palette otherwise
 const scalarColor = (c) => (typeof c === 'string' ? c : null);
@@ -124,6 +142,9 @@ const buildMatchedRows = (traces, idxs) => {
     });
   return rows;
 };
+
+const ROW_HEIGHT = 36;
+const OVERSCAN = 10;
 
 function MetricDetailView({ pane, envID, onClose }) {
   const isPlot = pane.type === 'plot' || pane.type === 'plot_history';
@@ -214,26 +235,35 @@ function MetricDetailView({ pane, envID, onClose }) {
 
   // ----- per-step stats table -----
   const [stepsDesc, setStepsDesc] = useState(false);
-  const stepRows = visibleIdx.length
-    ? (() => {
-        const rows = buildMatchedRows(allTraces, visibleIdx).map((row, r) => ({
-          key: r,
-          x: row.x,
-          cells: row.values.map(num),
-        }));
-        return stepsDesc ? rows.reverse() : rows;
-      })()
-    : [];
+  const [firstRow, setFirstRow] = useState(0);
+  const stepRows = useMemo(() => {
+    if (!visibleIdx.length) return [];
+    const rows = buildMatchedRows(allTraces, visibleIdx).map((row, r) => ({
+      key: r,
+      x: row.x,
+      cells: row.values.map(num),
+    }));
+    return stepsDesc ? rows.reverse() : rows;
+  }, [allTraces, visibleIdx.join(','), stepsDesc]);
+
+  // only the rows in view are rendered; the rest is spacer height
+  const rowsInView =
+    Math.ceil((window.innerHeight * 0.3) / ROW_HEIGHT) + 2 * OVERSCAN;
+  const startRow = Math.min(
+    Math.max(0, firstRow - OVERSCAN),
+    Math.max(0, stepRows.length - rowsInView)
+  );
+  const endRow = Math.min(stepRows.length, startRow + rowsInView);
 
   // ----- plot render -----
   useEffect(() => {
     if (!isPlot || !plotRef.current || typeof Plotly === 'undefined') return;
 
     const data = [];
-    visibleIdx.forEach((i, ordinal) => {
+    visibleIdx.forEach((i) => {
       const src = allTraces[i];
       const line = isLineTrace(src);
-      const color = traceColor(src, ordinal);
+      const color = traceColor(src, i);
       const base = { ...src };
       if (line) {
         base.mode = settings.points ? 'lines+markers' : 'lines';
@@ -294,8 +324,10 @@ function MetricDetailView({ pane, envID, onClose }) {
         type: settings.logY ? 'log' : 'linear',
         gridcolor: 'rgba(128,128,128,0.18)',
         zerolinecolor: 'rgba(128,128,128,0.35)',
-        autorange: true,
       },
+      // keeps zoom and dragged notes across live updates; a frame switch or
+      // log toggle changes the key, which resets the range
+      uirevision: `${pane.id}:${clampedFrame}:${settings.logY}`,
       datarevision: `${pane.version}:${clampedFrame}:${settings.smoothing}:${settings.logY}:${settings.points}:${settings.hidden.join(',')}`,
     };
 
@@ -313,7 +345,7 @@ function MetricDetailView({ pane, envID, onClose }) {
     isPlot,
     content,
     visibleIdx.join(','),
-    annotations.modebarButton,
+    !!annotations.modebarButton,
     sessionInfo,
     settings.points,
     settings.smoothing,
@@ -380,7 +412,7 @@ function MetricDetailView({ pane, envID, onClose }) {
         </button>
       </div>
 
-      {isPlot ? (
+      {isPlot && (
         <div className="metric-detail-body">
           <aside className="metric-detail-rail">
             <div className="rail-meta">
@@ -482,15 +514,15 @@ function MetricDetailView({ pane, envID, onClose }) {
             {annotations.editor}
           </div>
         </div>
-      ) : (
-        <div className="metric-detail-note">
-          The expanded metric view is available for line and scatter plots.
-          {` "${pane.type}" panes are not supported yet.`}
-        </div>
       )}
 
       {isPlot && stepRows.length > 0 && (
-        <div className="metric-detail-stats">
+        <div
+          className="metric-detail-stats"
+          onScroll={(e) =>
+            setFirstRow(Math.floor(e.currentTarget.scrollTop / ROW_HEIGHT))
+          }
+        >
           <table>
             <thead>
               <tr>
@@ -503,7 +535,15 @@ function MetricDetailView({ pane, envID, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {stepRows.map((row) => (
+              {startRow > 0 && (
+                <tr style={{ height: startRow * ROW_HEIGHT }}>
+                  <td
+                    className="stats-spacer"
+                    colSpan={visibleIdx.length + 1}
+                  />
+                </tr>
+              )}
+              {stepRows.slice(startRow, endRow).map((row) => (
                 <tr key={row.key}>
                   <td>{row.x}</td>
                   {row.cells.map((c, ci) => (
@@ -511,6 +551,14 @@ function MetricDetailView({ pane, envID, onClose }) {
                   ))}
                 </tr>
               ))}
+              {endRow < stepRows.length && (
+                <tr style={{ height: (stepRows.length - endRow) * ROW_HEIGHT }}>
+                  <td
+                    className="stats-spacer"
+                    colSpan={visibleIdx.length + 1}
+                  />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -519,4 +567,5 @@ function MetricDetailView({ pane, envID, onClose }) {
   );
 }
 
+export { canExpand };
 export default MetricDetailView;

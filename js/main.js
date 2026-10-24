@@ -35,7 +35,7 @@ import ApiProvider from './api/ApiProvider';
 import EventSystem from './EventSystem';
 import EnvModal from './modals/EnvModal';
 import ViewModal from './modals/ViewModal';
-import MetricDetailView from './panes/detail/MetricDetailView';
+import MetricDetailView, { canExpand } from './panes/detail/MetricDetailView';
 import TextPane from './panes/TextPane';
 import {
   DEFAULT_LAYOUT,
@@ -284,7 +284,8 @@ const App = () => {
   // only, not history, so this can't double up with the explicit
   // history.back() calls elsewhere
   useEffect(() => {
-    if (expandedPaneID != null && !storeData.panes[expandedPaneID]) {
+    const expanded = storeData.panes[expandedPaneID];
+    if (expandedPaneID != null && !(expanded && canExpand(expanded))) {
       setExpandedPaneID(null);
     }
   }, [expandedPaneID, storeData.panes]);
@@ -1115,11 +1116,7 @@ const App = () => {
               envID={selection.envIDs[0]}
               onClose={closePane}
               onFocus={focusPane}
-              onExpand={
-                pane.type === 'plot' || pane.type === 'plot_history'
-                  ? openDetail
-                  : undefined
-              }
+              onExpand={canExpand(pane) ? openDetail : undefined}
               isFocused={pane.id === focusedPaneID}
               defaultWidth={_width}
               defaultHeight={_height}
@@ -1372,13 +1369,15 @@ const App = () => {
           {panes}
         </GridLayout>
       </div>
-      {expandedPaneID && storeData.panes[expandedPaneID] && (
-        <MetricDetailView
-          pane={storeData.panes[expandedPaneID]}
-          envID={selection.envIDs[0]}
-          onClose={closeDetail}
-        />
-      )}
+      {expandedPaneID &&
+        storeData.panes[expandedPaneID] &&
+        canExpand(storeData.panes[expandedPaneID]) && (
+          <MetricDetailView
+            pane={storeData.panes[expandedPaneID]}
+            envID={selection.envIDs[0]}
+            onClose={closeDetail}
+          />
+        )}
     </div>
   );
 };
