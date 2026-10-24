@@ -644,7 +644,7 @@ def test_boxplot_2d_x_one_box_per_column(capture_send):
     [
         ((3,), None, [[1.0, None, 3.0]]),
         ((3, 1), None, [[1.0, None, 3.0]]),
-        ((1, 3), None, [[1.0, None, 3.0]]),
+        ((1, 3), None, [[1.0], [None], [3.0]]),
         ((1, 3), ["train", "validation", "test"], [[1.0], [None], [3.0]]),
     ],
 )
@@ -677,15 +677,13 @@ def test_boxplot_single_row_with_column_labels_keeps_separate_columns(
 
 
 @pytest.mark.parametrize("values", [[[1.0, 2.0, 3.0]], np.array([[1.0, 2.0, 3.0]])])
-@pytest.mark.parametrize("legend", [None, ["train"]])
-def test_boxplot_single_row_keeps_legacy_single_series(capture_send, values, legend):
-    """Previously valid single-row calls still produce one box of observations."""
-    opts = None if legend is None else {"legend": legend}
+@pytest.mark.parametrize("opts", [None, {}, {"legend": None}])
+def test_boxplot_single_row_without_labels_keeps_columns(capture_send, values, opts):
+    """Omitting labels does not change the matrix's series count."""
     sent = capture_send(lambda v: v.boxplot(values, opts=opts))
     traces = sent["payload"]["data"]
-    assert len(traces) == 1
-    assert traces[0]["y"] == [1.0, 2.0, 3.0]
-    assert traces[0]["name"] == (legend[0] if legend is not None else "column 0")
+    assert [trace["y"] for trace in traces] == [[1.0], [2.0], [3.0]]
+    assert [trace["name"] for trace in traces] == ["column 0", "column 1", "column 2"]
     np.testing.assert_array_equal(values, [[1.0, 2.0, 3.0]])
 
 
@@ -728,11 +726,15 @@ def test_boxplot_legend_sets_box_names(capture_send):
     assert names == ["train", "test"]
 
 
-def test_boxplot_legend_length_mismatch_raises(offline_client):
+@pytest.mark.parametrize("rows", [1, 2])
+@pytest.mark.parametrize("legend", [[], ["one"], ["one", "two"], list("abcd")])
+def test_boxplot_legend_length_mismatch_raises(offline_client, rows, legend):
     """legend length not matching the column count raises."""
-    X = np.array([[1.0, 2.0], [3.0, 4.0]])
-    with pytest.raises(AssertionError):
-        offline_client.boxplot(X, opts={"legend": ["only_one"]})
+    X = np.ones((rows, 3))
+    with pytest.raises(
+        AssertionError, match="number of legend labels must match number of columns"
+    ):
+        offline_client.boxplot(X, opts={"legend": legend})
 
 
 def test_boxplot_size_one_x_renders(capture_send):
