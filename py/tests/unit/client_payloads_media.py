@@ -744,12 +744,47 @@ def test_svg_passes_opts_through(capture_send):
     assert sent["payload"]["opts"]["title"] == "diagram"
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<svg\n   width='2'\n   height='2'>\n  <rect/>\n</svg>",
+        "<svg\twidth='2'><rect/></svg>",
+        "<svg><rect/></svg>",
+    ],
+    ids=["newline", "tab", "no-attributes"],
+)
+def test_svg_accepts_any_tag_separator(capture_send, markup):
+    """The tag name need not be followed by a single space to be found."""
+    sent = capture_send(lambda v: v.svg(svgstr=markup))
+    assert content(sent) == markup
+
+
+def test_svg_reads_an_inkscape_file(capture_send, tmp_path):
+    """Inkscape writes ``<svg`` alone on a line, one attribute per line after it."""
+    markup = (
+        "<svg\n"
+        '   width="100"\n'
+        '   height="100"\n'
+        '   xmlns="http://www.w3.org/2000/svg">\n'
+        '  <circle cx="50" cy="50" r="40" />\n'
+        "</svg>"
+    )
+    path = tmp_path / "drawing.svg"
+    path.write_text(
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        "<!-- Created with Inkscape (http://www.inkscape.org/) -->\n\n" + markup + "\n"
+    )
+    sent = capture_send(lambda v: v.svg(svgfile=str(path)))
+    assert content(sent) == markup
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
     [
         ({}, "should specify SVG string or filename"),
         (dict(svgstr="no markup here"), "could not parse SVG string"),
+        (dict(svgstr="<svgx a='1'><g/></svgx>"), "could not parse SVG string"),
     ],
 )
 def test_svg_rejects_malformed_input(offline_client, kwargs, message):
