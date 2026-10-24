@@ -256,12 +256,17 @@ class VisdomSklearnLogger:
             params=param_rows,
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        # best_estimator_ outlives a later refit=False fit, so check refit too.
+        best = getattr(est, "best_estimator_", None)
+        if getattr(est, "refit", False) and best is not None:
+            self._log_history(self._history_source(best), owner=est)
 
-    def _plot_history(self, est, curve, attr, xlabel, ylabel):
+    def _plot_history(self, est, curve, attr, xlabel, ylabel, owner=None):
+        """Plot ``est``'s ``curve``; ``owner`` (default ``est``) keys the pane."""
         self.viz.line(
             X=list(range(1, len(curve) + 1)),
             Y=curve,
-            win=self._win(est, attr),
+            win=self._win(est if owner is None else owner, attr),
             env=self.env,
             opts={
                 "title": "{} {}".format(type(est).__name__, attr),
@@ -270,20 +275,37 @@ class VisdomSklearnLogger:
             },
         )
 
-    def _log_history(self, est):
+    def _log_history(self, est, owner=None):
+        """Plot ``est``'s training history in panes keyed on ``owner``.
+
+        ``owner`` is the estimator the user fitted, a Pipeline or a search,
+        when ``est`` is the model inside it.
+        """
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
-            self._plot_history(est, loss_curve, "loss_curve_", "epoch", "loss")
+            self._plot_history(
+                est, loss_curve, "loss_curve_", "epoch", "loss", owner=owner
+            )
             val_scores = getattr(est, "validation_scores_", None)
             if val_scores is not None and len(val_scores) > 0:
                 self._plot_history(
-                    est, val_scores, "validation_scores_", "epoch", "val_score"
+                    est,
+                    val_scores,
+                    "validation_scores_",
+                    "epoch",
+                    "val_score",
+                    owner=owner,
                 )
 
         train_score = getattr(est, "train_score_", None)
         if train_score is not None and len(train_score) > 0:
             self._plot_history(
-                est, train_score, "train_score_", "iteration", "train_score"
+                est,
+                train_score,
+                "train_score_",
+                "iteration",
+                "train_score",
+                owner=owner,
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
@@ -331,6 +353,21 @@ class VisdomSklearnLogger:
             },
         )
 
+    @staticmethod
+    def _history_source(est):
+        """The estimator to read training history from for ``est``.
+
+        A Pipeline has no history of its own, so this is its final step, which
+        may not have any either (a ``"passthrough"`` step, a linear model).
+        Only the outer fit is logged, so without unwrapping, a model inside a
+        Pipeline never had its curve plotted.
+        """
+        from sklearn.pipeline import Pipeline
+
+        while isinstance(est, Pipeline):
+            est = est[-1]
+        return est
+
     def _log_plain(self, est, X, y, duration):
         summary_rows = [self._row("fit_time", "{:.2f}s".format(duration))]
 
@@ -370,4 +407,4 @@ class VisdomSklearnLogger:
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
         if residuals is not None:
             self._plot_residuals(est, residuals)
-        self._log_history(est)
+        self._log_history(self._history_source(est), owner=est)
