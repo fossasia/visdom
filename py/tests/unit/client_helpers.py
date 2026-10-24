@@ -36,6 +36,7 @@ import numpy as np
 import pytest
 
 import visdom
+from testutils import recording_array
 from visdom import (
     _assert_opts,
     _axisformat,
@@ -806,6 +807,98 @@ def test_decode_binary_arrays_yields_an_empty_list_for_junk_base64():
     with pytest.raises(binascii.Error):
         base64.b64decode("!!!", validate=True)
     assert _decode_binary_arrays({"dtype": "float64", "bdata": "!!!"}) == []
+
+
+# ----------------------------------------- vectorised per-point validators ----
+#
+# These three helpers used to walk their arguments one element at a time in
+# Python. The tests below pin the grouping and the expansion they produce, and
+# assert that none of them traverses an array element by element any more.
+
+
+def test_marker_color_check_keeps_each_label_s_points_in_input_order():
+    """Grouping by label must not reorder the points inside a label.
+
+    The browser pairs the Nth colour of a trace with the Nth point of that
+    trace, so a grouping that sorted the colours would silently recolour every
+    multi-label scatter.
+    """
+    result = _markerColorCheck(
+        np.array([0, 51, 102, 153, 204]),
+        _points(5),
+        np.array([2, 1, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == [
+        "rgba(0, 0, 255, %s)" % (51 / 255.0),
+        "rgba(0, 0, 255, %s)" % (153 / 255.0),
+    ]
+    assert result[2] == [
+        "rgba(0, 0, 255, 0.0)",
+        "rgba(0, 0, 255, %s)" % (102 / 255.0),
+        "rgba(0, 0, 255, %s)" % (204 / 255.0),
+    ]
+
+
+def test_marker_color_check_groups_a_long_single_label_run():
+    """One label holding every point is the worst case for the grouping.
+
+    Appending to the label's list is linear; rebuilding it per point, as the
+    helper used to, is quadratic -- 20k points took 0.8 s. Correctness is the
+    assertion here, the cost is covered by ``example/benchmarks``.
+    """
+    n = 2000
+    result = _markerColorCheck(
+        np.zeros(n, dtype=int), _points(n), np.ones(n, dtype=int), 1
+    )
+    assert list(result) == [1]
+    assert result[1] == ["rgba(0, 0, 255, 0.0)"] * n
+
+
+def test_marker_color_check_indexes_a_palette_by_label_not_by_position():
+    """A palette shorter than the point count is indexed by ``Y``.
+
+    Label ``k`` takes the ``k - 1``th palette entry for every one of its
+    points, which is what makes a palette distinguishable from a per-point
+    array of the same length.
+    """
+    result = _markerColorCheck(
+        np.array([[255, 0, 0], [0, 255, 0]]),
+        _points(4),
+        np.array([2, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == ["#ff0000"]
+    assert result[2] == ["#00ff00"] * 3
+
+
+def test_marker_color_check_groups_without_indexing_the_label_vector():
+    """The label vector is read once, not once per point per lookup.
+
+    The grouping used to index ``Y`` three times for every point -- once to
+    expand the palette and twice to key the result dict.
+    """
+    labels = recording_array([2, 1, 2], dtype=int)
+    result = _markerColorCheck(np.array([0, 255]), _points(), labels, 2)
+    assert sorted(result) == [1, 2]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_marker_size_check_expands_a_palette_without_indexing_point_by_point():
+    """The per-label expansion is one numpy gather, not a loop over ``Y``."""
+    labels = recording_array([2, 1, 2, 1], dtype=int)
+    result = _markerSizeCheck(np.array([5.0, 10.0]), _points(4), labels)
+    assert result.tolist() == [10.0, 5.0, 10.0, 5.0]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_assert_opts_validates_a_marker_size_array_without_iterating_it():
+    """``_markerSizeCheck`` already scans the array in numpy; this was a second,
+    slower scan in Python, paid by every plot call that passes per-point sizes.
+    """
+    sizes = recording_array([1.0, 2.0, 3.0])
+    _assert_opts({"markersize": sizes})
+    assert sizes.counts["iter"] == 0
 
 
 # -- tensor unwrapping, without importing torch ------------------------------
