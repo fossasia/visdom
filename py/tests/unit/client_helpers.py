@@ -30,8 +30,8 @@ import base64
 import binascii
 import builtins
 import sys
+import tracemalloc
 import types
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -1080,16 +1080,42 @@ def test_finite_range_returns_floats_not_numpy_scalars():
     assert type(low) is float and type(high) is float
 
 
-def test_finite_range_builds_no_mask_without_an_infinity():
+def _peak_bytes(call):
+    """Peak allocation during ``call``, numpy's own buffers included."""
+    call()  # first call pays for any one-off import or cache
+    tracemalloc.start()
+    try:
+        call()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        lambda ar: ar[np.isfinite(ar)],
+        lambda ar: ar[~np.isnan(ar)],
+    ],
+    ids=["isfinite", "isnan"],
+)
+def test_finite_range_allocates_nothing_without_an_infinity(spelling):
     """The whole point is that the common case allocates nothing.
 
-    The mask is what the helper exists to avoid -- ``np.isfinite`` followed by
-    a fancy index builds a compacted copy of every finite element. It stays
-    reachable for arrays holding an infinity, which the reduction cannot answer
-    on its own, so the assertion is that an array without one never reaches it.
+    The thing to protect is the *allocation*, not the absence of one named
+    function: asserting that ``np.isfinite`` goes uncalled would pin a single
+    spelling of the mask, and ``ar[~np.isnan(ar)]`` costs exactly as much while
+    slipping past it. So the budget is measured instead, and each mask spelling
+    is run against the same budget in the same test -- which is what proves the
+    budget is tight enough to catch one rather than merely generous.
     """
-    with patch.object(np, "isfinite", side_effect=AssertionError("built a mask")):
-        assert _finite_range(np.array([1.0, np.nan, 3.0])) == (1.0, 3.0)
+    ar = np.linspace(0.0, 1.0, 1 << 18)
+    ar[0] = np.nan
+    budget = ar.nbytes // 64  # a bare bool mask is eight times this, uncompacted
+
+    assert _finite_range(ar) == (ar[1], 1.0)
+    assert _peak_bytes(lambda: _finite_range(ar)) < budget
+    assert _peak_bytes(lambda: spelling(ar)) > budget
 
 
 def test_finite_range_falls_back_to_the_mask_for_an_infinity():

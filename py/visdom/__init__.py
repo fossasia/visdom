@@ -2782,15 +2782,19 @@ class Visdom(object):
         # The grid has always been float64, which `image()` then takes through
         # its float branch: eight bytes a pixel for what is usually a uint8
         # batch, plus that branch's full-size temporaries. Staying in uint8 is
-        # only *identical* while that branch does no scaling, and it scales
-        # whenever the whole grid fits in [0, 1] -- which includes the fill
-        # value of 1 itself. So a uint8 batch holding nothing above 1 keeps the
-        # float grid, and with it the stretch pinned by
-        # `test_images_padding_colour_follows_the_input_dtype`. Deciding that
-        # costs one C-speed pass over the batch and saves a copy of it at
-        # eight times the width.
+        # only *identical* while that branch does no scaling, and it has two
+        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
+        # which includes the fill value of 1 itself -- so a uint8 batch holding
+        # nothing above 1 keeps the float grid, and with it the stretch pinned
+        # by `test_images_padding_colour_follows_the_input_dtype`. And
+        # `opts.normalize` asks for the min-max stretch explicitly, which the
+        # branch is the only thing that implements: a uint8 grid never reaches
+        # it, so the option would silently do nothing. Deciding this costs one
+        # C-speed pass over the batch and saves a copy of it at eight times the
+        # width.
+        normalize = opts is not None and opts.get("normalize", False)
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1:
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
             grid = np.ones(grid_shape, dtype=np.uint8)
         else:
             grid = np.ones(grid_shape)

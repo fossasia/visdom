@@ -475,6 +475,36 @@ def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client
     assert _grid_dtype(offline_client, batch) == np.float64
 
 
+def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
+    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+
+    A uint8 grid never reaches that branch, so taking the dtype shortcut under
+    ``normalize=True`` would accept the option and silently do nothing. The
+    batch here is uint8 with a maximum above 1, which is exactly what the
+    shortcut is for -- so the float grid can only be coming from the option.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
+    assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
+
+
+def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
+    """And the stretch itself reaches the pixels, not just the grid dtype.
+
+    A batch spanning only part of [0, 255] is min-max scaled onto the whole
+    range, so the decoded grid has to reach both ends; without the option it
+    keeps the input's own, narrower range.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    batch[:, :, 0, 0] = 40
+    stretched = decode(
+        capture_send(lambda v: v.images(batch, opts={"normalize": True}))
+    )[1]
+    plain = decode(capture_send(lambda v: v.images(batch)))[1]
+    assert (stretched.min(), stretched.max()) == (0, 255)
+    assert (plain.min(), plain.max()) == (1, 200)
+
+
 def test_images_forwards_the_compress_level(capture_send):
     """``images`` hands its opts to ``image``, so the PNG dial reaches the grid."""
     batch = np.stack([_compressible(size=32)] * 4)
