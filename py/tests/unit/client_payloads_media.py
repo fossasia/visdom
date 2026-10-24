@@ -267,6 +267,264 @@ def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
 
 
 @pytest.mark.parametrize(
+    "mode, shown_as",
+    [
+        ("RGB", "RGB"),
+        ("L", "L"),
+        ("RGBA", "RGBA"),
+        ("P", "RGB"),
+        ("1", "L"),
+        ("LA", "RGBA"),
+    ],
+)
+def test_image_accepts_a_pil_image(capture_send, mode, shown_as):
+    """Image.open() gives a PIL image, which crashed on .dtype before."""
+    pixels = np.random.RandomState(0).randint(0, 256, (6, 9, 3), dtype=np.uint8)
+    img = Image.fromarray(pixels).convert(mode)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    np.testing.assert_array_equal(shown, np.asarray(img.convert(shown_as)))
+
+
+def test_images_accepts_a_list_of_pil_images(capture_send):
+    """A list of PIL images used to become NxHxWxC and was read as NxCxHxW."""
+    rng = np.random.RandomState(0)
+    tiles = [
+        Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+        for _ in range(2)
+    ]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    np.testing.assert_array_equal(shown[:, :9], np.asarray(tiles[0]))
+    np.testing.assert_array_equal(shown[:, 9:], np.asarray(tiles[1]))
+
+
+@pytest.mark.parametrize("order", ["pil_first", "array_first"])
+def test_images_accepts_pil_images_mixed_with_arrays(capture_send, order):
+    rng = np.random.RandomState(0)
+    pil = Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+    array = rng.randint(0, 256, (3, 6, 9), dtype=np.uint8)
+    tiles = [pil, array] if order == "pil_first" else [array, pil]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    as_hwc = [np.asarray(pil), array.transpose(1, 2, 0)]
+    if order == "array_first":
+        as_hwc.reverse()
+    np.testing.assert_array_equal(shown, np.concatenate(as_hwc, axis=1))
+
+
+@pytest.mark.parametrize(
+    "float_tile, shown_value",
+    [(0.5, 127), (-0.5, 63), (200.0, 200)],
+    ids=["unit_range", "minus_one_to_one", "byte_range"],
+)
+def test_images_scales_a_float_tile_next_to_a_pil_tile(
+    capture_send, float_tile, shown_value
+):
+    """Each tile keeps its own range; a [0, 1] tile isn't read as 0..255."""
+    pil = Image.fromarray(np.full((6, 9, 3), 200, np.uint8))
+    tile = np.full((3, 6, 9), float_tile, np.float32)
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert (shown[:, :9] == 200).all()
+    assert (shown[:, 9:] == shown_value).all()
+
+
+def test_images_normalizes_a_list_of_16_bit_pngs_together(capture_send, tmp_path):
+    """All-float tiles keep one scale, so opts.normalize spans the whole grid."""
+    path = tmp_path / "depth.png"
+    Image.fromarray(np.linspace(500, 60000, 54).reshape(6, 9).astype(np.uint16)).save(
+        path
+    )
+    tiles = [Image.open(path), Image.open(path)]
+    shown = decode(
+        capture_send(lambda v: v.images(tiles, padding=0, opts={"normalize": True}))
+    )[1]
+    assert shown.min() == 0 and shown.max() == 255
+    np.testing.assert_array_equal(shown[:, :9], shown[:, 9:])
+
+
+def test_images_scales_a_16_bit_tile_next_to_an_8_bit_one(capture_send, tmp_path):
+    """The 16-bit tile is scaled to fit, not clipped to white."""
+    path = tmp_path / "depth.png"
+    depth = np.linspace(500, 60000, 54).reshape(6, 9).astype(np.uint16)
+    Image.fromarray(depth).save(path)
+    rgb = Image.fromarray(np.full((6, 9, 3), 120, np.uint8))
+    shown = decode(
+        capture_send(lambda v: v.images([rgb, Image.open(path)], padding=0))
+    )[1]
+    assert (shown[:, :9] == 120).all()
+    tile = shown[:, 9:]
+    assert (tile[..., 0] == tile[..., 1]).all() and (tile[..., 1] == tile[..., 2]).all()
+    assert tile.min() == 0 and tile.max() == 255
+    assert (np.diff(tile[..., 0].ravel().astype(int)) >= 0).all()
+
+
+def test_images_scales_a_float_tile_that_does_not_fit_bytes(capture_send):
+    pil = Image.fromarray(np.full((6, 9, 3), 50, np.uint8))
+    tile = np.linspace(0, 1000, 162, dtype=np.float32).reshape(3, 6, 9)
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    values = shown[:, 9:]
+    assert values.min() == 0 and values.max() == 255
+    assert (values == 255).sum() == 1  # clipping would saturate most of it
+
+
+@pytest.mark.parametrize(
+    "tile, expected",
+    [
+        (np.full((3, 6, 9), 90, np.int64), 90),
+        (np.full((3, 6, 9), True), 255),
+    ],
+    ids=["int_in_byte_range", "bool_mask"],
+)
+def test_images_keeps_byte_valued_tiles_next_to_pil(capture_send, tile, expected):
+    pil = Image.fromarray(np.full((6, 9, 3), 30, np.uint8))
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert (shown[:, :9] == 30).all() and (shown[:, 9:] == expected).all()
+
+
+def test_images_scales_an_int_tile_that_does_not_fit_bytes(capture_send):
+    pil = Image.fromarray(np.full((6, 9, 3), 30, np.uint8))
+    tile = np.arange(162, dtype=np.int64).reshape(3, 6, 9) * 10
+    shown = decode(capture_send(lambda v: v.images([pil, tile], padding=0)))[1]
+    assert shown[:, 9:].min() == 0 and (shown[:, 9:] == 255).sum() == 1
+
+
+def test_images_gives_an_rgb_tile_opaque_alpha_next_to_rgba(capture_send):
+    rgb = Image.fromarray(np.full((6, 9, 3), 80, np.uint8))
+    rgba = Image.fromarray(np.full((6, 9, 4), 160, np.uint8), "RGBA")
+    shown = decode(capture_send(lambda v: v.images([rgb, rgba], padding=0)))[1]
+    assert shown.shape == (6, 18, 4)
+    assert (shown[:, :9, :3] == 80).all() and (shown[:, :9, 3] == 255).all()
+    assert (shown[:, 9:] == 160).all()
+
+
+def test_images_shows_a_grayscale_pil_tile_next_to_rgb(capture_send):
+    gray = Image.fromarray(np.full((6, 9), 70, np.uint8))
+    rgb = Image.fromarray(np.full((6, 9, 3), 200, np.uint8))
+    shown = decode(capture_send(lambda v: v.images([gray, rgb], padding=0)))[1]
+    assert (shown[:, :9] == 70).all() and (shown[:, 9:] == 200).all()
+
+
+def test_images_accepts_a_pil_image_next_to_a_torch_tensor(capture_send):
+    torch = pytest.importorskip("torch")
+    rng = np.random.RandomState(0)
+    pil = Image.fromarray(rng.randint(0, 256, (6, 9, 3), dtype=np.uint8))
+    tensor = torch.tensor(np.asarray(pil).transpose(2, 0, 1))
+    shown = decode(capture_send(lambda v: v.images([pil, tensor], padding=0)))[1]
+    np.testing.assert_array_equal(shown, np.concatenate([np.asarray(pil)] * 2, axis=1))
+
+
+def test_images_accepts_grayscale_pil_next_to_a_2d_array(capture_send):
+    rng = np.random.RandomState(0)
+    gray = rng.randint(0, 256, (6, 9), dtype=np.uint8)
+    shown = decode(
+        capture_send(lambda v: v.images([Image.fromarray(gray), gray], padding=0))
+    )[1]
+    expected = np.repeat(np.concatenate([gray, gray], axis=1)[:, :, None], 3, axis=2)
+    np.testing.assert_array_equal(shown, expected)
+
+
+def test_images_accepts_a_list_of_grayscale_pil_images(capture_send):
+    rng = np.random.RandomState(0)
+    gray = [rng.randint(0, 256, (6, 9), dtype=np.uint8) for _ in range(3)]
+    tiles = [Image.fromarray(g) for g in gray]
+    shown = decode(capture_send(lambda v: v.images(tiles, padding=0)))[1]
+    expected = np.repeat(np.concatenate(gray, axis=1)[:, :, None], 3, axis=2)
+    np.testing.assert_array_equal(shown, expected)
+
+
+def test_image_heatmap_accepts_a_pil_image(capture_send):
+    """The blend is the same as for the equivalent CxHxW array."""
+    rng = np.random.RandomState(0)
+    pixels = rng.randint(0, 256, (6, 9, 3), dtype=np.uint8)
+    heat = rng.rand(6, 9)
+    from_pil = capture_send(lambda v: v.image_heatmap(Image.fromarray(pixels), heat))
+    from_array = capture_send(
+        lambda v: v.image_heatmap(pixels.transpose(2, 0, 1), heat)
+    )
+    np.testing.assert_array_equal(decode(from_pil)[1], decode(from_array)[1])
+
+
+def test_image_keeps_a_float_pil_image_as_floats(capture_send):
+    """Mode F in [0, 1] is scaled like a float array, not truncated to black."""
+    values = np.random.RandomState(0).rand(6, 9).astype(np.float32)
+    shown = decode(capture_send(lambda v: v.image(Image.fromarray(values, mode="F"))))[
+        1
+    ]
+    expected = decode(capture_send(lambda v: v.image(values)))[1]
+    np.testing.assert_array_equal(shown, expected)
+    assert shown.max() > 200
+
+
+def _shown_normalized(capture_send, img):
+    """The decoded pixels for a PIL image and for its values as a float array."""
+    expected = np.asarray(img, dtype=float)
+    shown = capture_send(lambda v: v.image(img, opts={"normalize": True}))
+    reference = capture_send(lambda v: v.image(expected, opts={"normalize": True}))
+    return decode(shown)[1], decode(reference)[1]
+
+
+def test_image_keeps_a_16_bit_png_as_floats(capture_send, tmp_path):
+    """A 16-bit PNG (mode I;16) used to be clipped to plain white, even with normalize."""
+    depth = np.linspace(500, 60000, 6 * 9).reshape(6, 9).astype(np.uint16)
+    path = tmp_path / "depth.png"
+    Image.fromarray(depth).save(path)
+    img = Image.open(path)
+    assert img.mode == "I;16"
+    shown, expected = _shown_normalized(capture_send, img)
+    np.testing.assert_array_equal(shown, expected)
+    assert shown.min() == 0 and shown.max() == 255
+
+
+def test_image_keeps_a_32_bit_integer_pil_image_as_floats(capture_send):
+    """Mode I is built in memory: recent Pillow can't write it as PNG."""
+    img = Image.fromarray(np.linspace(0, 100000, 6 * 9).reshape(6, 9).astype(np.int32))
+    assert img.mode == "I"
+    shown, expected = _shown_normalized(capture_send, img)
+    np.testing.assert_array_equal(shown, expected)
+    assert shown.min() == 0 and shown.max() == 255
+
+
+def _half_transparent_rgba():
+    alpha = np.tile([0, 255], 27).reshape(6, 9).astype(np.uint8)
+    return Image.fromarray(
+        np.dstack([np.full((6, 9, 3), 200, np.uint8), alpha]), "RGBA"
+    )
+
+
+def test_image_keeps_the_alpha_of_an_rgba_palette(capture_send):
+    """A palette can carry alpha with no transparency key."""
+    img = Image.new("P", (9, 6))
+    img.putpalette([255, 0, 0, 0] + [0, 255, 0, 255] * 255, rawmode="RGBA")
+    img.putdata([0, 1] * 27)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    np.testing.assert_array_equal(shown, np.asarray(img.convert("RGBA")))
+    assert sorted(np.unique(shown[..., 3]).tolist()) == [0, 255]
+
+
+@pytest.mark.parametrize("mode", ["RGBa", "La", "PA"])
+def test_image_keeps_premultiplied_and_palette_alpha(capture_send, mode):
+    """RGBa and La name their alpha band 'a'; La can't be converted to RGBA directly."""
+    source = _half_transparent_rgba()
+    img = source.convert("LA").convert("La") if mode == "La" else source.convert(mode)
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    assert shown.shape == (6, 9, 4)
+    np.testing.assert_array_equal(shown[..., 3], np.asarray(source)[..., 3])
+
+
+def test_image_shows_a_lab_image_without_an_alpha_channel(capture_send):
+    """LAB's "a" band is a colour channel, not alpha."""
+    img = _half_transparent_rgba().convert("RGB").convert("LAB")
+    assert decode(capture_send(lambda v: v.image(img)))[1].shape == (6, 9, 3)
+
+
+@pytest.mark.parametrize("mode", ["1", "L", "RGB"])
+def test_image_keeps_a_colour_key_transparency(capture_send, mode):
+    img = Image.fromarray(np.zeros((6, 9, 3), np.uint8)).convert(mode)
+    img.info["transparency"] = (0, 0, 0) if mode == "RGB" else 0
+    shown = decode(capture_send(lambda v: v.image(img)))[1]
+    assert shown.shape == (6, 9, 4)
+    assert not shown[..., 3].any()
+
+
+@pytest.mark.parametrize(
     "img, message",
     [
         (
