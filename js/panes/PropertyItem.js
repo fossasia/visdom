@@ -12,6 +12,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 
 const LATEX_PATTERN = /\$[^$]+\$|\\\([^)]+\\\)/;
+const NUMBER_EDIT_PATTERN = /^-?[0-9]*([.][0-9]*)?$/;
+const NUMBER_SUBMIT_PATTERN = /^-?([0-9]+(\.[0-9]*)?|\.[0-9]+)$/;
 
 function EditablePropertyText(props) {
   const { value, validateHandler, submitHandler, blurStopPropagation } = props;
@@ -43,7 +45,9 @@ function EditablePropertyText(props) {
   };
   const onBlur = (event) => {
     setIsEdited(false);
-    if (submitHandler) submitHandler(actualValue);
+    if (submitHandler && submitHandler(actualValue) === false) {
+      setActualValue(value);
+    }
 
     // prevents the pane to drop focus
     // otherwise the sendPaneMessage-API does not work
@@ -142,8 +146,14 @@ function PropertyItem(props) {
       return (
         <EditablePropertyText
           value={value}
-          submitHandler={(value) => updateValue(propId, value)}
-          validateHandler={(value) => value.match(/^[0-9]*([.][0-9]*)?$/i)}
+          submitHandler={(val) => {
+            if (NUMBER_SUBMIT_PATTERN.test(val)) {
+              updateValue(propId, val);
+              return true;
+            }
+            return false;
+          }}
+          validateHandler={(val) => NUMBER_EDIT_PATTERN.test(val)}
           blurStopPropagation={blurStopPropagation}
         />
       );
