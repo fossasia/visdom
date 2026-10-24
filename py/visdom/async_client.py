@@ -923,6 +923,7 @@ _PROXIED = frozenset(
         "audio",
         "bar",
         "boxplot",
+        "calibration_curve",
         "check_connection",
         "close",
         "compare_experiments",

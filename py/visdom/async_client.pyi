@@ -481,6 +481,17 @@ class AsyncVisdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    async def calibration_curve(
+        self,
+        y_true: Tensor,
+        y_prob: Tensor,
+        n_bins: int = ...,
+        strategy: Text = ...,
+        pos_label: Union[int, float, str] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     async def confusion_matrix(
         self,
         y_true: Optional[Tensor] = ...,

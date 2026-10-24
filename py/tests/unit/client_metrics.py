@@ -35,6 +35,7 @@ from testutils import recording_array
 from visdom import (
     _average_precision,
     _binary_clf_curve,
+    _compute_calibration_curve,
     _coerce_curve_xy,
     _compute_confusion_matrix,
     _compute_pr_curve,
@@ -911,3 +912,114 @@ def test_confusion_matrix_input_errors(offline_client, kwargs, message):
     """Every ValueError guard on the public method."""
     with pytest.raises(ValueError, match=message):
         offline_client.confusion_matrix(**kwargs)
+
+
+@pytest.mark.parametrize("strategy", ["uniform", "quantile"])
+def test_calibration_curve_matches_sklearn(strategy):
+    """Bins, fractions and mean probabilities are the same as sklearn's."""
+    calibration = pytest.importorskip("sklearn.calibration")
+
+    for seed in range(10):
+        rng = np.random.RandomState(seed)
+        y_prob = rng.rand(rng.randint(20, 500))
+        y_true = (rng.rand(y_prob.size) < y_prob**1.5).astype(int)
+        for n_bins in (1, 3, 10):
+            expected_true, expected_pred = calibration.calibration_curve(
+                y_true, y_prob, n_bins=n_bins, strategy=strategy
+            )
+            prob_true, prob_pred, counts, _ = _compute_calibration_curve(
+                y_true, y_prob, n_bins=n_bins, strategy=strategy
+            )
+            np.testing.assert_allclose(prob_true, expected_true)
+            np.testing.assert_allclose(prob_pred, expected_pred)
+            assert counts.sum() == y_prob.size
+
+
+def test_calibration_curve_ece_by_hand():
+    """Bins [0.1, 0.3] and [0.6, 0.8, 0.9]: ECE = (2*0.3 + 3*|2/3-0.7667|) / 5."""
+    prob_true, prob_pred, counts, ece = _compute_calibration_curve(
+        [0, 1, 1, 1, 0], [0.1, 0.3, 0.6, 0.8, 0.9], n_bins=2
+    )
+    np.testing.assert_allclose(prob_true, [0.5, 2 / 3])
+    np.testing.assert_allclose(prob_pred, [0.2, 2.3 / 3])
+    assert counts.tolist() == [2, 3]
+    assert ece == pytest.approx((2 * 0.3 + 3 * abs(2 / 3 - 2.3 / 3)) / 5)
+
+
+def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
+    """Empty bins are dropped and pos_label picks the positive class."""
+    prob_true, prob_pred, counts, _ = _compute_calibration_curve(
+        ["b", "a", "a"], [0.05, 0.95, 0.92], n_bins=10, pos_label="a"
+    )
+    assert counts.tolist() == [1, 2]
+    np.testing.assert_allclose(prob_true, [0.0, 1.0])
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"y_true": [0, 1], "y_prob": [0.1]}, "y_true and y_prob should match"),
+        ({"y_true": [], "y_prob": []}, "should be non-empty"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 1.2]}, "probabilities in"),
+        ({"y_true": [0, 1], "y_prob": [0.1, float("nan")]}, "finite values"),
+        ({"y_true": [0, 1], "y_prob": np.array([0.1 + 0.5j, 0.2])}, "real values"),
+        ({"y_true": [0, 1, 2], "y_prob": [0.1, 0.2, 0.3]}, "binary labels only"),
+        ({"y_true": [2, 3], "y_prob": [0.1, 0.2]}, "pos_label=1 is not one of"),
+        ({"y_true": [[0, 1], [1, 0]], "y_prob": [[0.2, 0.8], [0.7, 0.3]]}, "1 dim"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "strategy": "x"}, "strategy"),
+    ],
+)
+def test_calibration_curve_input_errors(offline_client, kwargs, message):
+    """Bad input is refused before anything is sent."""
+    with pytest.raises(ValueError, match=message):
+        offline_client.calibration_curve(**kwargs)
+
+
+def test_calibration_curve_sends_curve_and_diagonal(capture_send):
+    """The model trace carries per-bin counts, the diagonal is dashed."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[0, 1, 1, 1, 0], y_prob=[0.1, 0.3, 0.6, 0.8, 0.9], n_bins=2
+        )
+    )
+    model, diagonal = sent["payload"]["data"]
+    assert model["mode"] == "lines+markers"
+    assert model["text"] == ["n=2", "n=3"]
+    assert diagonal["x"] == [0.0, 1.0] and diagonal["y"] == [0.0, 1.0]
+    assert diagonal["line"]["dash"] == "dash"
+    opts = sent["payload"]["opts"]
+    assert opts["legend"] == ["Model", "Perfectly calibrated"]
+    # (2 * |0.5 - 0.2| + 3 * |2/3 - 2.3/3|) / 5 = 0.18
+    assert opts["title"] == "Calibration Curve (ECE=0.1800)"
+    assert opts["xlabel"] == "Mean predicted probability"
+
+
+def test_calibration_curve_keeps_a_custom_title_and_legend(capture_send):
+    """User opts win over the defaults."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[0, 1],
+            y_prob=[0.2, 0.7],
+            opts={"title": "Calib", "legend": ["Net", "Ideal"]},
+        )
+    )
+    assert sent["payload"]["opts"]["title"] == "Calib"
+    assert [d["name"] for d in sent["payload"]["data"]] == ["Net", "Ideal"]
+
+
+def test_calibration_curve_accepts_a_single_column(capture_send):
+    """An (n, 1) column is one vector, unlike a one-hot (n, 2) matrix."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[[0], [1], [1]], y_prob=[[0.2], [0.7], [0.9]], n_bins=2
+        )
+    )
+    assert sent["payload"]["data"][0]["text"] == ["n=1", "n=2"]
+
+
+def test_calibration_curve_allows_a_single_class():
+    """A batch with no positives is still valid input."""
+    prob_true, _, _, _ = _compute_calibration_curve([0, 0], [0.2, 0.7])
+    assert prob_true.tolist() == [0.0, 0.0]
