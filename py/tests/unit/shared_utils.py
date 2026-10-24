@@ -19,6 +19,7 @@ Two of them are subtle enough to be worth pinning down explicitly:
   an autouse fixture for that; the paired tests below are what prove it works.
 """
 
+import copy
 import io
 import json
 import math
@@ -624,3 +625,216 @@ def test_math_isnan_would_raise_on_a_string():
     """Documents why _is_missing_value guards on type before calling isnan."""
     with pytest.raises(TypeError):
         math.isnan("cat")
+
+
+# -- copy_json_data ----------------------------------------------------------
+
+
+def _env_document():
+    """An env-shaped document holding every JSON type at several depths."""
+    return {
+        "jsons": {
+            "win_0": {
+                "id": "win_0",
+                "title": "loss",
+                "version": 3,
+                "inflate": True,
+                "width": None,
+                "content": {
+                    "data": [
+                        {
+                            "x": [0.0, 1.5, 2.0],
+                            "y": [1, 2, 3],
+                            "name": "train",
+                            "marker": {"color": ["#fff", "#000"], "size": 10},
+                        }
+                    ],
+                    "layout": {"title": {"text": "loss"}, "showlegend": False},
+                },
+            }
+        },
+        "reload": {"width": 1280, "height": None},
+    }
+
+
+def _containers(value, seen=None):
+    """Every dict and list reachable from ``value``, by identity."""
+    if seen is None:
+        seen = {}
+    if id(value) in seen:
+        return seen
+    if isinstance(value, dict):
+        seen[id(value)] = value
+        for key, item in value.items():
+            _containers(key, seen)
+            _containers(item, seen)
+    elif isinstance(value, (list, tuple)):
+        seen[id(value)] = value
+        for item in value:
+            _containers(item, seen)
+    return seen
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        _env_document(),
+        {},
+        [],
+        {"empty_dict": {}, "empty_list": [], "zero": 0, "false": False},
+        [[1, 2], [3, [4, {"five": 5}]]],
+        {"mixed": [1, "two", 3.0, None, True, {"four": [4]}]},
+        "a bare string",
+        3.5,
+        None,
+    ],
+    ids=[
+        "env",
+        "empty_dict",
+        "empty_list",
+        "empty_containers",
+        "nested_lists",
+        "mixed_list",
+        "bare_string",
+        "bare_float",
+        "bare_none",
+    ],
+)
+def test_copy_json_data_agrees_with_deepcopy(document):
+    """The contract: an outcome indistinguishable from ``copy.deepcopy``."""
+    assert shared_utils.copy_json_data(document) == copy.deepcopy(document)
+
+
+def test_copy_json_data_shares_no_container_with_its_source():
+    """What the copy is *for*: a worker can walk it while the loop writes."""
+    live = _env_document()
+
+    copied = shared_utils.copy_json_data(live)
+
+    assert copied == live
+    assert not set(_containers(copied)) & set(_containers(live))
+
+
+def test_copy_json_data_leaves_the_source_alone_when_the_copy_is_rewritten():
+    live = _env_document()
+    trace = live["jsons"]["win_0"]["content"]["data"][0]
+
+    copied = shared_utils.copy_json_data(live)
+    copied["jsons"]["win_0"]["content"]["data"][0]["x"].append(9.0)
+    copied["jsons"]["win_1"] = {"id": "win_1"}
+
+    assert trace["x"] == [0.0, 1.5, 2.0]
+    assert list(live["jsons"]) == ["win_0"]
+
+
+def test_copy_json_data_copies_a_list_of_scalars_as_a_new_list():
+    """The slice shortcut has to produce a list, not share the original."""
+    live = {"x": [1.0, 2.0, 3.0]}
+
+    copied = shared_utils.copy_json_data(live)
+    copied["x"].append(4.0)
+
+    assert live["x"] == [1.0, 2.0, 3.0]
+
+
+def test_copy_json_data_keeps_a_shared_reference_shared():
+    """Two panes built from one object stay one object, as under deepcopy."""
+    trace = {"x": [1, 2]}
+    live = {"first": trace, "second": trace}
+
+    copied = shared_utils.copy_json_data(live)
+
+    assert copied["first"] is copied["second"]
+    assert copied["first"] is not trace
+
+
+def test_copy_json_data_terminates_on_a_cycle():
+    """A self-referential document is a RecursionError without the memo."""
+    live = {"name": "root"}
+    live["self"] = live
+    live["also"] = [live]
+
+    copied = shared_utils.copy_json_data(live)
+
+    assert copied["self"] is copied
+    assert copied["also"][0] is copied
+    assert copied is not live
+
+
+def test_copy_json_data_does_not_share_a_mutable_inside_a_tuple():
+    """The trap the scalar check exists for.
+
+    A list holding a tuple holds something ``copy.deepcopy`` would copy, so
+    testing "no element is a dict or a list" and slicing would hand the copy
+    the source's own list -- reachable, mutable, and shared.
+    """
+    inner = [1, 2]
+    live = {"rows": [(inner,)]}
+
+    copied = shared_utils.copy_json_data(live)
+    copied["rows"][0][0].append(3)
+
+    assert inner == [1, 2]
+
+
+def test_copy_json_data_copies_a_value_json_cannot_represent():
+    """Anything not JSON falls back to deepcopy rather than being shared."""
+    live = {"array": np.array([1.0, 2.0])}
+
+    copied = shared_utils.copy_json_data(live)
+    copied["array"][0] = 99.0
+
+    assert live["array"][0] == 1.0
+
+
+def test_copy_json_data_copies_a_non_string_key():
+    """JSON keys are strings, but nothing here may assume the caller's are."""
+    inner = [1]
+    live = {(1, 2): inner}
+
+    copied = shared_utils.copy_json_data(live)
+    copied[(1, 2)].append(2)
+
+    assert inner == [1]
+
+
+def test_copy_json_data_keeps_bool_and_int_apart():
+    """``True`` is an ``int``; a copy that forgets writes ``1`` to disk."""
+    copied = shared_utils.copy_json_data({"flags": [True, 1, False, 0]})
+
+    assert [type(value) for value in copied["flags"]] == [bool, int, bool, int]
+
+
+def test_copy_json_data_does_not_rebuild_an_immutable_scalar():
+    """Strings and numbers are shared, which is what deepcopy does too."""
+    text = "a title long enough not to be interned by accident"
+    live = {"title": text, "points": [1.5]}
+
+    copied = shared_utils.copy_json_data(live)
+
+    assert copied["title"] is text
+    assert copied["points"][0] is live["points"][0]
+
+
+def test_copy_json_data_copies_a_scalar_subclass_rather_than_sharing_it():
+    """A ``str`` subclass is only as immutable as its instance state.
+
+    Sharing one would hand the copy an object whose attributes the live env
+    can still rewrite -- the very thing the copy exists to prevent -- so a
+    subclass takes the deepcopy fallback like any other non-JSON value, and
+    only the exact built-in scalar types are handed back as they are.
+    """
+
+    class Tagged(str):
+        pass
+
+    tagged = Tagged("loss")
+    tagged.history = [1]
+    live = {"title": tagged, "panes": [tagged]}
+
+    copied = shared_utils.copy_json_data(live)
+    copied["title"].history.append(2)
+
+    assert tagged.history == [1]
+    assert copied["title"] == "loss"
+    assert copied["panes"][0] is copied["title"]
