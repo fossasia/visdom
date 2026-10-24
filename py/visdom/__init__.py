@@ -4144,13 +4144,17 @@ class Visdom(object):
         """
         This function draws boxplots of the specified data. It takes as input
         an `N` or an `NxM` tensor `X` that specifies the `N` data values of
-        which to construct the `M` boxplots.
+        which to construct the `M` boxplots. Each matrix column remains a
+        separate series, including when `N` is one. Use a vector or an `Nx1`
+        matrix for a single series.
 
         The following plot-specific `opts` are currently supported:
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.atleast_1d(np.squeeze(X))
+        X = np.ma.asarray(X)
+        if X.ndim != 2:
+            X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
