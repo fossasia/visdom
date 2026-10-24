@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import asyncio
 import copy
 import getpass
 import hmac
@@ -1179,11 +1180,11 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
-            if self.readonly:
-                reject_readonly(self)
-                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
+                if self.readonly:
+                    reject_readonly(self)
+                    return
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
 
@@ -2401,4 +2402,46 @@ class RetireHandler(InternalHandler):
             self.set_status(400)
             self.write({"error": "invalid workspace id"})
             return
+        self.write(answer)
+
+
+class DropHandler(InternalHandler):
+    """Removes a whole workspace from this instance, files included.
+
+    Called by the gateway once a workspace's rows are gone for good: emptied
+    from the trash, or taken with a deleted account. Internal like the other
+    underscore endpoints: served on the internal port only, to a request signed
+    with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        drop = getattr(self._app, "drop_workspace", None)
+        if drop is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer, pending = drop(payload.get("workspace_id"))
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "workspace_id is not a workspace id"})
+            return
+
+        freed = await asyncio.wrap_future(pending)
+        answer["removed"] = freed is not None
+        answer["bytes"] = freed or 0
         self.write(answer)
