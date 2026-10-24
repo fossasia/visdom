@@ -143,7 +143,7 @@ function PropertyItem(props) {
         <EditablePropertyText
           value={value}
           submitHandler={(value) => updateValue(propId, value)}
-          validateHandler={(value) => value.match(/^[0-9]*([.][0-9]*)?$/i)}
+          validateHandler={(value) => value.match(/^-?[0-9]*([.][0-9]*)?$/)}
           blurStopPropagation={blurStopPropagation}
         />
       );
