@@ -13,6 +13,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import uuid
 from unittest import mock
 
 import pytest
@@ -76,13 +77,73 @@ class TestTheInternalPort(InternalPortCase):
         self.assertEqual(by_token.code, 200)
         self.assertEqual(self.signed_get("/_metrics").code, 200)
 
+    def signed_post(self, path, body, key):
+        raw = json.dumps(body).encode()
+        return self.fetch(
+            path,
+            method="POST",
+            body=raw,
+            headers=internal.signed_headers(key, "POST", path, raw),
+        )
+
+    def test_evicting_needs_the_admin_key(self):
+        body = {"workspace_slug": "alpha"}
+
+        self.assertEqual(self.signed_post("/_evict", body, "read-key").code, 401)
+        allowed = self.signed_post("/_evict", body, "admin-key")
+        self.assertEqual(allowed.code, 200)
+        self.assertEqual(
+            json.loads(allowed.body), {"workspace_slug": "alpha", "closed": 0}
+        )
+
+    def test_retiring_needs_the_admin_key(self):
+        body = {"workspace_id": "ws-a", "older_than_days": 7}
+
+        self.assertEqual(self.signed_post("/_retire", body, "read-key").code, 401)
+        allowed = self.signed_post("/_retire", body, "admin-key")
+        self.assertEqual(allowed.code, 200)
+        self.assertEqual(json.loads(allowed.body)["dry_run"], True)
+
+    def test_retiring_refuses_a_bad_request(self):
+        for body in [
+            {"older_than_days": 7},
+            {"workspace_id": "ws-a", "older_than_days": "soon"},
+            {"workspace_id": "ws-a", "older_than_days": 0},
+            {"workspace_id": "ws-a", "older_than_days": "nan"},
+            {"workspace_id": "ws-a", "older_than_days": "inf"},
+            {"workspace_id": "../outside", "older_than_days": 7},
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(
+                    self.signed_post("/_retire", body, "admin-key").code, 400
+                )
+
+    def test_dropping_needs_the_admin_key(self):
+        workspace_id = str(uuid.uuid4())
+        os.makedirs(os.path.join(self.env_path, "workspaces", workspace_id))
+        body = {"workspace_id": workspace_id}
+
+        self.assertEqual(self.signed_post("/_drop", body, "read-key").code, 401)
+        allowed = self.signed_post("/_drop", body, "admin-key")
+        self.assertEqual(allowed.code, 200)
+        self.assertTrue(json.loads(allowed.body)["removed"])
+        self.assertFalse(
+            os.path.exists(os.path.join(self.env_path, "workspaces", workspace_id))
+        )
+
+    def test_dropping_refuses_an_id_that_is_not_a_workspace(self):
+        self.assertEqual(
+            self.signed_post("/_drop", {"workspace_id": "../.."}, "admin-key").code,
+            400,
+        )
+
     def test_the_rest_of_visdom_is_not_on_this_port(self):
         self.assertEqual(self.fetch("/events", method="POST", body="{}").code, 404)
 
 
 class TestThePublicPort(KeysSetCase):
     def test_the_internal_endpoints_are_not_served(self):
-        for path in ["/_activity", "/_metrics"]:
+        for path in ["/_activity", "/_metrics", "/_evict", "/_retire", "/_drop"]:
             with self.subTest(path=path):
                 response = self.fetch(
                     path, headers=internal.signed_headers("read-key", "GET", path)

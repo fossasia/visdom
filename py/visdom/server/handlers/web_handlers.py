@@ -13,12 +13,14 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import asyncio
 import copy
 import getpass
 import hmac
 import json
 import jsonpatch
 import logging
+import math
 import os
 import uuid
 from collections import OrderedDict
@@ -1178,11 +1180,11 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
-            if self.readonly:
-                reject_readonly(self)
-                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
+                if self.readonly:
+                    reject_readonly(self)
+                    return
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
 
@@ -2181,7 +2183,19 @@ class HealthHandler(BaseHandler):
         self.write({"status": "ok"})
 
 
-class ActivityHandler(BaseHandler):
+class InternalHandler(BaseHandler):
+    scope = internal.READ
+
+    def allowed(self):
+        return internal.is_signed(self.request, self.scope)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
+
+class ActivityHandler(InternalHandler):
     """Reports who is connected to each workspace this instance currently holds.
 
     Only ever the instance's own share of them: the proxy hashes each workspace
@@ -2253,14 +2267,6 @@ class ActivityHandler(BaseHandler):
 
         return list(workspaces.values())
 
-    def allowed(self):
-        return internal.is_signed(self.request, internal.READ)
-
-    def prepare(self):
-        if not self.allowed():
-            self.set_status(401)
-            self.finish({"error": "This endpoint needs a signed request."})
-
     async def stored(self):
         if self._manager is None:
             return {}
@@ -2289,3 +2295,153 @@ class MetricsHandler(ActivityHandler):
         # accept a bare text/plain, but tools that inspect the header expect it.
         self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.write(metrics.render(samples))
+
+
+class EvictHandler(InternalHandler):
+    """Closes the sockets a workspace still has open on this instance.
+
+    The gateway calls this the moment a workspace is suspended or moved to the
+    trash. Without it the refusal only takes effect at the next resolve, and a
+    socket already open never resolves again, so a tab that was watching when
+    the workspace was switched off carries on watching.
+
+    Served on the internal port only, to a request signed with an admin key: it
+    acts on a workspace by name and nothing outside the deployment has any
+    business asking for that.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        slug = (payload.get("workspace_slug") or "").strip()
+        if not slug:
+            self.set_status(400)
+            self.write({"error": "workspace_slug is required"})
+            return
+
+        reason = (payload.get("reason") or "").strip() or None
+        evict = getattr(self._app, "evict_workspace", None)
+        if evict is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        closed = evict(slug, reason) if reason else evict(slug)
+        self.write({"workspace_slug": slug, "closed": closed})
+
+
+class RetireHandler(InternalHandler):
+    """Removes the environments a workspace's plan no longer keeps.
+
+    The gateway decides who is due and how far back their plan reaches, because
+    it is the one holding plans and workspaces. This end only knows how to find
+    a workspace's aged environments and remove them properly, which is why the
+    retention window arrives in the request rather than being configured here.
+
+    Internal, like the other underscore endpoints. It names a workspace and
+    deletes work inside it, so it is served on the internal port only, to a
+    request signed with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        workspace_id = (str(payload.get("workspace_id") or "")).strip()
+        if not workspace_id:
+            self.set_status(400)
+            self.write({"error": "workspace_id is required"})
+            return
+
+        older_than_days = payload.get("older_than_days")
+        try:
+            older_than_days = float(older_than_days)
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.write({"error": "older_than_days must be a number"})
+            return
+        if not math.isfinite(older_than_days) or older_than_days <= 0:
+            self.set_status(400)
+            self.write({"error": "older_than_days must be greater than zero"})
+            return
+
+        retire = getattr(self._app, "retire_workspace_off_loop", None)
+        if retire is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer = await retire(
+                workspace_id,
+                older_than_days,
+                dry_run=bool(payload.get("dry_run", True)),
+            )
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "invalid workspace id"})
+            return
+        self.write(answer)
+
+
+class DropHandler(InternalHandler):
+    """Removes a whole workspace from this instance, files included.
+
+    Called by the gateway once a workspace's rows are gone for good: emptied
+    from the trash, or taken with a deleted account. Internal like the other
+    underscore endpoints: served on the internal port only, to a request signed
+    with an admin key.
+    """
+
+    scope = internal.ADMIN
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        drop = getattr(self._app, "drop_workspace", None)
+        if drop is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer, pending = drop(payload.get("workspace_id"))
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "workspace_id is not a workspace id"})
+            return
+
+        freed = await asyncio.wrap_future(pending)
+        answer["removed"] = freed is not None
+        answer["bytes"] = freed or 0
+        self.write(answer)
