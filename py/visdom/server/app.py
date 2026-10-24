@@ -31,7 +31,7 @@ from visdom.utils.server_utils import (
 )
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
-from visdom.server.workspace_env_manager import WorkspaceEnvManager
+from visdom.server.workspace_env_manager import WorkspaceEnvManager, remove_directory
 from visdom.server.ownership import (
     OwnershipMonitor,
     WITHDRAWN_REASON,
@@ -57,6 +57,7 @@ from visdom.server.handlers.web_handlers import (
     CompareHandler,
     DataHandler,
     DeleteEnvHandler,
+    DropHandler,
     EnvHandler,
     EnvStateHandler,
     ErrorHandler,
@@ -91,6 +92,8 @@ from visdom.server.defaults import (
     DEFAULT_SAVE_THRESHOLD,
     WEBSOCKET_PING_INTERVAL,
 )
+
+DROPPED_REASON = "this workspace has been deleted"
 
 # Template only -- never mutate it. ``__init__`` copies it per instance because
 # several of these values are derived from constructor arguments, and writing
@@ -319,6 +322,7 @@ class Application(tornado.web.Application):
                 (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
                 (r"%s/_evict" % self.base_url, EvictHandler, {"app": self}),
                 (r"%s/_retire" % self.base_url, RetireHandler, {"app": self}),
+                (r"%s/_drop" % self.base_url, DropHandler, {"app": self}),
             ]
         )
 
@@ -585,6 +589,46 @@ class Application(tornado.web.Application):
                 "retired %d env(s) from workspace %s", answer["removed"], workspace_id
             )
         return answer
+
+    def drop_workspace(self, workspace_id):
+        """Remove a whole workspace from this instance: sockets, state and files.
+
+        For a workspace whose rows are gone for good, so its plots go with it
+        rather than staying on the disk with nothing pointing at them. The state
+        is forgotten first, so no autosave can write a file back, and the
+        directory is removed on the storage worker, behind any write already
+        queued for it.
+
+        Returns the answer so far and the pending removal, which resolves to the
+        bytes freed, or ``None`` when this instance found no directory. Every
+        instance is asked because any of them may hold the workspace in memory;
+        only the first to reach the shared disk finds anything to delete.
+        """
+        manager = self.workspace_env_manager
+        directory = manager.workspace_directory(workspace_id)
+        if directory is None:
+            raise ValueError("workspace_id is not a workspace id")
+        canonical = os.path.basename(directory)
+        if self.workspace_manager is not None:
+            self.workspace_manager.forget_workspace(canonical)
+        space = manager.forget(canonical)
+        closed = 0
+        if space is not None:
+            space.stop_socket_monitor()
+            space.dirty_envs.clear()
+            for socket in list(space.subs.values()) + list(space.sources.values()):
+                try:
+                    socket.close(WS_POLICY_VIOLATION, DROPPED_REASON)
+                    closed += 1
+                except Exception as exc:
+                    logging.debug("could not close a dropped socket: %s", exc)
+        pending = self.storage_executor.submit(remove_directory, directory)
+        answer = {
+            "workspace_id": canonical,
+            "loaded": space is not None,
+            "closed": closed,
+        }
+        return answer, pending
 
     def evict_workspace(self, slug, reason=WITHDRAWN_REASON):
         """Close every socket bound to one workspace, viewers and sources alike.
