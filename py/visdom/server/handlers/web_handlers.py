@@ -1397,7 +1397,15 @@ class IndexHandler(BaseHandler):
             )
 
     async def post(self, arg, **kwargs):
-        json_obj = tornado.escape.json_decode(self.request.body)
+        json_obj = _decode_json_body(self.request.body)
+        if (
+            not isinstance(json_obj.get("username"), str)
+            or not isinstance(json_obj.get("password"), str)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="username and password must be strings"
+            )
+
         username = json_obj["username"]
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
