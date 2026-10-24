@@ -20,8 +20,8 @@ test.describe('Misc Tests', () => {
 
     const chart = page.locator('.content').first();
 
-    await expect(chart.locator('svg line')).toHaveCount(6);
-    await expect(chart.locator('svg path')).toHaveCount(6);
+    await expect(chart.locator('svg .link')).toHaveCount(6);
+    await expect(chart.locator('svg .edgepath')).toHaveCount(6);
     await expect(chart.locator('svg text')).toHaveCount(12);
     await expect(chart.locator('svg g')).toHaveCount(6);
   });
