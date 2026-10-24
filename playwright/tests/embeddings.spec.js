@@ -1,6 +1,10 @@
 /**
- * SPDX-License-Identifier: Apache-2.0
- * https://www.apache.org/licenses/LICENSE-2.0
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
  */
 
 const { test, expect } = require('@playwright/test');
@@ -16,26 +20,32 @@ test('embedding hovers release GPU buffers and retain the shared texture', async
     const resources = { buffers: 0, textures: 0, createdBuffers: 0 };
     window.embeddingResources = resources;
 
-    const prototype = WebGL2RenderingContext.prototype;
-    for (const [type, live] of [
-      ['Buffer', buffers],
-      ['Texture', textures],
+    for (const Context of [
+      window.WebGLRenderingContext,
+      window.WebGL2RenderingContext,
     ]) {
-      const create = prototype[`create${type}`];
-      const dispose = prototype[`delete${type}`];
-      const key = type === 'Buffer' ? 'buffers' : 'textures';
-      prototype[`create${type}`] = function (...args) {
-        const resource = create.apply(this, args);
-        if (resource) live.add(resource);
-        resources[key] = live.size;
-        if (type === 'Buffer') resources.createdBuffers++;
-        return resource;
-      };
-      prototype[`delete${type}`] = function (resource) {
-        dispose.call(this, resource);
-        live.delete(resource);
-        resources[key] = live.size;
-      };
+      if (!Context) continue;
+      const prototype = Context.prototype;
+      for (const [type, live] of [
+        ['Buffer', buffers],
+        ['Texture', textures],
+      ]) {
+        const create = prototype[`create${type}`];
+        const dispose = prototype[`delete${type}`];
+        const key = type === 'Buffer' ? 'buffers' : 'textures';
+        prototype[`create${type}`] = function (...args) {
+          const resource = create.apply(this, args);
+          if (resource) live.add(resource);
+          resources[key] = live.size;
+          if (type === 'Buffer') resources.createdBuffers++;
+          return resource;
+        };
+        prototype[`delete${type}`] = function (resource) {
+          dispose.call(this, resource);
+          live.delete(resource);
+          resources[key] = live.size;
+        };
+      }
     }
   });
 
