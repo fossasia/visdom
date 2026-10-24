@@ -3029,10 +3029,23 @@ class Visdom(object):
                 X.shape[0], num_steps
             )
 
+        if (
+            update == "append"
+            and win is not None
+            and self.use_preflight_checks
+            and not self.offline
+            and self.win_exists(win, env) is False
+        ):
+            # Appending to a window that isn't there creates it, so do that
+            # here and give it the defaults like any new window.
+            update = None
+
         opts = {} if opts is None else dict(opts)
-        opts.setdefault("title", "Learning Curve")
-        opts.setdefault("xlabel", "step")
-        opts.setdefault("ylabel", "metric")
+        defaults = {"title": "Learning Curve", "xlabel": "step", "ylabel": "metric"}
+        create_defaults = {k: v for k, v in defaults.items() if k not in opts}
+        if update is None:
+            # Only a new window gets the defaults; an update would rename it.
+            opts.update(create_defaults)
         if opts.get("legend") is None:
             legend = names
             opts["legend"] = legend
@@ -3051,6 +3064,9 @@ class Visdom(object):
                 if update != "remove":
                     metric_opts = dict(opts)
                     metric_opts["legend"] = [name]
+                    if update == "append" and not self.use_preflight_checks:
+                        # Used only if the server creates the window from this.
+                        metric_opts["_create_defaults"] = create_defaults
                 result = self.line(
                     X=X,
                     Y=values,
@@ -3110,6 +3126,10 @@ class Visdom(object):
             )
 
         send_layout_create = False
+        create_defaults = {}
+        if opts and "_create_defaults" in opts:
+            opts = dict(opts)
+            create_defaults = opts.pop("_create_defaults")
 
         if update == "remove":
             assert win is not None
@@ -3352,7 +3372,8 @@ class Visdom(object):
             data_to_send["name"] = name
             data_to_send["append"] = update == "append"
             if send_layout_create:
-                data_to_send["layout_create"] = _opts2layout(opts, is3d)
+                create_opts = dict(create_defaults, **opts)
+                data_to_send["layout_create"] = _opts2layout(create_opts, is3d)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)

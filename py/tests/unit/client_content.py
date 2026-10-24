@@ -393,6 +393,79 @@ def test_learning_curve_sends_one_named_update_per_metric(offline_client):
     assert all(m["win"] == "w1" for m in updates)
 
 
+@pytest.mark.parametrize("update", ["append", "replace"])
+def test_learning_curve_update_keeps_the_window_title_and_labels(
+    offline_client, update
+):
+    """The defaults are for new windows; an update must not rename the pane."""
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0], "b": [2.0]}, step=[2], win="w1", update=update
+        )
+
+    for msg in sends_to(send, "update"):
+        assert not {"title", "xlabel", "ylabel"} & set(msg["opts"])
+        assert "title" not in msg["layout"]
+        assert "title" not in msg["layout"].get("yaxis", {})
+
+
+def test_learning_curve_append_to_a_missing_window_creates_it_with_defaults(
+    offline_client,
+):
+    with patch.object(offline_client, "win_exists", return_value=False):
+        with patch.object(offline_client, "_send", return_value="w1") as send:
+            offline_client.learning_curve(
+                {"a": [1.0], "b": [2.0]}, step=[1], win="w1", update="append"
+            )
+
+    (created,) = sends_to(send, "events")
+    assert created["win"] == "w1"
+    assert [t["name"] for t in created["data"]] == ["a", "b"]
+    assert created["opts"]["title"] == "Learning Curve"
+    assert created["layout"]["yaxis"]["title"] == {"text": "metric"}
+
+
+def test_learning_curve_append_to_an_existing_window_sends_no_defaults(
+    offline_client,
+):
+    with patch.object(offline_client, "win_exists", return_value=True):
+        with patch.object(offline_client, "_send", return_value="w1") as send:
+            offline_client.learning_curve(
+                {"a": [1.0]}, step=[2], win="w1", update="append"
+            )
+
+    (msg,) = sends_to(send, "update")
+    assert "title" not in msg["opts"]
+
+
+def test_learning_curve_append_without_preflight_sends_defaults_to_create_only(
+    offline_client,
+):
+    """The server may create the window from this append; only then are they used."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0]}, step=[1], win="w1", update="append", opts={"xlabel": "epoch"}
+        )
+
+    (msg,) = sends_to(send, "update")
+    assert not {"title", "ylabel", "_create_defaults"} & set(msg["opts"])
+    assert msg["layout"] == {}
+    assert msg["layout_create"]["title"] == {"text": "Learning Curve"}
+    assert msg["layout_create"]["xaxis"]["title"] == {"text": "epoch"}
+    assert msg["layout_create"]["yaxis"]["title"] == {"text": "metric"}
+
+
+def test_learning_curve_update_sends_opts_the_caller_passed(offline_client):
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"a": [1.0]}, step=[2], win="w1", update="append", opts={"title": "Loss"}
+        )
+
+    (msg,) = sends_to(send, "update")
+    assert msg["opts"]["title"] == "Loss"
+
+
 def test_learning_curve_remove_deletes_the_named_trace(offline_client):
     with patch.object(offline_client, "_send", return_value="w1") as send:
         offline_client.learning_curve({"a": [1.0]}, win="w1", update="remove")
