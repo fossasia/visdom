@@ -17,6 +17,20 @@ from visdom.tracking.core import (
     STATUS_UNFINISHED,
 )
 from visdom.tracking.graphs import GRAPH_METHODS, NON_GRAPH_METHODS, TrackedVisdom
+from visdom.tracking.restore import (
+    RunRestoreError,
+    extract_replayable_calls,
+    iter_run_events,
+    load_run_events,
+    load_run_file,
+    replay_calls,
+    resolve_run_events_path,
+    resolve_under_root,
+    restore_run,
+    retarget_calls,
+    run_event_consistency_warning,
+    validate_delay,
+)
 
 __all__ = [
     "RunTracker",
@@ -29,4 +43,16 @@ __all__ = [
     "TrackedVisdom",
     "GRAPH_METHODS",
     "NON_GRAPH_METHODS",
+    "RunRestoreError",
+    "extract_replayable_calls",
+    "iter_run_events",
+    "load_run_events",
+    "load_run_file",
+    "replay_calls",
+    "resolve_run_events_path",
+    "resolve_under_root",
+    "restore_run",
+    "retarget_calls",
+    "run_event_consistency_warning",
+    "validate_delay",
 ]
