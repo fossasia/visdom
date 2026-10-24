@@ -2503,9 +2503,17 @@ class Visdom(object):
                 img = np.transpose(img, (1, 2, 0))
                 im = Image.fromarray(img, mode="RGBA")
             else:
+                hint = ""
+                if img.shape[2] in (1, 3, 4):
+                    hint = (
+                        f" Shape {img.shape} looks like HxWxC (channels last), but"
+                        " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
+                        " (numpy) or img.permute(2, 0, 1) (torch) first."
+                    )
                 raise ValueError(
                     f"Unsupported number of image channels: {nchannels}. "
                     "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                    + hint
                 )
         else:
             raise ValueError(
@@ -2754,6 +2762,18 @@ class Visdom(object):
             if tensor.shape[0] == 1:  # if single-channel, convert to 3-channel
                 tensor = np.repeat(tensor, 3, 0)
             return self.image(tensor, win, env, opts)
+        if (
+            tensor.ndim == 4
+            and tensor.shape[1] not in (1, 3, 4)
+            and tensor.shape[3] in (1, 3, 4)
+        ):
+            raise ValueError(
+                f"Unsupported number of image channels: {tensor.shape[1]}."
+                f" Shape {tensor.shape} looks like NxHxWxC (channels last), but"
+                " vis.images expects NxCxHxW: use batch.transpose(0, 3, 1, 2)"
+                " (numpy) or batch.permute(0, 3, 1, 2) (torch) first, or for a"
+                " list pass [img.transpose(2, 0, 1) for img in images]."
+            )
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
 
