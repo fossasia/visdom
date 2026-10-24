@@ -1005,7 +1005,8 @@ environment). If you've also registered an event handler via
 #### vis.audio
 This function plays audio. It takes as input the filename of the audio
 file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
-audio). The function does not support any plot-specific `opts`.
+audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or
+`2xN`) is accepted too. The function does not support any plot-specific `opts`.
 
 The following `opts` are supported:
 
