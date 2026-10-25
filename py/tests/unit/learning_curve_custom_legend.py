@@ -100,3 +100,42 @@ def test_learning_curve_subset_update_uses_the_label_it_is_given(offline_client)
         )
 
     assert [m["name"] for m in updates(send)] == ["Validation loss"]
+
+
+def test_learning_curve_append_maps_each_label_back_to_its_metric(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    # The labels are listed in the order of the creation call, the metrics are
+    # not: reading the legend positionally would put val on the train trace.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9], "train": [0.7]},
+            step=[1],
+            win="w1",
+            opts=opts,
+            update="append",
+        )
+
+    sent = {m["name"]: m["data"][0]["y"] for m in updates(send)}
+    assert sent == {"Training loss": [0.7], "Validation loss": [0.9]}
+
+
+def test_learning_curve_append_without_a_legend_reuses_the_created_names(
+    offline_client,
+):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"train": [0.7], "val": [0.9]}, step=[1], win="w1", update="append"
+        )
+
+    assert [m["name"] for m in updates(send)] == ["Training loss", "Validation loss"]

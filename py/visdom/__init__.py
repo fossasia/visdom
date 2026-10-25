@@ -1000,6 +1000,10 @@ class Visdom(object):
                 )
 
         self.win_data = {}
+        # Trace names learning_curve created, keyed by (env, win). Creation names
+        # traces after the legend it was given, which an update cannot recover
+        # from its own arguments once the metrics come in another order.
+        self._learning_curve_names = {}
         if self.offline:
             self.use_socket = False
             assert (
@@ -2955,8 +2959,9 @@ class Visdom(object):
         points at the same x-coordinate.
 
         With a custom `opts['legend']` the traces are created named after the
-        legend entries, so every call that updates the plot has to send the same
-        legend again, with one entry per metric being updated.
+        legend entries, which is what an update addresses: give one entry per
+        metric being updated, in any order, or leave the legend out and the
+        names from the creation call on this client are reused.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3002,7 +3007,8 @@ class Visdom(object):
         opts.setdefault("title", "Learning Curve")
         opts.setdefault("xlabel", "step")
         opts.setdefault("ylabel", "metric")
-        if opts.get("legend") is None:
+        legend_given = opts.get("legend") is not None
+        if not legend_given:
             legend = names
             opts["legend"] = legend
         else:
@@ -3015,6 +3021,9 @@ class Visdom(object):
         # Creation names every trace after the matching legend entry, so the
         # updates have to address those names. Using the metric keys added
         # traces instead of updating the ones on the screen.
+        env_key = self.env if env is None else env
+        created = self._learning_curve_names.get((env_key, win))
+
         if update is not None:
             # A trace is named after the position of its metric in the legend,
             # and an update may carry fewer metrics than the legend has entries.
@@ -3027,6 +3036,25 @@ class Visdom(object):
                 "metrics".format(len(legend), len(names))
             )
             trace_names = list(legend)
+            if created is not None:
+                created_names = [trace_name for _, trace_name in created]
+                stored = dict(created)
+                if not legend_given:
+                    # The caller kept the labels from the creation call out of
+                    # the update, so take them from there.
+                    trace_names = [stored.get(name, name) for name in names]
+                    opts["legend"] = trace_names
+                elif (
+                    len(set(created_names)) == len(created_names)
+                    and len(set(legend)) == len(legend)
+                    and set(legend) == set(created_names)
+                ):
+                    # The same labels, but they may be listed in another order
+                    # than the metrics, which would send values to the wrong
+                    # trace. Look each one up by the metric it was created for.
+                    trace_names = [
+                        stored.get(name, label) for name, label in zip(names, legend)
+                    ]
             result = None
             # Send one named update per metric so mapping order cannot swap traces.
             for trace_name, values in zip(trace_names, series):
@@ -3047,7 +3075,7 @@ class Visdom(object):
 
         Y = np.column_stack(series)
 
-        return self.line(
+        result = self.line(
             X=X,
             Y=Y,
             win=win,
@@ -3055,6 +3083,11 @@ class Visdom(object):
             opts=opts,
             update=update,
         )
+        if result is not None:
+            self._learning_curve_names[(env_key, result)] = list(
+                zip(names, legend[: len(names)])
+            )
+        return result
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
