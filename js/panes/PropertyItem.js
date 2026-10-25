@@ -13,7 +13,7 @@ import { typesetMathJax } from './utils/mathjaxHelpers';
 
 const LATEX_PATTERN = /\$[^$]+\$|\\\([^)]+\\\)/;
 const NUMBER_EDIT_PATTERN = /^-?[0-9]*([.][0-9]*)?$/;
-const NUMBER_SUBMIT_PATTERN = /^-?([0-9]+(\.[0-9]*)?|\.[0-9]+)$/;
+const NUMBER_SUBMIT_PATTERN = /^-?([0-9]+(\.[0-9]+)?|\.[0-9]+)$/;
 
 function EditablePropertyText(props) {
   const { value, validateHandler, submitHandler, blurStopPropagation } = props;

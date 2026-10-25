@@ -70,6 +70,10 @@ test.describe('Properties Pane', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('input[value="-15.50"]')).toBeVisible();
 
+    await page.locator('input[value="-15.50"]').first().fill('42.');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('input[value="-15.50"]')).toBeVisible();
+
     await page.getByText('Start').click();
 
     await expect(
