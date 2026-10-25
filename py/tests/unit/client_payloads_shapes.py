@@ -275,6 +275,29 @@ def test_stem_does_not_mutate_caller_opts(capture_send):
     assert "mode" not in opts
 
 
+def test_stem_handles_single_row_2d_y_input(capture_send):
+    """Single-row 2D Y input (1, 1) and (1, M) correctly supply timestamps without shape errors."""
+    # (1, 1) single-row 2D timestamp array shared across all series
+    sent1 = capture_send(
+        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([[100.0]]))
+    )
+    assert len(sent1["payload"]["data"]) == 2
+    assert segments(sent1["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent1["payload"]["data"][1]["x"]) == [[100.0, 100.0]]
+    assert segments(sent1["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent1["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+    # (1, M) single-row 2D timestamp array matching M series
+    sent2 = capture_send(
+        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([[100.0, 200.0]]))
+    )
+    assert len(sent2["payload"]["data"]) == 2
+    assert segments(sent2["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent2["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
+    assert segments(sent2["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent2["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
