@@ -642,14 +642,14 @@ def test_boxplot_2d_x_one_box_per_column(capture_send):
 @pytest.mark.parametrize(
     "shape,legend,expected",
     [
-        ((3,), None, [[1.0, None, 3.0]]),
-        ((3, 1), None, [[1.0, None, 3.0]]),
-        ((1, 3), None, [[1.0], [None], [3.0]]),
-        ((1, 3), ["train", "validation", "test"], [[1.0], [None], [3.0]]),
+        ((3,), None, [[1.0, 3.0]]),
+        ((3, 1), None, [[1.0, 3.0]]),
+        ((1, 3), None, [[1.0], [], [3.0]]),
+        ((1, 3), ["train", "validation", "test"], [[1.0], [], [3.0]]),
     ],
 )
-def test_boxplot_preserves_masked_values(capture_send, shape, legend, expected):
-    """Masked samples stay hidden in both single-series and multi-series plots."""
+def test_boxplot_excludes_masked_values(capture_send, shape, legend, expected):
+    """Masked samples are omitted without losing columns or changing the input."""
     values = np.ma.masked_array([1.0, 100.0, 3.0], mask=[False, True, False])
     values = values.reshape(shape)
     original_data = values.data.copy()
@@ -661,6 +661,33 @@ def test_boxplot_preserves_masked_values(capture_send, shape, legend, expected):
     assert [trace["y"] for trace in traces] == expected
     np.testing.assert_array_equal(values.data, original_data)
     np.testing.assert_array_equal(np.ma.getmaskarray(values), original_mask)
+
+
+def test_boxplot_filters_masks_per_column_without_shifting_labels(capture_send):
+    values = np.ma.array(
+        [[1.0, 10.0, 100.0], [2.0, 20.0, 200.0], [3.0, 30.0, 300.0]],
+        mask=[[False, True, True], [True, True, False], [False, True, False]],
+    )
+    original_data = values.data.copy()
+    original_mask = np.ma.getmaskarray(values).copy()
+    legend = ["first", "empty", "last"]
+
+    sent = capture_send(lambda v: v.boxplot(values, opts={"legend": legend}))
+    traces = sent["payload"]["data"]
+    assert [trace["y"] for trace in traces] == [[1.0, 3.0], [], [200.0, 300.0]]
+    assert [trace["name"] for trace in traces] == legend
+    np.testing.assert_array_equal(values.data, original_data)
+    np.testing.assert_array_equal(np.ma.getmaskarray(values), original_mask)
+
+
+@pytest.mark.parametrize("mask", [np.ma.nomask, False, True])
+def test_boxplot_uniform_mask_keeps_series(capture_send, mask):
+    values = np.ma.array([1.0, 2.0, 3.0], mask=mask)
+    sent = capture_send(lambda v: v.boxplot(values, opts={"legend": ["samples"]}))
+    traces = sent["payload"]["data"]
+    assert len(traces) == 1
+    assert traces[0]["name"] == "samples"
+    assert traces[0]["y"] == ([] if mask is True else [1.0, 2.0, 3.0])
 
 
 @pytest.mark.parametrize("values", [[[1.0, 2.0, 3.0]], np.array([[1.0, 2.0, 3.0]])])

@@ -3957,6 +3957,8 @@ class Visdom(object):
         which to construct the `M` boxplots. Each matrix column remains a
         separate series, including when `N` is one. Use a vector or an `Nx1`
         matrix for a single series.
+        Masked observations are omitted from each column. A fully masked
+        column keeps its series and label with an empty list of observations.
 
         The following plot-specific `opts` are currently supported:
         - `opts.legend`: labels for each of the columns in `X`
@@ -3981,7 +3983,7 @@ class Visdom(object):
         data = []
         for k in range(X.shape[1]):
             _data = {
-                "y": X.take(k, 1).tolist(),
+                "y": X.take(k, 1).compressed().tolist(),
                 "type": "box",
             }
             if opts.get("legend"):

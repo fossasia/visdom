@@ -272,6 +272,10 @@ Each matrix column is a separate boxplot, including when the matrix has only
 one row. Legend labels name these columns without changing their number; if
 provided, the number of labels must match the number of columns.
 
+For NumPy masked arrays, masked observations are omitted independently from
+each column. A fully masked column still has a series and label, but its
+observation list is empty. The input data and mask are not modified.
+
 Previously, a single-row matrix could be flattened into one series. To plot
 all values in one box, pass a vector or an `Nx1` matrix instead. A single label
 for a multi-column matrix now raises the same validation error as it does for
