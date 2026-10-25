@@ -22,6 +22,7 @@ function EditablePropertyText(props) {
   // --------------
   const textInput = useRef();
   const previewRef = useRef();
+  const lastAcceptedValue = useRef(value);
   const [actualValue, setActualValue] = useState(value);
   const [isEdited, setIsEdited] = useState(false);
 
@@ -45,8 +46,12 @@ function EditablePropertyText(props) {
   };
   const onBlur = (event) => {
     setIsEdited(false);
-    if (submitHandler && submitHandler(actualValue) === false) {
-      setActualValue(value);
+    if (submitHandler) {
+      if (submitHandler(actualValue) === false) {
+        setActualValue(lastAcceptedValue.current);
+      } else {
+        lastAcceptedValue.current = actualValue;
+      }
     }
 
     // prevents the pane to drop focus
@@ -75,7 +80,10 @@ function EditablePropertyText(props) {
 
   // save value if props changed & we are not in edit mode
   useEffect(() => {
-    if (!isEdited) setActualValue(value);
+    if (!isEdited) {
+      lastAcceptedValue.current = value;
+      setActualValue(value);
+    }
   }, [value]);
 
   useEffect(() => {
