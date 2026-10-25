@@ -26,6 +26,17 @@ import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
+const smoothingCopy = (trace) => {
+  const copy = Object.assign({}, trace);
+  if (copy.marker) {
+    copy.marker = Object.assign({}, copy.marker);
+    if (copy.marker.line) {
+      copy.marker.line = Object.assign({}, copy.marker.line);
+    }
+  }
+  return copy;
+};
+
 var PlotPane = (props) => {
   const { contentID, type, selected } = props;
   const isHistory = type === 'plot_history';
@@ -229,7 +240,15 @@ var PlotPane = (props) => {
     }
 
     newPlot();
-  });
+  }, [
+    content,
+    props.version,
+    actualSelected,
+    smoothWidgetActive,
+    smoothvalue,
+    annotations.modebarButton,
+    sessionInfo?.readonly,
+  ]);
 
   useEffect(() => {
     const plotElement = plotlyRef.current;
@@ -290,7 +309,7 @@ var PlotPane = (props) => {
       smooth_data = data
         .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
         .map((d) => {
-          var smooth_d = JSON.parse(JSON.stringify(d));
+          var smooth_d = smoothingCopy(d);
           var windowSize = 2 * smoothvalue + 1;
 
           // remove legend of smoothed plot
@@ -371,11 +390,6 @@ var PlotPane = (props) => {
       modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
-    }).then(() => {
-      const plotElement = plotlyRef.current;
-      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
-      }
     });
   };
 
