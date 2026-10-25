@@ -61,6 +61,7 @@ const ApiProvider = ({ children }) => {
   };
 
   // Establish a connection to the server
+// Establish a connection to the server
   const connect = () => {
     if (_socket.current) {
       return;
@@ -69,8 +70,13 @@ const ApiProvider = ({ children }) => {
     const _onConnect = () => {
       setConnected(true);
     };
-    const _onDisconnect = () => {
-      // Silent cleanup - logging handled by event handlers
+
+    const _onDisconnect = (socketInstance) => {
+      // Guard: Only clear state and mark offline if the closing socket is still the active one
+      if (socketInstance && _socket.current !== socketInstance) {
+        return;
+      }
+      _socket.current = null;
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
@@ -81,7 +87,7 @@ const ApiProvider = ({ children }) => {
         correctPathname,
         handleMessage,
         _onConnect,
-        _onDisconnect
+        () => _onDisconnect(_socket.current)
       );
       return;
     }
@@ -101,15 +107,19 @@ const ApiProvider = ({ children }) => {
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
     socket.onerror = (event) => {
-      // Log error but don't call _onDisconnect here (let onclose handle it)
       // eslint-disable-next-line no-console
       console.error(
         '[Visdom API] WebSocket error - the socket will likely close next',
         event
       );
     };
+
     socket.onclose = (event) => {
-      // Determine if this was a clean close or an error
+      // Guard against old/superseded socket instances
+      if (_socket.current !== socket) {
+        return;
+      }
+
       if (!event.wasClean) {
         // eslint-disable-next-line no-console
         console.warn(
@@ -118,21 +128,29 @@ const ApiProvider = ({ children }) => {
           `Reason: ${event.reason || '(no reason provided)'}`
         );
       }
-      // Only call _onDisconnect from onclose to avoid duplicate handling
-      _onDisconnect();
+      _onDisconnect(socket);
     };
+
     _socket.current = socket;
   };
-
   // Close the server connection and reset the _socket ref
+// Close the server connection and reset the _socket ref
+ // Close the server connection and reset the _socket ref
   const disconnect = () => {
     if (_socket.current) {
-      _socket.current.close();
+      const socketToClose = _socket.current;
       _socket.current = null;
+
+      // Nullify listeners so asynchronous close events won't fire against subsequent sockets
+      socketToClose.onopen = null;
+      socketToClose.onmessage = null;
+      socketToClose.onerror = null;
+      socketToClose.onclose = null;
+
+      socketToClose.close();
       setConnected(false);
     }
-  };
-  // ------------------ //
+  }; // ------------------ //
   // API receive events //
   // -------------------//
 
