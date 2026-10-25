@@ -80,8 +80,8 @@ function EditablePropertyText(props) {
 
   // save value if props changed & we are not in edit mode
   useEffect(() => {
+    lastAcceptedValue.current = value;
     if (!isEdited) {
-      lastAcceptedValue.current = value;
       setActualValue(value);
     }
   }, [value]);
