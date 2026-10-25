@@ -7,7 +7,10 @@ import Poller from './Legacy';
 import serverPath from './serverPath';
 
 const ApiProvider = ({ children }) => {
-  const [connected, setConnected] = useState(false);
+  // null = initial connection attempt pending ("connecting")
+  // true = online / connected
+  // false = offline / disconnected / connection failed
+  const [connected, setConnected] = useState(null);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
   const apiHandlers = useRef(null);
@@ -126,9 +129,9 @@ const ApiProvider = ({ children }) => {
     if (_socket.current) {
       _socket.current.close();
       _socket.current = null;
+      setConnected(false);
     }
   };
-
   // ------------------ //
   // API receive events //
   // -------------------//
