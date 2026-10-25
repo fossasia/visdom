@@ -139,3 +139,68 @@ def test_learning_curve_append_without_a_legend_reuses_the_created_names(
         )
 
     assert [m["name"] for m in updates(send)] == ["Training loss", "Validation loss"]
+
+
+def test_learning_curve_remembers_no_names_when_the_creation_fails(offline_client):
+    """A failed post answers False and no window was created to name."""
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value=False):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    assert offline_client._learning_curve_names == {}
+
+
+def test_closing_a_window_forgets_the_names_it_created(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="w1") as closed:
+        offline_client.close(win="w1")
+
+    assert closed.call_args[1]["endpoint"] == "close"
+    assert offline_client._learning_curve_names == {}
+
+    # The window is gone, so an update that leaves the legend out reads the
+    # metric keys again instead of names nothing can be sent to.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"train": [0.7], "val": [0.9]}, step=[1], win="w1", update="append"
+        )
+
+    assert [m["name"] for m in updates(send)] == ["train", "val"]
+
+
+def test_closing_all_windows_forgets_the_names_of_that_env_only(offline_client):
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+    with patch.object(offline_client, "_send", return_value="w2"):
+        offline_client.learning_curve(
+            {"train": [1.0]}, step=[0], win="w2", env="other", opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="1"):
+        offline_client.close(win=None)
+
+    assert list(offline_client._learning_curve_names) == [("other", "w2")]
+
+
+def test_deleting_an_env_forgets_its_window_names(offline_client):
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+    with patch.object(offline_client, "_send", return_value="w2"):
+        offline_client.learning_curve(
+            {"train": [1.0]}, step=[0], win="w2", env="other", opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="1") as deleted:
+        offline_client.delete_env("other")
+
+    assert deleted.call_args[1]["endpoint"] == "delete_env"
+    assert list(offline_client._learning_curve_names) == [("main", "w1")]

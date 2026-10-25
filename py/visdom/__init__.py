@@ -1887,17 +1887,35 @@ class Visdom(object):
             create=False,
         )
 
+    def _forget_learning_curve_names(self, win=None, env=None):
+        """
+        This function drops the trace names `learning_curve` created for a
+        window, or for every window of an env when `win=None`.
+        """
+
+        env_key = self.env if env is None else env
+        if win is None:
+            for key in [k for k in self._learning_curve_names if k[0] == env_key]:
+                del self._learning_curve_names[key]
+        else:
+            self._learning_curve_names.pop((env_key, win), None)
+
     def close(self, win=None, env=None):
         """
         This function closes a specific window.
         Use `win=None` to close all windows in an env.
         """
 
-        return self._send(
+        result = self._send(
             msg={"win": win, "eid": env},
             endpoint="close",
             create=False,
         )
+        if result is not False:
+            # The window is gone from here on, so a name kept for it would only
+            # send an update to a window that no longer exists.
+            self._forget_learning_curve_names(win=win, env=env)
+        return result
 
     def delete_envs(self, env_list):
         """This function deletes a list of environments."""
@@ -1912,7 +1930,10 @@ class Visdom(object):
 
     def delete_env(self, env):
         """This function deletes a specific environment."""
-        return self._send(msg={"eid": env}, endpoint="delete_env")
+        result = self._send(msg={"eid": env}, endpoint="delete_env")
+        if result is not False:
+            self._forget_learning_curve_names(env=env)
+        return result
 
     def _win_exists_wrap(self, win, env=None):
         """
@@ -3083,7 +3104,9 @@ class Visdom(object):
             opts=opts,
             update=update,
         )
-        if result is not None:
+        # A post that failed answers False and created no window, so there is no
+        # id to keep the names against.
+        if result not in (None, False):
             self._learning_curve_names[(env_key, result)] = list(
                 zip(names, legend[: len(names)])
             )
