@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import pytest
+from testutils import recording_array
 import visdom
 
 pytestmark = pytest.mark.unit
@@ -390,6 +391,106 @@ def test_line_3d_aspectmode_forwarded_to_scene(capture_send):
     assert sent["payload"]["layout"]["scene"]["aspectmode"] == "cube"
 
 
+# ----------------------------------------------------------------- traceopts ----
+#
+# ``scatter`` merges ``opts["traceopts"]["plotly"][<trace name>]`` into the
+# trace it built, and that merge is the only way a title can reach a trace.
+# The title normalization runs on it alone for that reason: the helper descends
+# into lists, so running it over the finished trace cost one call per plotted
+# coordinate and could rewrite nothing. These tests hold both halves -- the
+# normalization still happens, and the coordinates are not walked.
+
+
+def _normalize_spy():
+    """``_normalize_title_strings`` wrapped so the tests can see its arguments.
+
+    The helper recurses through the module global, so patching it records every
+    node it visits, not just the top-level call.
+    """
+    real = visdom._normalize_title_strings
+    seen = []
+
+    def spy(value):
+        seen.append(value)
+        return real(value)
+
+    return spy, seen
+
+
+def _traceopts(**plotly):
+    return {"traceopts": {"plotly": plotly}}
+
+
+def test_scatter_traceopts_title_string_is_normalized(capture_send):
+    """A bare string title in a user's trace options is still rewritten."""
+    sent = capture_send(
+        lambda v: v.line(np.array([1.0, 2.0]), opts=_traceopts(**{"1": {"title": "s"}}))
+    )
+    assert sent["payload"]["data"][0]["title"] == {"text": "s"}
+
+
+def test_scatter_traceopts_nested_title_is_normalized(capture_send):
+    """marker.colorbar.title is the one title plotly really allows on a trace."""
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]),
+            opts=_traceopts(**{"1": {"marker": {"colorbar": {"title": "scale"}}}}),
+        )
+    )
+    marker = sent["payload"]["data"][0]["marker"]
+    assert marker["colorbar"]["title"] == {"text": "scale"}
+
+
+def test_scatter_traceopts_without_a_title_are_merged_unchanged(capture_send):
+    """Normalizing the merged subtree must not disturb the rest of it."""
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]),
+            opts=_traceopts(**{"1": {"hovertemplate": "%{y}", "opacity": 0.5}}),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["hovertemplate"] == "%{y}"
+    assert trace["opacity"] == 0.5
+
+
+def test_scatter_traceopts_are_not_mutated(capture_send):
+    """The caller keeps their own options dict; the helper returns a new one."""
+    given = {"1": {"title": "s"}}
+    capture_send(lambda v: v.line(np.array([1.0, 2.0]), opts=_traceopts(**given)))
+    assert given == {"1": {"title": "s"}}
+
+
+def test_scatter_does_not_normalize_titles_over_the_trace(capture_send):
+    """The finished trace is never handed to the title helper.
+
+    Asserting on what the helper is called with rather than on how long the
+    call takes: a wall-clock budget is not safe on a shared CI runner, and the
+    cost here is one call per plotted point, which is a shape, not a duration.
+    """
+    spy, seen = _normalize_spy()
+    with patch("visdom._normalize_title_strings", side_effect=spy):
+        sent = capture_send(lambda v: v.line(np.array([1.0, 2.0, 3.0])))
+
+    trace = sent["payload"]["data"][0]
+    assert not any(isinstance(node, dict) and "type" in node for node in seen)
+    assert trace["y"] not in seen
+    assert trace["x"] not in seen
+    assert trace["y"] == [1.0, 2.0, 3.0]
+
+
+def test_scatter_normalizes_titles_over_the_merged_trace_options(capture_send):
+    """The other half: the subtree that can carry a title is still visited."""
+    spy, seen = _normalize_spy()
+    with patch("visdom._normalize_title_strings", side_effect=spy):
+        capture_send(
+            lambda v: v.line(
+                np.array([1.0, 2.0]), opts=_traceopts(**{"1": {"title": "s"}})
+            )
+        )
+    assert {"title": "s"} in seen
+
+
 # ------------------------------------------------------------------- heatmap ----
 
 
@@ -676,6 +777,14 @@ def test_boxplot_legend_length_mismatch_raises(offline_client):
         offline_client.boxplot(X, opts={"legend": ["only_one"]})
 
 
+def test_boxplot_size_one_x_renders(capture_send):
+    """Regression test: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.boxplot(np.array([10.5])))
+    assert sent["payload"]["data"][0]["type"] == "box"
+    assert sent["payload"]["data"][0]["y"] == [10.5]
+
+
 # ---------------------------------------------------------------------- surf ----
 
 
@@ -738,6 +847,29 @@ def test_surf_layout_is_3d(capture_send):
     """surf builds a 3D scene layout."""
     sent = capture_send(lambda v: v.surf(np.ones((2, 2))))
     assert "scene" in sent["payload"]["layout"]
+
+
+def test_surf_single_row_matrix_renders(capture_send):
+    """Regression test: a single-row (1xN) matrix used to
+    collapse via np.squeeze() to 1D and fail the ndim==2 assert.
+    The fix guards with 'if X.ndim > 2' so valid 2D matrices are preserved."""
+    sent = capture_send(lambda v: v.surf(np.ones((1, 5))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1.0, 1.0, 1.0, 1.0, 1.0]]
+
+
+def test_surf_single_col_matrix_renders(capture_send):
+    """Regression test: single-column (Nx1) matrix also collapsed to 1D."""
+    sent = capture_send(lambda v: v.surf(np.ones((5, 1))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1.0], [1.0], [1.0], [1.0], [1.0]]
+
+
+def test_surf_tuple_input_renders(capture_send):
+    """Regression test: tuple input should be accepted."""
+    sent = capture_send(lambda v: v.surf(((1, 2), (3, 4))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1, 2], [3, 4]]
 
 
 def test_surf_aspectmode_forwarded_to_scene(capture_send):
@@ -839,6 +971,65 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+# -------------------------------------------------------------------- pie ----
+
+
+def test_pie_size_one_x_renders(capture_send):
+    """Regression test: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.pie(np.array([100.0])))
+    assert sent["payload"]["data"][0]["type"] == "pie"
+    assert sent["payload"]["data"][0]["values"] == [100.0]
+
+
+def test_pie_multi_value_x_renders(capture_send):
+    """Normal multi-slice pie chart still works after the fix."""
+    sent = capture_send(lambda v: v.pie(np.array([30.0, 70.0])))
+    assert sent["payload"]["data"][0]["values"] == [30.0, 70.0]
+
+
+# ------------------------------------------------------------------- stem ----
+
+
+def test_stem_size_one_x_renders(capture_send):
+    """Regression test for #1787/#1821: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert.
+    stem() delegates to scatter(); y column carries the original values."""
+    sent = capture_send(lambda v: v.stem(np.array([5.0])))
+    data = sent["payload"]["data"][0]
+    assert data["type"] == "scatter"
+    # y column: [0.0 (zero baseline), 5.0 (the value), nan] — value must appear
+    y_vals = [v for v in data["y"] if not np.isnan(v)]
+    assert 5.0 in y_vals
+
+
+def test_stem_multi_value_x_renders(capture_send):
+    """Normal multi-value stem plot still works after the fix."""
+    sent = capture_send(lambda v: v.stem(np.array([1.0, 2.0, 3.0])))
+    assert sent["payload"]["data"] is not None
+
+
+# --------------------------------------------------------------- histogram2d ----
+
+
+def test_histogram2d_size_one_xy_renders(capture_send):
+    """Regression test for #1787/#1821: single-value X and Y both collapsed to
+    0-d arrays via unconditional np.squeeze() and failed the ndim assert."""
+    sent = capture_send(lambda v: v.histogram2d(np.array([1.0]), np.array([2.0])))
+    data = sent["payload"]["data"][0]
+    assert data["type"] == "histogram2d"
+    assert data["x"] == [1.0]
+    assert data["y"] == [2.0]
+
+
+def test_histogram2d_multi_value_xy_renders(capture_send):
+    """Normal multi-value histogram2d still works after the fix."""
+    sent = capture_send(
+        lambda v: v.histogram2d(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]))
+    )
+    assert sent["payload"]["data"][0]["type"] == "histogram2d"
 
 
 # --------------------------------------------------- parallel_coordinates ----
@@ -981,3 +1172,105 @@ def test_contour_skips_unused_data_bounds(capture_send, opts):
         assert "zmin" not in trace
         assert "zmax" not in trace
     np.testing.assert_equal(trace["z"], X)
+
+
+# ------------------------------------------------- per-label trace grouping ----
+
+
+def _traces_by_label_mask(X, Y):
+    """The x/y/z lists a boolean mask per label produces, for cross-checking."""
+    traces = []
+    for k in np.unique(Y):
+        ind = np.equal(Y, k)
+        trace = {
+            "x": X.take(0, 1)[ind].tolist(),
+            "y": X.take(1, 1)[ind].tolist(),
+        }
+        if X.shape[1] == 3:
+            trace["z"] = X.take(2, 1)[ind].tolist()
+        traces.append(trace)
+    return traces
+
+
+@pytest.mark.parametrize("n_cols", [2, 3])
+@pytest.mark.parametrize("n_labels", [1, 2, 5])
+def test_scatter_groups_points_by_label_like_a_per_label_mask(
+    capture_send, n_cols, n_labels
+):
+    """One sort replaces one full pass over Y per label; the traces must match.
+
+    Grouping is now a single stable argsort sliced per label rather than
+    ``np.equal(Y, k)`` for every k, so this pins the result against the mask it
+    replaced -- trace for trace, point for point, in order.
+    """
+    rng = np.random.default_rng(n_cols * 10 + n_labels)
+    n = 60
+    X = rng.random((n, n_cols))
+    Y = rng.integers(0, n_labels, n) + 1
+    Y[:n_labels] = np.arange(1, n_labels + 1)
+
+    sent = capture_send(lambda v: v.scatter(X, Y=Y))
+
+    expected = _traces_by_label_mask(X, Y)
+    assert len(sent["payload"]["data"]) == len(expected)
+    for trace, want in zip(sent["payload"]["data"], expected):
+        for axis, values in want.items():
+            assert trace[axis] == values
+
+
+def test_scatter_extracts_each_coordinate_column_once(capture_send):
+    """Columns are pulled out of X before the loop, not inside it.
+
+    ``X.take(axis, 1)`` used to run once per axis *per trace*, so a 200-trace
+    scatter copied the whole coordinate array 400 times.
+    """
+    X = recording_array(np.arange(24, dtype=float).reshape(8, 3))
+    Y = np.array([1, 2, 3, 4, 1, 2, 3, 4])
+
+    capture_send(lambda v: v.scatter(X, Y=Y))
+
+    assert X.counts["take"] == 3
+
+
+def test_scatter_with_a_single_label_skips_the_grouping_sort(capture_send):
+    """Every unlabelled plot -- ``line`` included -- lands on the fast path.
+
+    With one trace the sort would be pure overhead: the trace is the whole
+    array, so the column is handed over as-is.
+    """
+    X = np.arange(12, dtype=float).reshape(6, 2)
+    with patch.object(visdom.np, "argsort", wraps=np.argsort) as argsort:
+        sent = capture_send(lambda v: v.scatter(X))
+    assert argsort.call_count == 0
+    assert sent["payload"]["data"][0]["x"] == X.take(0, 1).tolist()
+
+
+def test_scatter_multi_label_groups_with_one_sort(capture_send):
+    """The grouping costs exactly one sort regardless of the label count."""
+    X = np.arange(20, dtype=float).reshape(10, 2)
+    Y = np.array([1, 2, 3, 4, 5, 1, 2, 3, 4, 5])
+    with patch.object(visdom.np, "argsort", wraps=np.argsort) as argsort:
+        capture_send(lambda v: v.scatter(X, Y=Y))
+    assert argsort.call_count == 1
+
+
+def test_dual_axis_lines_rejects_a_two_dimensional_x(offline_client):
+    """``.tolist()`` would nest a 2-D input instead of failing on it.
+
+    The ``float()`` loop this replaced raised a numpy TypeError for anything
+    that was not a scalar, so the dimensionality is now asserted outright,
+    alongside the two shape assertions it belongs with.
+    """
+    square = np.zeros((2, 2))
+    with pytest.raises(AssertionError, match="values of X should be one-dimensional"):
+        offline_client.dual_axis_lines(X=square, Y1=square, Y2=square)
+
+
+def test_dual_axis_lines_accepts_matching_column_vectors(capture_send):
+    """A set of (N, 1) columns plots flat, as the ``float()`` loop had it."""
+    column = np.arange(3).reshape(3, 1)
+    sent = capture_send(lambda v: v.dual_axis_lines(X=column, Y1=column, Y2=column * 2))
+    first, second = sent["payload"]["data"]
+    assert first["x"] == [0.0, 1.0, 2.0]
+    assert first["y"] == [0.0, 1.0, 2.0]
+    assert second["y"] == [0.0, 2.0, 4.0]

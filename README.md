@@ -214,6 +214,18 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
+11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
+12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
+
+The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
+
+- `VISDOM_INTERNAL_READ_KEYS`: keys that may read `/_activity` and `/_metrics`.
+- `VISDOM_INTERNAL_ADMIN_KEYS`: keys for endpoints that change or remove data.
+- `VISDOM_METRICS_TOKENS`: bearer tokens for `/_metrics`, for scrapers that cannot sign.
+
+Behind a proxy that spreads workspaces over several servers, set `VISDOM_PROXY_URL` and each server asks the proxy every `VISDOM_OWNERSHIP_INTERVAL` seconds (30) which server owns the workspaces it has viewers for, and closes the viewers of any that moved, so they reconnect to the new one.
+
+A signed request sends `X-Visdom-Timestamp` (Unix seconds) and `X-Visdom-Signature`, the hex HMAC-SHA256 of the method, the path with its query, the timestamp and the hex SHA-256 of the body, joined by newlines. A signature older or newer than 60 seconds is refused. With no key set, every signed request is refused, and `/_metrics` answers only a metrics token. `visdom.server.internal.signed_headers` builds the headers.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
@@ -290,6 +302,8 @@ The python visdom client takes a few options:
 - `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
+- `api_key`: API key sent as the `X-API-KEY` header on every request and on the socket, for servers behind a gateway that checks keys (default: `None`)
+- `workspace`: workspace sent as the `X-Visdom-Workspace` header alongside `api_key`, required when `api_key` is given (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 - `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
@@ -487,6 +501,9 @@ Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()
 - `env`: environment name (default: auto-generated from timestamp)
 - `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
 - `params`: dict of hyperparameters; opts into experiment tracking (default: `None`, tracking off)
+- `is_main_process`: `True` or `False` to choose whether this process plots (default: `None`, only global rank 0 plots); any other type raises `TypeError`
+
+**Distributed training:** under `torchrun`, SLURM or `mp.spawn`, only global rank 0 plots and tracks; other ranks just validate their inputs, so one window is created per metric and nothing extra needs to be passed. The plotted value is whatever rank 0 logs, so to log a global average every rank must call `dist.all_reduce` and divide by `dist.get_world_size()` before `tracker.log()`. An `mp.spawn` worker has no rank to go by until `dist.init_process_group` has run, so create the logger after it or pass `is_main_process=(rank == 0)`. Pass `is_main_process=True` or `False` to pick the plotting process yourself, for example the last stage of a pipeline-parallel job, or when SLURM starts independent runs with `srun -n N`. Single-GPU and `nn.DataParallel` scripts run as one process and plot as before.
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 

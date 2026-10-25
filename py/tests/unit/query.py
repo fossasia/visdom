@@ -30,7 +30,13 @@ from visdom.experiments import (
     build_record,
     parse_query,
 )
-from visdom.experiments.query import And, Comparison, Or, tokenize
+from visdom.experiments.query import (
+    And,
+    Comparison,
+    Or,
+    latest_metric_values,
+    tokenize,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -313,6 +319,100 @@ class TestParseLimits(unittest.TestCase):
         self.assertTrue(parse_query(text).matches({"lr": 0.001}))
 
 
+class TestWideIntegers(unittest.TestCase):
+    """An integer too wide for a float compares instead of raising.
+
+    JSON bounds neither a stored number nor one written into a query, so both
+    sides of a comparison can hold an integer with no float representation.
+    ``float()`` does not saturate on one of those the way it does on an
+    over-large string — it raises ``OverflowError`` — and nothing between the
+    comparison and the request catches it, so the whole search answers 500.
+
+    The sort path was already hardened against this
+    (``store._is_number`` swallows the same ``OverflowError`` by design); these
+    pin the filter path to the same standard, and pin the exactness that comes
+    with not rounding through a float.
+    """
+
+    #: Wider than the ~1.8e308 a float can hold, and far inside MAX_QUERY_LENGTH.
+    WIDE = 10**400
+
+    def test_a_wide_literal_in_the_query_compares(self):
+        """The literal reaches the comparison as an int; nothing casts it."""
+        record = {"lr": 0.01}
+        wide = str(self.WIDE)
+        self.assertTrue(match("lr < " + wide, record))
+        self.assertFalse(match("lr > " + wide, record))
+        self.assertFalse(match("lr = " + wide, record))
+        self.assertTrue(match("lr != " + wide, record))
+        self.assertTrue(match("lr <= " + wide, record))
+        self.assertFalse(match("lr >= " + wide, record))
+
+    def test_a_wide_stored_value_compares(self):
+        """A param can hold one too, and every operator must survive reading it."""
+        record = {"steps": self.WIDE}
+        self.assertTrue(match("steps > 1", record))
+        self.assertFalse(match("steps < 1", record))
+        self.assertFalse(match("steps = 1", record))
+        self.assertTrue(match("steps != 1", record))
+
+    def test_wide_on_both_sides(self):
+        """Neither side is the one that has to be small."""
+        record = {"steps": self.WIDE}
+        self.assertTrue(match("steps = " + str(self.WIDE), record))
+        self.assertTrue(match("steps < " + str(self.WIDE + 1), record))
+        self.assertFalse(match("steps > " + str(self.WIDE + 1), record))
+
+    def test_a_wide_value_is_not_rounded_into_a_false_match(self):
+        """Two ints that differ past a float's mantissa stay different.
+
+        Casting through ``float`` made this match: both sides land on the same
+        1e20 once 53 bits of mantissa run out.
+        """
+        stored = 10**20
+        self.assertFalse(match("steps = %d" % (stored + 1), {"steps": stored}))
+        self.assertTrue(match("steps = %d" % stored, {"steps": stored}))
+        self.assertTrue(match("steps < %d" % (stored + 1), {"steps": stored}))
+
+    def test_an_integer_shaped_string_is_not_rounded_either(self):
+        """A stored ``"100000000000000000001"`` keeps every digit.
+
+        Read through ``float`` it lands on 1e20, so it matched the integer it
+        differs from and failed to match the one it spells.
+        """
+        stored = {"steps": str(10**20 + 1)}
+        self.assertTrue(match("steps = %d" % (10**20 + 1), stored))
+        self.assertFalse(match("steps = %d" % 10**20, stored))
+        self.assertFalse(match("steps < %d" % (10**20 + 1), stored))
+        self.assertTrue(match("steps > %d" % 10**20, stored))
+
+    def test_a_string_too_long_for_int_still_reads_as_a_number(self):
+        """``int()`` refuses past ``sys.get_int_max_str_digits()``; ``float`` saturates."""
+        self.assertTrue(match("steps > 1", {"steps": "9" * 5000}))
+        self.assertTrue(match("steps = 1.5", {"steps": "1.5"}))
+        self.assertTrue(match("steps < 1e999", {"steps": "1e5"}))
+
+    def test_a_wide_value_still_answers_contains_and_string_compares(self):
+        """The non-numeric operators were never the problem and stay put."""
+        self.assertTrue(match("steps contains 1000", {"steps": self.WIDE}))
+        self.assertFalse(match("name > 5", {"name": "abc"}))
+
+    def test_ordinary_numbers_are_unaffected(self):
+        """The cast that was removed did nothing else, so nothing else moves."""
+        record = {"lr": 0.01, "acc": 92.5, "epochs": 10}
+        self.assertTrue(match("lr < 0.05", record))
+        self.assertTrue(match("acc >= 92.5", record))
+        self.assertTrue(match("epochs = 10", record))
+        self.assertTrue(match("epochs = 10", {"epochs": "10"}))
+        self.assertTrue(match("lr = 0.010", {"lr": 0.01}))
+        self.assertFalse(match("epochs = 10", {"epochs": True}))
+
+    def test_an_over_large_float_literal_still_saturates(self):
+        """A float-shaped literal overflows to inf rather than raising, as before."""
+        self.assertTrue(match("lr < 1.0e999", {"lr": 0.01}))
+        self.assertTrue(match("lr < 1e999", {"lr": "0.01"}))
+
+
 class TestInjectionSafety(unittest.TestCase):
     """Injection-style payloads are inert: they parse to string literals or fail."""
 
@@ -419,7 +519,12 @@ class _FakeNamedValue:
 
 
 class _FakeExperiment:
-    """Experiment-shaped without being an Experiment; satisfies ExperimentLike."""
+    """Experiment-shaped without being an Experiment; satisfies ExperimentLike.
+
+    Exposes the metric series and nothing else, which is all the protocol asks
+    for: the shortcut a stored experiment offers is added by the subclass
+    below, so the two sides of :func:`latest_metric_values` are both covered.
+    """
 
     def __init__(self):
         self.env_id = "fake1"
@@ -429,8 +534,23 @@ class _FakeExperiment:
         self.created_at = 0.0
         self.finished_at = 1.0
         self.params = [_FakeNamedValue("lr", 0.5)]
-        self.metrics = [_FakeNamedValue("acc", 99.0)]
+        self.metrics = [
+            _FakeNamedValue("acc", 10.0),
+            _FakeNamedValue("acc", 99.0),
+        ]
         self.tags = [_FakeNamedValue("owner", "bob")]
+
+
+class _FakeExperimentWithShortcut(_FakeExperiment):
+    """The same shape, able to answer for its series without walking it."""
+
+    def __init__(self):
+        super().__init__()
+        self.shortcut_calls = 0
+
+    def latest_metric_values(self):
+        self.shortcut_calls += 1
+        return {"acc": 99.0}
 
 
 class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
@@ -442,6 +562,23 @@ class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
         self.assertEqual(record["metric.acc"], 99.0)
         self.assertEqual(record["tag.owner"], "bob")
         self.assertTrue(Query("lr < 1 AND acc > 90").matches(record))
+
+    def test_an_object_without_the_metric_shortcut_still_builds(self):
+        """The shortcut is an optimisation, so its absence is not an error."""
+        plain = _FakeExperiment()
+        self.assertFalse(hasattr(plain, "latest_metric_values"))
+
+        self.assertEqual(
+            build_record(plain), build_record(_FakeExperimentWithShortcut())
+        )
+
+    def test_the_shortcut_is_used_when_offered(self):
+        shortcut = _FakeExperimentWithShortcut()
+        build_record(shortcut)
+        self.assertEqual(shortcut.shortcut_calls, 1)
+
+    def test_latest_metric_values_walks_the_series_as_a_fallback(self):
+        self.assertEqual(latest_metric_values(_FakeExperiment()), {"acc": 99.0})
 
 
 if __name__ == "__main__":
