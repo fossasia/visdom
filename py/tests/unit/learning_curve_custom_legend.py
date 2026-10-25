@@ -190,6 +190,27 @@ def test_closing_all_windows_forgets_the_names_of_that_env_only(offline_client):
     assert list(offline_client._learning_curve_names) == [("other", "w2")]
 
 
+def test_deleting_the_main_env_keeps_its_window_names(offline_client):
+    """The server refuses to drop `main`, so its windows keep their names."""
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+
+    with patch.object(offline_client, "_send", return_value=None) as deleted:
+        offline_client.delete_env("main")
+
+    # `None` is what the server answers for the env it protects.
+    assert deleted.call_args[1]["endpoint"] == "delete_env"
+    assert list(offline_client._learning_curve_names) == [("main", "w1")]
+
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"train": [0.7]}, step=[1], win="w1", update="append"
+        )
+
+    assert [m["name"] for m in updates(send)] == ["Training loss"]
+
+
 def test_deleting_an_env_forgets_its_window_names(offline_client):
     opts = {"legend": ["Training loss"]}
     with patch.object(offline_client, "_send", return_value="w1"):

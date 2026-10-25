@@ -1930,8 +1930,14 @@ class Visdom(object):
 
     def delete_env(self, env):
         """This function deletes a specific environment."""
+        assert isstr(env), "env should be a string"
+
         result = self._send(msg={"eid": env}, endpoint="delete_env")
-        if result is not False:
+        # The server refuses to drop `main`, and a missing env is not dropped
+        # either, so its windows are still there and their names are still the
+        # ones an update has to address. A failed post answers False: nothing
+        # was deleted then, and the answer carries no env to compare against.
+        if result is not False and env != "main":
             self._forget_learning_curve_names(env=env)
         return result
 
