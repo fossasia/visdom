@@ -211,6 +211,82 @@ def test_deleting_the_main_env_keeps_its_window_names(offline_client):
     assert [m["name"] for m in updates(send)] == ["Training loss"]
 
 
+def test_learning_curve_replace_targets_the_legend_named_traces(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"train": [0.8], "val": [0.9]},
+            step=[1],
+            win="w1",
+            opts=opts,
+            update="replace",
+        )
+
+    replaced = updates(send)
+    assert [m["name"] for m in replaced] == ["Training loss", "Validation loss"]
+    assert [m["append"] for m in replaced] == [False, False]
+
+
+def test_learning_curve_subset_update_maps_each_label_back_to_its_metric(
+    offline_client,
+):
+    opts = {"legend": ["Training loss", "Validation loss", "Test loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2], "test": [1.4]}, step=[0], win="w1", opts=opts
+        )
+
+    # Two of the three metrics, under their own labels, listed in the order of
+    # the creation call: reading that legend positionally puts val on the train
+    # trace, because the update's metric order is val first.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9], "train": [0.7]},
+            step=[1],
+            win="w1",
+            opts={"legend": ["Training loss", "Validation loss"]},
+            update="append",
+        )
+
+    sent = {m["name"]: m["data"][0]["y"] for m in updates(send)}
+    assert sent == {"Training loss": [0.7], "Validation loss": [0.9]}
+
+
+def test_learning_curve_reports_an_update_that_partly_failed(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    # The first metric's update is refused, the second goes through: the answer
+    # has to say the call failed rather than carry the last success.
+    seen = []
+
+    def post(msg, endpoint="events", **kwargs):
+        seen.append(endpoint)
+        if endpoint == "update" and seen.count("update") == 1:
+            return False
+        return "w1"
+
+    with patch.object(offline_client, "_send", side_effect=post) as send:
+        result = offline_client.learning_curve(
+            {"train": [0.7], "val": [0.9]},
+            step=[1],
+            win="w1",
+            opts=opts,
+            update="append",
+        )
+
+    assert len(updates(send)) == 2
+    assert result is False
+
+
 def test_deleting_an_env_forgets_its_window_names(offline_client):
     opts = {"legend": ["Training loss"]}
     with patch.object(offline_client, "_send", return_value="w1"):

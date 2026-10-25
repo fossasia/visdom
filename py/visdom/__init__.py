@@ -3064,25 +3064,30 @@ class Visdom(object):
             )
             trace_names = list(legend)
             if created is not None:
-                created_names = [trace_name for _, trace_name in created]
                 stored = dict(created)
+                known = [stored.get(name) for name in names]
                 if not legend_given:
                     # The caller kept the labels from the creation call out of
                     # the update, so take them from there.
-                    trace_names = [stored.get(name, name) for name in names]
+                    trace_names = [
+                        name if label is None else label
+                        for name, label in zip(names, known)
+                    ]
                     opts["legend"] = trace_names
                 elif (
-                    len(set(created_names)) == len(created_names)
+                    None not in known
                     and len(set(legend)) == len(legend)
-                    and set(legend) == set(created_names)
+                    and set(legend) == set(known)
                 ):
-                    # The same labels, but they may be listed in another order
-                    # than the metrics, which would send values to the wrong
-                    # trace. Look each one up by the metric it was created for.
-                    trace_names = [
-                        stored.get(name, label) for name, label in zip(names, legend)
-                    ]
+                    # Every metric being updated was created under one of the
+                    # labels that came in, but they may be listed in another
+                    # order, or the update may carry only a subset of the
+                    # metrics. Position would send a metric's values to another
+                    # metric's trace, so each label is used for the metric it
+                    # was created for.
+                    trace_names = list(known)
             result = None
+            failed = False
             # Send one named update per metric so mapping order cannot swap traces.
             for trace_name, values in zip(trace_names, series):
                 metric_opts = None
@@ -3098,7 +3103,11 @@ class Visdom(object):
                     update=update,
                     name=trace_name,
                 )
-            return result
+                # A metric whose update was refused makes the whole call a
+                # failure. Answering with the last call's result would tell the
+                # caller everything went through when part of it did not.
+                failed = failed or result is False
+            return False if failed else result
 
         Y = np.column_stack(series)
 
