@@ -8,6 +8,8 @@
  */
 import React, { useContext } from 'react';
 const classNames = require('classnames');
+import './ConnectionIndicator.css';
+
 import ApiContext from '../api/ApiContext';
 
 function ConnectionIndicator(props) {

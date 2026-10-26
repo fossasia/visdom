@@ -1,0 +1,35 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+/* neutral "connecting" state, shown until the first connection resolves */
+.btn.topbar-conn-connecting {
+  cursor: default;
+  opacity: 1; /* override the faded look of disabled buttons */
+}
+
+.topbar-conn-connecting .topbar-conn-dot {
+  background: var(--vis-text-muted);
+  animation: topbar-conn-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes topbar-conn-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-conn-connecting .topbar-conn-dot {
+    animation: none;
+  }
+}
