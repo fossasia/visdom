@@ -135,6 +135,30 @@ class TestRequestsFindTheirWorkspace(WorkspaceRoutingCase):
         self.assertEqual(windows(self._app.server_state), {})
 
 
+class TestPagesCarryTheWorkspace(WorkspaceRoutingCase):
+    def test_every_page_names_its_workspace(self):
+        for path in ["/", "/env/main", "/compare/main+main"]:
+            with self.subTest(path=path):
+                response = self.fetch(
+                    path,
+                    headers={
+                        "X-Visdom-Workspace": "alpha",
+                        "Cookie": "session_token=browser",
+                    },
+                )
+
+                self.assertEqual(response.code, 200)
+                self.assertIn(b'"slug": "alpha"', response.body)
+
+    def test_pages_without_a_workspace_leave_the_badge_out(self):
+        for path in ["/", "/env/main", "/compare/main+main"]:
+            with self.subTest(path=path):
+                response = self.fetch(path)
+
+                self.assertEqual(response.code, 200)
+                self.assertNotIn(b"VISDOM_CLOUD", response.body)
+
+
 class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
     def test_a_viewer_cannot_write(self):
         response = self.write({"X-Visdom-Workspace": "alpha", "X-API-KEY": "key-v"})
@@ -159,6 +183,13 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
 
         self.assertEqual(response.code, 403)
         self.assertNotIn("new", self.space("ws-a").state)
+
+    def test_a_viewer_can_load_an_environment_that_exists(self):
+        self.space("ws-a").state["old"] = {"jsons": {}, "reload": {}}
+
+        response = self.post_as("key-v", "/env/old", {"eid": "old"})
+
+        self.assertEqual(response.code, 200)
 
     def test_a_member_can_still_create_an_environment(self):
         response = self.post_as("key-a", "/env/new", {"eid": "new"})
