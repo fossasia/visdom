@@ -4850,17 +4850,20 @@ class Visdom(object):
 
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
-        assert X.ndim == 1, "values of X and Y1 are not in proper shape"
+        assert X.ndim == 1, "values of X should be one-dimensional"
 
+        is_categorical = False
         if any(isinstance(val, str) for val in X) or (
             hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character)
         ):
             X = [str(value) for value in X]
+            is_categorical = True
         else:
             try:
                 X = [float(value) for value in X]
             except (ValueError, TypeError):
                 X = [str(value) for value in X]
+                is_categorical = True
         Y1 = [float(value) for value in Y1]
         Y2 = [float(value) for value in Y2]
         trace1 = {
@@ -4906,6 +4909,11 @@ class Visdom(object):
                 "l": opts.get("left", 60),
             },
         }
+        if "xtype" in opts:
+            layout["xaxis"] = {"type": opts["xtype"]}
+        elif is_categorical:
+            layout["xaxis"] = {"type": "category"}
+
         if "height" not in opts:
             opts["height"] = 300
         if "width" not in opts:
