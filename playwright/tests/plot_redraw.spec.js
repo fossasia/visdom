@@ -95,6 +95,35 @@ test.describe('plot redraws', () => {
     expect(calls.react).toBe(0);
   });
 
+  test('editing a property redraws the plot', async ({ page }) => {
+    await countPlotCalls(page);
+
+    await page
+      .locator('.layout .window button[title="properties"]')
+      .first()
+      .click();
+    const row = page
+      .locator('td.table-properties-name')
+      .filter({ hasText: 'type' })
+      .first()
+      .locator('xpath=..');
+    const value = row.locator('td.table-properties-value input').first();
+    await value.fill('bar');
+    await value.press('Enter');
+    await page.waitForTimeout(800);
+
+    const calls = await readPlotCalls(page);
+    expect(calls.react).toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (selector) => document.querySelector(selector)._fullData[0].type,
+          plotSelector
+        )
+      )
+      .toBe('bar');
+  });
+
   test('the smoothed overlay reuses the plotted x data', async ({ page }) => {
     const before = await page.evaluate(
       (selector) => document.querySelector(selector).data[0].y.slice(),

@@ -7,7 +7,13 @@
  *
  */
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
@@ -47,6 +53,7 @@ var PlotPane = (props) => {
   const captionRef = useRef();
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
+  const [propertyEdits, setPropertyEdits] = useState(0);
   const [smoothvalue, setSmoothValue] = useState(1);
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
@@ -187,6 +194,11 @@ var PlotPane = (props) => {
       });
   };
 
+  const handlePropertyUpdate = useCallback(
+    () => setPropertyEdits((edits) => edits + 1),
+    []
+  );
+
   const updateHistorySlider = (ev) => {
     setActualSelected(parseInt(ev.target.value));
   };
@@ -246,6 +258,7 @@ var PlotPane = (props) => {
     actualSelected,
     smoothWidgetActive,
     smoothvalue,
+    propertyEdits,
     annotations.modebarButton,
     sessionInfo?.readonly,
   ]);
@@ -471,6 +484,7 @@ var PlotPane = (props) => {
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       handleLatexExport={handleLatexExport}
+      onPropertyUpdate={handlePropertyUpdate}
       barwidgets={[smooth_widget_button]}
       widgets={[
         history_widget,
