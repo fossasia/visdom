@@ -82,16 +82,18 @@ const ApiProvider = ({ children }) => {
     };
 
     // eslint-disable-next-line no-undef
+   // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      _socket.current = new Poller(
+      let pollerInstance = null;
+      pollerInstance = new Poller(
         correctPathname,
         handleMessage,
         _onConnect,
-        () => _onDisconnect(_socket.current)
+        () => _onDisconnect(pollerInstance)
       );
+      _socket.current = pollerInstance;
       return;
     }
-
     var url = window.location;
     var ws_protocol = null;
     if (url.protocol == 'https:') {
