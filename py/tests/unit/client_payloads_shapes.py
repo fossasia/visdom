@@ -298,6 +298,33 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent2["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
 
+def test_stem_handles_1d_x_with_row_vector_y(capture_send):
+    """1D X inputs with row-vector Y (1, N) preserve timestamps and produce stems to baseline."""
+    # 1D X with (1, N) row-vector Y
+    sent = capture_send(
+        lambda v: v.stem(
+            X=np.array([10.0, 20.0, 30.0]),
+            Y=np.array([[1.0, 2.0, 3.0]]),
+        )
+    )
+    assert len(sent["payload"]["data"]) == 1
+    assert segments(trace(sent)["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(trace(sent)["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
+
+    # 2D X (N, M) with (1, N) row-vector Y
+    sent_multi = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0], [30.0, 40.0]]),
+            Y=np.array([[1.0, 2.0]]),
+        )
+    )
+    assert len(sent_multi["payload"]["data"]) == 2
+    assert segments(sent_multi["payload"]["data"][0]["x"]) == [[1.0, 1.0], [2.0, 2.0]]
+    assert segments(sent_multi["payload"]["data"][1]["x"]) == [[1.0, 1.0], [2.0, 2.0]]
+    assert segments(sent_multi["payload"]["data"][0]["y"]) == [[0.0, 10.0], [0.0, 30.0]]
+    assert segments(sent_multi["payload"]["data"][1]["y"]) == [[0.0, 20.0], [0.0, 40.0]]
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
