@@ -16,13 +16,18 @@ const NUMBER_EDIT_PATTERN = /^-?[0-9]*([.][0-9]*)?$/;
 const NUMBER_SUBMIT_PATTERN = /^-?([0-9]+(\.[0-9]+)?|\.[0-9]+)$/;
 
 function EditablePropertyText(props) {
-  const { value, validateHandler, submitHandler, blurStopPropagation } = props;
+  const {
+    value,
+    validateHandler,
+    submitHandler,
+    submitValidateHandler,
+    blurStopPropagation,
+  } = props;
 
   // state varibles
   // --------------
   const textInput = useRef();
   const previewRef = useRef();
-  const lastAcceptedValue = useRef(value);
   const [actualValue, setActualValue] = useState(value);
   const [isEdited, setIsEdited] = useState(false);
 
@@ -46,12 +51,10 @@ function EditablePropertyText(props) {
   };
   const onBlur = (event) => {
     setIsEdited(false);
-    if (submitHandler) {
-      if (submitHandler(actualValue) === false) {
-        setActualValue(lastAcceptedValue.current);
-      } else {
-        lastAcceptedValue.current = actualValue;
-      }
+    if (submitValidateHandler && !submitValidateHandler(actualValue)) {
+      setActualValue(value);
+    } else if (submitHandler) {
+      submitHandler(actualValue);
     }
 
     // prevents the pane to drop focus
@@ -80,10 +83,7 @@ function EditablePropertyText(props) {
 
   // save value if props changed & we are not in edit mode
   useEffect(() => {
-    lastAcceptedValue.current = value;
-    if (!isEdited) {
-      setActualValue(value);
-    }
+    if (!isEdited) setActualValue(value);
   }, [value]);
 
   useEffect(() => {
@@ -154,14 +154,9 @@ function PropertyItem(props) {
       return (
         <EditablePropertyText
           value={value}
-          submitHandler={(val) => {
-            if (NUMBER_SUBMIT_PATTERN.test(val)) {
-              updateValue(propId, val);
-              return true;
-            }
-            return false;
-          }}
+          submitHandler={(val) => updateValue(propId, val)}
           validateHandler={(val) => NUMBER_EDIT_PATTERN.test(val)}
+          submitValidateHandler={(val) => NUMBER_SUBMIT_PATTERN.test(val)}
           blurStopPropagation={blurStopPropagation}
         />
       );
