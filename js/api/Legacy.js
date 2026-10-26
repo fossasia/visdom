@@ -26,11 +26,11 @@ function dispatchMessages(messages, handler) {
         .replace(/\bNaN\b/g, 'null')
         .replace(/-Infinity\b/g, 'null')
         .replace(/\bInfinity\b/g, 'null');
-
     }
     try {
       handler({ data: msg });
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.warn('Skipping invalid message:', e.message);
     }
   });
@@ -52,38 +52,55 @@ function postData(url = ``, data = {}) {
 }
 
 class Poller {
-  /**
-   * Wrapper around what would regularly be socket communications, but handled
-   * through a POST-based polling loop
-   */
+  closed = false;
+
   constructor(correctPathname, _handleMessage, onConnect, onDisconnect) {
     this.onConnect = onConnect;
     this.onDisconnect = onDisconnect;
-    var url = window.location;
+    const url = window.location;
     this.target =
       url.protocol + '//' + url.host + correctPathname() + 'socket_wrap';
     this.onmessage = _handleMessage;
+
     fetch(this.target)
       .then((res) => {
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
         return res.json();
       })
       .then((data) => {
+        if (!data || !data.sid) {
+          throw new Error('missing sid in socket_wrap response');
+        }
         this.finishSetup(data.sid);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[Visdom API] Poller setup failed:', err);
+        this.close();
       });
   }
 
   finishSetup = (sid) => {
+    if (this.closed) {
+      return; // disconnected while setup was in flight
+    }
     this.sid = sid;
     this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
     this.onConnect(true);
   };
 
   close = () => {
-    this.onDisconnect();
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
     window.clearInterval(this.poller_id);
+    this.onDisconnect();
   };
-
   send = (msg) => {
+    if (this.closed) return;
     // Post a messge containing the desired command
     postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
       .then((res) => res.json())
@@ -102,11 +119,12 @@ class Poller {
   };
 
   poll = () => {
-    // Post message to query possible socket messages
+    if (this.closed) return;
     postData(this.target, { message_type: 'query', sid: this.sid })
       .then((res) => res.json())
       .then(
         (result) => {
+          if (this.closed) return;
           if (!result.success) {
             this.close();
           } else {
