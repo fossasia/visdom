@@ -148,6 +148,33 @@ def measure(call, repeat, warmup=0, setup=None):
     return Result(samples)
 
 
+def interleaved(sides, repeat, warmup):
+    """Time each side once per round, alternating, and return a Result each.
+
+    One side per process would be cleaner, but then the two numbers come from
+    different moments on a machine that is doing other things, and the drift
+    between them lands in the comparison. Alternating puts both sides under the
+    same conditions.
+
+    The order within a round is swapped every other round. Running one side
+    first every time gives it a systematic advantage or handicap -- it is the
+    call that pays for a cold page cache, a scheduler slice ending, whatever
+    the other side then finds already warm -- and the bias lands in the ratio
+    rather than averaging out across rounds, which is exactly what alternating
+    was supposed to prevent.
+    """
+    samples = {name: [] for name in sides}
+    order = list(sides)
+    for round_index in range(warmup + repeat):
+        for name in order if round_index % 2 == 0 else reversed(order):
+            start = time.perf_counter()
+            sides[name]()
+            elapsed = (time.perf_counter() - start) * 1000.0
+            if round_index >= warmup:
+                samples[name].append(elapsed)
+    return {name: Result(values) for name, values in samples.items()}
+
+
 def table(headers, rows):
     """Print a markdown table, ready to paste into a PR body."""
     cells = [[str(value) for value in row] for row in rows]
