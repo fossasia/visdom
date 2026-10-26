@@ -266,7 +266,13 @@ function PropertyList(props) {
   // note: props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
   const updateValue = (key, value) => {
-    content[key] = value;
+    if (typeof content[key] === 'number') {
+      const parsed = Number(value);
+      if (value === '' || Number.isNaN(parsed)) return;
+      content[key] = parsed;
+    } else {
+      content[key] = value;
+    }
     if (props.onUpdate) props.onUpdate();
   };
 

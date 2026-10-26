@@ -38,6 +38,19 @@ async function openSmoothing(page, value) {
   await page.waitForTimeout(800);
 }
 
+const openProperty = async (page, key) => {
+  await page
+    .locator('.layout .window button[title="properties"]')
+    .first()
+    .click();
+  const row = page
+    .locator('td.table-properties-name')
+    .filter({ hasText: key })
+    .first()
+    .locator('xpath=..');
+  return row.locator('td.table-properties-value input').first();
+};
+
 test.describe('plot redraws', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -98,16 +111,7 @@ test.describe('plot redraws', () => {
   test('editing a property redraws the plot', async ({ page }) => {
     await countPlotCalls(page);
 
-    await page
-      .locator('.layout .window button[title="properties"]')
-      .first()
-      .click();
-    const row = page
-      .locator('td.table-properties-name')
-      .filter({ hasText: 'type' })
-      .first()
-      .locator('xpath=..');
-    const value = row.locator('td.table-properties-value input').first();
+    const value = await openProperty(page, 'type');
     await value.fill('bar');
     await value.press('Enter');
     await page.waitForTimeout(800);
@@ -122,6 +126,36 @@ test.describe('plot redraws', () => {
         )
       )
       .toBe('bar');
+  });
+
+  test('a numeric property stays a number', async ({ page }) => {
+    const value = await openProperty(page, 'marker.line.width');
+    await value.fill('5');
+    await value.press('Enter');
+    await page.waitForTimeout(800);
+
+    const width = await page.evaluate(
+      (selector) => document.querySelector(selector).data[0].marker.line.width,
+      plotSelector
+    );
+    expect(width).toBe(5);
+  });
+
+  test('a resize while the plot redraws still ends at the pane size', async ({
+    page,
+  }) => {
+    await page
+      .locator('.layout .window button[title="smooth lines"]')
+      .first()
+      .click();
+    await page.setViewportSize({ width: 780, height: 600 });
+    await page.waitForTimeout(1500);
+
+    const sizes = await page.evaluate((selector) => {
+      const graph = document.querySelector(selector);
+      return { drawn: graph._fullLayout.width, pane: graph.clientWidth };
+    }, plotSelector);
+    expect(Math.abs(sizes.drawn - sizes.pane)).toBeLessThanOrEqual(2);
   });
 
   test('the smoothed overlay reuses the plotted x data', async ({ page }) => {

@@ -60,6 +60,7 @@ var PlotPane = (props) => {
   );
   const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
   const layoutUpdateTimeout = useRef(null);
+  const redrawn = useRef(Promise.resolve());
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -212,9 +213,11 @@ var PlotPane = (props) => {
     if (!plotElement) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      if (plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
-      }
+      redrawn.current.then(() => {
+        if (plotElement._fullLayout && isDisplayed(plotElement)) {
+          Plotly.Plots.resize(plotElement);
+        }
+      });
     });
 
     resizeObserver.observe(plotElement);
@@ -393,17 +396,22 @@ var PlotPane = (props) => {
     }
 
     // draw / redraw plot with layout-options
-    Plotly.react(plotlyRef.current, data.concat(smooth_data), content.layout, {
-      displaylogo: false,
-      doubleClick: 'reset',
-      doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
-        annotations.modebarButton ? [annotations.modebarButton] : []
-      ),
-      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
-      // dragging a note box leaves its arrow on the data point
-      edits: { annotationTail: !sessionInfo?.readonly },
-    });
+    redrawn.current = Plotly.react(
+      plotlyRef.current,
+      data.concat(smooth_data),
+      content.layout,
+      {
+        displaylogo: false,
+        doubleClick: 'reset',
+        doubleClickDelay: 500,
+        modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+          annotations.modebarButton ? [annotations.modebarButton] : []
+        ),
+        modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+        // dragging a note box leaves its arrow on the data point
+        edits: { annotationTail: !sessionInfo?.readonly },
+      }
+    ).catch(() => {});
   };
 
   // check if data can be smoothed
