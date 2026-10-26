@@ -61,19 +61,23 @@ const ApiProvider = ({ children }) => {
   };
 
   // Establish a connection to the server
-// Establish a connection to the server
   const connect = () => {
     if (_socket.current) {
       return;
     }
+    setConnected(null); // show "connecting" on (re)connect too
 
-    const _onConnect = () => {
+    const _onConnect = (instance) => {
+      // Ignore connects from sockets that were closed or superseded
+      if (_socket.current !== instance) {
+        return;
+      }
       setConnected(true);
     };
 
-    const _onDisconnect = (socketInstance) => {
-      // Guard: Only clear state and mark offline if the closing socket is still the active one
-      if (socketInstance && _socket.current !== socketInstance) {
+    const _onDisconnect = (instance) => {
+      // Only the active socket may mark us offline
+      if (_socket.current !== instance) {
         return;
       }
       _socket.current = null;
@@ -82,32 +86,25 @@ const ApiProvider = ({ children }) => {
     };
 
     // eslint-disable-next-line no-undef
-   // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      let pollerInstance = null;
-      pollerInstance = new Poller(
+      // eslint-disable-next-line prefer-const
+      let pollerInstance = new Poller(
         correctPathname,
         handleMessage,
-        _onConnect,
+        () => _onConnect(pollerInstance),
         () => _onDisconnect(pollerInstance)
       );
       _socket.current = pollerInstance;
       return;
     }
-    var url = window.location;
-    var ws_protocol = null;
-    if (url.protocol == 'https:') {
-      ws_protocol = 'wss';
-    } else {
-      ws_protocol = 'ws';
-    }
 
-    const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl =
+      protocol + '://' + window.location.host + correctPathname() + 'socket';
 
-    var socket = new WebSocket(wsUrl);
-
+    const socket = new WebSocket(wsUrl);
     socket.onmessage = handleMessage;
-    socket.onopen = _onConnect;
+    socket.onopen = () => _onConnect(socket);
     socket.onerror = (event) => {
       // eslint-disable-next-line no-console
       console.error(
@@ -115,13 +112,10 @@ const ApiProvider = ({ children }) => {
         event
       );
     };
-
     socket.onclose = (event) => {
-      // Guard against old/superseded socket instances
       if (_socket.current !== socket) {
         return;
       }
-
       if (!event.wasClean) {
         // eslint-disable-next-line no-console
         console.warn(
@@ -135,24 +129,25 @@ const ApiProvider = ({ children }) => {
 
     _socket.current = socket;
   };
+
   // Close the server connection and reset the _socket ref
-// Close the server connection and reset the _socket ref
- // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    if (_socket.current) {
-      const socketToClose = _socket.current;
-      _socket.current = null;
-
-      // Nullify listeners so asynchronous close events won't fire against subsequent sockets
-      socketToClose.onopen = null;
-      socketToClose.onmessage = null;
-      socketToClose.onerror = null;
-      socketToClose.onclose = null;
-
-      socketToClose.close();
-      setConnected(false);
+    const socketToClose = _socket.current;
+    if (!socketToClose) {
+      return;
     }
-  }; // ------------------ //
+    _socket.current = null;
+
+    // Detach listeners so late events can't touch a newer socket
+    socketToClose.onopen = null;
+    socketToClose.onmessage = null;
+    socketToClose.onerror = null;
+    socketToClose.onclose = null;
+
+    socketToClose.close();
+    setConnected(false);
+  };
+
   // API receive events //
   // -------------------//
 

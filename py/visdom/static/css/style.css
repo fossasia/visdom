@@ -169,6 +169,27 @@ h1 {
   background: var(--vis-danger);
 }
 
+.topbar-conn-connecting {
+  cursor: default;
+  opacity: 1; /* override bootstrap's faded .btn[disabled] */
+}
+
+.topbar-conn-connecting .topbar-conn-dot {
+  background: var(--vis-text-muted);
+  animation: topbar-conn-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes topbar-conn-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-conn-connecting .topbar-conn-dot {
+    animation: none;
+  }
+}
+
 .form-inline {
   padding: 5px;
 }
