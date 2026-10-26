@@ -236,6 +236,8 @@ function MetricDetailView({ pane, envID, onClose }) {
   // ----- per-step stats table -----
   const [stepsDesc, setStepsDesc] = useState(false);
   const [firstRow, setFirstRow] = useState(0);
+  // window_update patches the traces in place, so their identity doesn't
+  // change when a point is appended; pane.version does
   const stepRows = useMemo(() => {
     if (!visibleIdx.length) return [];
     const rows = buildMatchedRows(allTraces, visibleIdx).map((row, r) => ({
@@ -244,7 +246,7 @@ function MetricDetailView({ pane, envID, onClose }) {
       cells: row.values.map(num),
     }));
     return stepsDesc ? rows.reverse() : rows;
-  }, [allTraces, visibleIdx.join(','), stepsDesc]);
+  }, [allTraces, pane.version, visibleIdx.join(','), stepsDesc]);
 
   // only the rows in view are rendered; the rest is spacer height
   const rowsInView =
