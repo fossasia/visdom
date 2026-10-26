@@ -4470,7 +4470,8 @@ class Visdom(object):
         assert (
             X.ndim == 0 or X.ndim == 1 or X.ndim == 2
         ), "X should be one or two-dimensional"
-        if X.ndim <= 1:
+        is_1d_x = X.ndim <= 1
+        if is_1d_x:
             X = np.atleast_1d(X)[:, None]
 
         if Y is None:
@@ -4482,6 +4483,12 @@ class Visdom(object):
             assert (
                 Y.ndim == 0 or Y.ndim == 1 or Y.ndim == 2
             ), "Y should be one or two-dimensional"
+            if (
+                Y.ndim == 2
+                and Y.shape[0] == 1
+                and (is_1d_x or (X.shape[0] > 1 and Y.shape[1] == X.shape[0]))
+            ):
+                Y = np.squeeze(Y)
             if Y.ndim <= 1:
                 Y = np.atleast_1d(Y)[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
