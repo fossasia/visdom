@@ -506,11 +506,11 @@ def test_dual_axis_lines_resolves_the_environment_itself(capture_send, offline_c
         ),
         (
             dict(X=np.zeros((3, 2)), Y1=np.zeros((3, 2)), Y2=np.zeros((3, 2))),
-            "values of X and Y1 are not in proper shape",
+            "values of X should be one-dimensional",
         ),
         (
             dict(X=np.zeros((3, 2, 2)), Y1=np.zeros((3, 2, 2)), Y2=np.zeros((3, 2, 2))),
-            "values of X and Y1 are not in proper shape",
+            "values of X should be one-dimensional",
         ),
     ],
 )
@@ -555,6 +555,7 @@ def test_dual_axis_lines_accepts_categorical_x(capture_send):
     assert first["y"] == [10.0, 20.0]
     assert second["x"] == ["Jan", "Feb"]
     assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
 
 
 def test_dual_axis_lines_preserves_numeric_string_labels(capture_send):
@@ -568,3 +569,18 @@ def test_dual_axis_lines_preserves_numeric_string_labels(capture_send):
     assert first["y"] == [10.0, 20.0]
     assert second["x"] == ["001", "002"]
     assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_accepts_mixed_categorical_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", 1], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["Jan", "1"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["Jan", "1"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
