@@ -29,6 +29,7 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_PORT,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
@@ -91,6 +92,7 @@ def start_server(
     internal_port=None,
     internal_ssl_certfile=None,
     internal_ssl_keyfile=None,
+    max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
@@ -116,6 +118,7 @@ def start_server(
             save_threshold=save_threshold,
             internal_port=internal_port,
             internal_ssl_ctx=internal_ssl_ctx,
+            max_image_history=max_image_history,
         )
     )
 
@@ -212,6 +215,7 @@ async def _serve(
     save_threshold,
     internal_port=None,
     internal_ssl_ctx=None,
+    max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -231,6 +235,7 @@ async def _serve(
         eager_data_loading=eager_data_loading,
         save_interval=save_interval,
         save_threshold=save_threshold,
+        max_image_history=max_image_history,
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
@@ -426,6 +431,15 @@ def main(print_func=None):
         "so a busy one is not left unsaved for a whole interval. 0 disables.",
     )
     parser.add_argument(
+        "-max_image_history",
+        metavar="max_image_history",
+        type=int,
+        default=DEFAULT_MAX_IMAGE_HISTORY,
+        help="Maximum number of frames kept per image history window "
+        "(default = %d). Older frames are dropped. Higher values use more "
+        "memory in the browser." % DEFAULT_MAX_IMAGE_HISTORY,
+    )
+    parser.add_argument(
         "-ssl_certfile",
         metavar="ssl_certfile",
         type=str,
@@ -452,6 +466,8 @@ def main(print_func=None):
 
     if bool(FLAGS.ssl_certfile) != bool(FLAGS.ssl_keyfile):
         parser.error("-ssl_certfile and -ssl_keyfile must be provided together.")
+    if FLAGS.max_image_history < 1:
+        parser.error("-max_image_history must be at least 1.")
     if FLAGS.internal_port is not None and not (
         FLAGS.internal_ssl_certfile and FLAGS.internal_ssl_keyfile
     ):
@@ -540,6 +556,7 @@ def main(print_func=None):
         ssl_keyfile=FLAGS.ssl_keyfile,
         save_interval=FLAGS.save_interval,
         save_threshold=FLAGS.save_threshold,
+        max_image_history=FLAGS.max_image_history,
         internal_port=FLAGS.internal_port,
         internal_ssl_certfile=FLAGS.internal_ssl_certfile,
         internal_ssl_keyfile=FLAGS.internal_ssl_keyfile,
