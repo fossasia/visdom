@@ -164,6 +164,13 @@ class BaseWebSocketHandler(
             return None
         return self.get_secure_cookie("user_password")
 
+    def write_message(self, message, binary=False):
+        try:
+            return super().write_message(message, binary)
+        except tornado.websocket.WebSocketClosedError:
+            logging.debug("Dropped a message for a closed socket")
+            return None
+
     async def get(self, *args, **kwargs):
         try:
             await self.resolve_workspace_off_loop()

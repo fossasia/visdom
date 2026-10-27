@@ -245,6 +245,30 @@ def loadfile(filename):
     return str
 
 
+def _finite_range(ar):
+    """Smallest and largest finite value in `ar`, or `None` if it has none.
+
+    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
+    materialise: the fancy index builds a compacted copy of every finite
+    element just to read two numbers off it, which on an image-sized array is
+    a second full array per call. `fmin`/`fmax` skip NaN the same way and
+    reduce in place, so only an infinity -- which they propagate rather than
+    skip -- needs the mask at all.
+    """
+    if ar.size == 0:
+        return None
+    ar_min = np.fmin.reduce(ar, axis=None)
+    ar_max = np.fmax.reduce(ar, axis=None)
+    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
+        return None
+    if np.isneginf(ar_min) or np.isposinf(ar_max):
+        finite = ar[np.isfinite(ar)]
+        if finite.size == 0:
+            return None
+        return float(finite.min()), float(finite.max())
+    return float(ar_min), float(ar_max)
+
+
 def _title2str(opts):
     if opts.get("title") is not None:
         if isnum(opts.get("title")):
@@ -440,16 +464,17 @@ def _markerColorCheck(mc, X, Y, L):
     mc = np.uint8(mc)
 
     if mc.ndim == 1:
-        markercolor = ["rgba(0, 0, 255, %s)" % (mc[i] / 255.0) for i in range(len(mc))]
+        markercolor = ["rgba(0, 0, 255, %s)" % alpha for alpha in (mc / 255.0).tolist()]
     else:
-        markercolor = ["#%02x%02x%02x" % (i[0], i[1], i[2]) for i in mc]
+        markercolor = ["#%02x%02x%02x" % (r[0], r[1], r[2]) for r in mc.tolist()]
 
+    labels = Y.tolist()
     if mc.shape[0] != X.shape[0]:
-        markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]
+        markercolor = [markercolor[label - 1] for label in labels]
 
     ret = {}
-    for k, v in enumerate(markercolor):
-        ret[Y[k]] = ret.get(Y[k], []) + [v]
+    for label, color in zip(labels, markercolor):
+        ret.setdefault(label, []).append(color)
 
     return ret
 
@@ -471,7 +496,10 @@ def _markerSizeCheck(ms, X, Y):
         "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+    if len(Y) == 0:
+        return np.array([], dtype=float)
+
+    return ms[np.asarray(Y) - 1].astype(float)
 
 
 def _lineColorCheck(lc, K):
@@ -534,7 +562,7 @@ def _assert_opts(opts):
     if opts.get("markersize") is not None:
         ms = opts.get("markersize")
         if isinstance(ms, (list, tuple, np.ndarray)):
-            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+            assert np.all(np.asarray(ms) > 0), "all marker sizes must be positive"
         else:
             assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
@@ -558,6 +586,19 @@ def _assert_opts(opts):
         assert (
             opts.get("jpgquality") > 0 and opts.get("jpgquality") <= 100
         ), "JPG quality should be number between 0 and 100"
+
+    # Unlike jpgquality, this one is guarded on None rather than on being
+    # truthy: 0 is a documented level (store, no compression), not an unset
+    # value.
+    if opts.get("compresslevel") is not None:
+        assert isinstance(
+            opts.get("compresslevel"), numbers.Integral
+        ) and not isinstance(
+            opts.get("compresslevel"), bool
+        ), "PNG compress level should be an integer"
+        assert (
+            0 <= opts.get("compresslevel") <= 9
+        ), "PNG compress level should be an integer between 0 and 9"
 
     if opts.get("opacity"):
         assert isnum(opts.get("opacity")), "opacity should be a number"
@@ -824,13 +865,44 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
 
     label_to_idx = {label: i for i, label in enumerate(labels)}
     n = len(labels)
-    cm = np.zeros((n, n), dtype=int)
-    skipped = 0
-    for t, p in zip(y_true, y_pred):
-        if t in label_to_idx and p in label_to_idx:
-            cm[label_to_idx[t], label_to_idx[p]] += 1
-        else:
-            skipped += 1
+
+    def label_indices(values):
+        """Map a value vector to label indices, -1 where the label is unknown.
+
+        The dict is consulted once per *distinct* value rather than once per
+        sample, so a long run of a few labels costs a sort and a gather.
+        Object arrays may hold values that cannot be ordered against each
+        other (``None`` beside numbers, numbers beside strings), which the
+        sort inside ``np.unique`` rejects, so those keep the per-sample
+        lookup, which only ever needs the labels to be hashable.
+        """
+        if values.dtype == object:
+            return np.fromiter(
+                (label_to_idx.get(value, -1) for value in values.tolist()),
+                dtype=np.intp,
+                count=values.shape[0],
+            )
+        uniq, inverse = np.unique(values, return_inverse=True)
+        lookup = np.fromiter(
+            (label_to_idx.get(value, -1) for value in uniq.tolist()),
+            dtype=np.intp,
+            count=uniq.shape[0],
+        )
+        return lookup[inverse.ravel()]
+
+    true_idx = label_indices(y_true)
+    pred_idx = label_indices(y_pred)
+    counted = (true_idx >= 0) & (pred_idx >= 0)
+    skipped = int(counted.shape[0] - np.count_nonzero(counted))
+
+    cm = (
+        np.bincount(
+            true_idx[counted] * n + pred_idx[counted],
+            minlength=n * n,
+        )
+        .reshape(n, n)
+        .astype(int)
+    )
     if skipped > 0:
         warnings.warn(
             "{} samples had labels not in the provided labels list "
@@ -2423,6 +2495,7 @@ class Visdom(object):
 
         - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
@@ -2430,9 +2503,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2484,6 +2557,8 @@ class Visdom(object):
         if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -2556,6 +2631,7 @@ class Visdom(object):
         - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
         - `opts.caption`:  caption below the image (`string`; optional)
         - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
         """
         opts = {} if opts is None else dict(opts)
@@ -2566,9 +2642,9 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2653,6 +2729,8 @@ class Visdom(object):
         if jpgquality is not None:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
         im.save(buf, format=image_type.upper(), **imsave_args)
         b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
 
@@ -2736,18 +2814,44 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
-        k = 0
-        for y in range(ymaps):
-            for x in range(xmaps):
-                if k >= nmaps:
-                    break
-                h_start = y * height + offset
-                h_end = h_start + tensor.shape[2]
-                w_start = x * width + offset
-                w_end = w_start + tensor.shape[3]
-                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
-                k += 1
+        # The grid has always been float64, which `image()` then takes through
+        # its float branch: eight bytes a pixel for what is usually a uint8
+        # batch, plus that branch's full-size temporaries. Staying in uint8 is
+        # only *identical* while that branch does no scaling, and it has two
+        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
+        # which includes the fill value of 1 itself -- so a uint8 batch holding
+        # nothing above 1 keeps the float grid, and with it the stretch pinned
+        # by `test_images_padding_colour_follows_the_input_dtype`. And
+        # `opts.normalize` asks for the min-max stretch explicitly, which the
+        # branch is the only thing that implements: a uint8 grid never reaches
+        # it, so the option would silently do nothing. Deciding this costs one
+        # C-speed pass over the batch and saves a copy of it at eight times the
+        # width.
+        normalize = opts is not None and opts.get("normalize", False)
+        grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+            grid = np.ones(grid_shape, dtype=np.uint8)
+        else:
+            grid = np.ones(grid_shape)
+
+        # One strided write per row of cells instead of one per tile: the grid
+        # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
+        # tile's slot at once, and a view is all of reshape/transpose/slice, so
+        # assigning into it writes straight through to `grid`.
+        cells = grid.reshape(tensor.shape[1], ymaps, height, xmaps, width).transpose(
+            1, 3, 0, 2, 4
+        )
+        slots = cells[
+            ..., offset : offset + tensor.shape[2], offset : offset + tensor.shape[3]
+        ]
+        full_rows = nmaps // xmaps
+        if full_rows:
+            slots[:full_rows] = tensor[: full_rows * xmaps].reshape(
+                full_rows, xmaps, *tensor.shape[1:]
+            )
+        remainder = nmaps - full_rows * xmaps
+        if remainder:
+            slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
         return self.image(grid, win, env, opts)
 
@@ -3183,9 +3287,30 @@ class Visdom(object):
         )
         lc = opts.get("linecolor")
 
-        for k in labels:
-            ind = np.equal(Y, k)
-            if ind.any():
+        # Each coordinate column is extracted once here rather than once per
+        # trace, and the points are grouped by label in a single pass: both
+        # used to be redone for every label, so an M-trace plot walked all N
+        # points M times.
+        columns = [X.take(axis, 1) for axis in range(X.shape[1])]
+        if len(labels) == 1:
+            # One trace holding every point, which is what every unlabelled
+            # plot (``line`` included) reduces to. No grouping work at all.
+            runs = [slice(None)]
+            run_lengths = [X.shape[0]]
+        else:
+            # ``labels`` is ``np.unique(Y)``, so it is sorted and covers every
+            # value in ``Y``: one stable argsort lays the points out in
+            # contiguous per-label runs, in their original order, and the left
+            # boundaries alone partition it.
+            grouped = np.argsort(Y, kind="stable")
+            bounds = np.searchsorted(Y[grouped], labels, side="left").tolist()
+            bounds.append(X.shape[0])
+            runs = [grouped[bounds[i] : bounds[i + 1]] for i in range(len(labels))]
+            run_lengths = [len(run) for run in runs]
+
+        for position, k in enumerate(labels):
+            ind = runs[position]
+            if run_lengths[position]:
                 if "legend" in opts:
                     trace_name = opts.get("legend")[k - 1]
                 elif len(labels) == 1 and name is not None:
@@ -3199,8 +3324,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": X.take(0, 1)[ind].tolist(),
-                    "y": X.take(1, 1)[ind].tolist(),
+                    "x": columns[0][ind].tolist(),
+                    "y": columns[1][ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -3230,7 +3355,7 @@ class Visdom(object):
                     _data["fill"] = "tonexty"
 
                 if is3d:
-                    _data["z"] = X.take(2, 1)[ind].tolist()
+                    _data["z"] = columns[2][ind].tolist()
 
                 if trace_name in trace_opts:
                     # Normalized here rather than over the finished trace below:
@@ -4019,9 +4144,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        finite = X[np.isfinite(X)]
-        if finite.size > 0:
-            minx, maxx = float(finite.min()), float(finite.max())
+        finite_range = _finite_range(X)
+        if finite_range is not None:
+            minx, maxx = finite_range
         else:
             minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
@@ -4712,13 +4837,20 @@ class Visdom(object):
         Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
+        if X.ndim == 2 and X.shape[1] == 1:
+            # The shapes match, so all three are column vectors holding one
+            # value per row, which the ``float(value)`` loop this replaced
+            # flattened implicitly. Every other 2-D shape still fails the
+            # assertion below.
+            X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
+        assert X.ndim == 1, "values of X should be one-dimensional"
         if opts is None:
             opts = {}
             opts["height"] = 300
             opts["width"] = 500
-        X = [float(value) for value in X]
-        Y1 = [float(value) for value in Y1]
-        Y2 = [float(value) for value in Y2]
+        X = X.astype(float).tolist()
+        Y1 = Y1.astype(float).tolist()
+        Y2 = Y2.astype(float).tolist()
         trace1 = {
             "x": X,
             "y": Y1,
