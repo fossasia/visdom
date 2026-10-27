@@ -245,6 +245,30 @@ def loadfile(filename):
     return str
 
 
+def _finite_range(ar):
+    """Smallest and largest finite value in `ar`, or `None` if it has none.
+
+    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
+    materialise: the fancy index builds a compacted copy of every finite
+    element just to read two numbers off it, which on an image-sized array is
+    a second full array per call. `fmin`/`fmax` skip NaN the same way and
+    reduce in place, so only an infinity -- which they propagate rather than
+    skip -- needs the mask at all.
+    """
+    if ar.size == 0:
+        return None
+    ar_min = np.fmin.reduce(ar, axis=None)
+    ar_max = np.fmax.reduce(ar, axis=None)
+    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
+        return None
+    if np.isneginf(ar_min) or np.isposinf(ar_max):
+        finite = ar[np.isfinite(ar)]
+        if finite.size == 0:
+            return None
+        return float(finite.min()), float(finite.max())
+    return float(ar_min), float(ar_max)
+
+
 def _title2str(opts):
     if opts.get("title") is not None:
         if isnum(opts.get("title")):
@@ -562,6 +586,19 @@ def _assert_opts(opts):
         assert (
             opts.get("jpgquality") > 0 and opts.get("jpgquality") <= 100
         ), "JPG quality should be number between 0 and 100"
+
+    # Unlike jpgquality, this one is guarded on None rather than on being
+    # truthy: 0 is a documented level (store, no compression), not an unset
+    # value.
+    if opts.get("compresslevel") is not None:
+        assert isinstance(
+            opts.get("compresslevel"), numbers.Integral
+        ) and not isinstance(
+            opts.get("compresslevel"), bool
+        ), "PNG compress level should be an integer"
+        assert (
+            0 <= opts.get("compresslevel") <= 9
+        ), "PNG compress level should be an integer between 0 and 9"
 
     if opts.get("opacity"):
         assert isnum(opts.get("opacity")), "opacity should be a number"
@@ -2479,6 +2516,7 @@ class Visdom(object):
 
         - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
@@ -2486,9 +2524,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2540,6 +2578,8 @@ class Visdom(object):
         if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -2612,6 +2652,7 @@ class Visdom(object):
         - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
         - `opts.caption`:  caption below the image (`string`; optional)
         - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
         """
         opts = {} if opts is None else dict(opts)
@@ -2622,9 +2663,9 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2709,6 +2750,8 @@ class Visdom(object):
         if jpgquality is not None:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
         im.save(buf, format=image_type.upper(), **imsave_args)
         b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
 
@@ -2792,18 +2835,44 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
-        k = 0
-        for y in range(ymaps):
-            for x in range(xmaps):
-                if k >= nmaps:
-                    break
-                h_start = y * height + offset
-                h_end = h_start + tensor.shape[2]
-                w_start = x * width + offset
-                w_end = w_start + tensor.shape[3]
-                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
-                k += 1
+        # The grid has always been float64, which `image()` then takes through
+        # its float branch: eight bytes a pixel for what is usually a uint8
+        # batch, plus that branch's full-size temporaries. Staying in uint8 is
+        # only *identical* while that branch does no scaling, and it has two
+        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
+        # which includes the fill value of 1 itself -- so a uint8 batch holding
+        # nothing above 1 keeps the float grid, and with it the stretch pinned
+        # by `test_images_padding_colour_follows_the_input_dtype`. And
+        # `opts.normalize` asks for the min-max stretch explicitly, which the
+        # branch is the only thing that implements: a uint8 grid never reaches
+        # it, so the option would silently do nothing. Deciding this costs one
+        # C-speed pass over the batch and saves a copy of it at eight times the
+        # width.
+        normalize = opts is not None and opts.get("normalize", False)
+        grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+            grid = np.ones(grid_shape, dtype=np.uint8)
+        else:
+            grid = np.ones(grid_shape)
+
+        # One strided write per row of cells instead of one per tile: the grid
+        # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
+        # tile's slot at once, and a view is all of reshape/transpose/slice, so
+        # assigning into it writes straight through to `grid`.
+        cells = grid.reshape(tensor.shape[1], ymaps, height, xmaps, width).transpose(
+            1, 3, 0, 2, 4
+        )
+        slots = cells[
+            ..., offset : offset + tensor.shape[2], offset : offset + tensor.shape[3]
+        ]
+        full_rows = nmaps // xmaps
+        if full_rows:
+            slots[:full_rows] = tensor[: full_rows * xmaps].reshape(
+                full_rows, xmaps, *tensor.shape[1:]
+            )
+        remainder = nmaps - full_rows * xmaps
+        if remainder:
+            slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
         return self.image(grid, win, env, opts)
 
@@ -4096,9 +4165,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        finite = X[np.isfinite(X)]
-        if finite.size > 0:
-            minx, maxx = float(finite.min()), float(finite.max())
+        finite_range = _finite_range(X)
+        if finite_range is not None:
+            minx, maxx = finite_range
         else:
             minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
