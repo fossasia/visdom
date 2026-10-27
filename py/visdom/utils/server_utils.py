@@ -15,7 +15,6 @@ in the previous server.py class.
 """
 
 import contextlib
-import copy
 import functools
 import hashlib
 import html
@@ -39,6 +38,7 @@ from visdom.server.defaults import (
 )
 from visdom.utils.shared_utils import (
     warn_once,
+    copy_json_data,
     get_rand_id,
     get_new_window_id,
     NanSafeEncoder,
@@ -228,12 +228,20 @@ class LazyEnvData(Mapping):
 def snapshot_env(env):
     """Deep-copy one env so a worker thread can serialize it safely.
 
+    The copy is taken here, on the loop, because that is the only place the env
+    is not being written to -- so it is paid every ``save_interval`` or every
+    ``save_threshold`` updates, per environment, for the whole env however
+    little of it changed. ``copy_json_data`` is what keeps that affordable:
+    an env is JSON by construction, and copying it as JSON rather than as
+    arbitrary Python objects is several times less work for an identical
+    result (see :func:`~visdom.utils.shared_utils.copy_json_data`).
+
     Returns ``None`` for a lazy env that was never read: its on-disk copy is
     already current, so there is nothing to write.
     """
     if isinstance(env, LazyEnvData) and not env.is_loaded:
         return None
-    return copy.deepcopy(dict(env))
+    return copy_json_data(dict(env))
 
 
 def snapshot_envs(state, eids):
@@ -777,7 +785,9 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
         socket.eid = eids
         return
     base_eid = valid_eids[0]
-    res = copy.deepcopy(envs[base_eid])
+    # Every valid env is read below, this one included, so materialising the
+    # base to copy it as JSON reads nothing that was not about to be read.
+    res = copy_json_data(dict(envs[base_eid]))
     name2Wid = {
         res["jsons"][wid].get("title", None): wid + "_compare"
         for wid in res.get("jsons", {})
@@ -829,7 +839,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
 
-                    first_img = copy.deepcopy(destWidJson["content"])
+                    first_img = copy_json_data(destWidJson["content"])
                     caption = first_img.get("caption")
                     first_img["caption"] = "{}_{}".format(
                         eidNums[eid], caption if caption is not None else "image"
@@ -841,7 +851,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     if destWid not in seen_dest_wids:
                         continue  # base image never initialised; skip
                     destWidJson["has_compare"] = True
-                    next_img = copy.deepcopy(win["content"])
+                    next_img = copy_json_data(win["content"])
                     caption = next_img.get("caption")
                     next_img["caption"] = "{}_{}".format(
                         eidNums[eid], caption if caption is not None else "image"
@@ -886,7 +896,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                         continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
                     for data in incoming_data:
-                        data = copy.deepcopy(data)
+                        data = copy_json_data(data)
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 
@@ -906,7 +916,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 new_wid = "{}_env_{}".format(eid, wid)
                 if new_wid in res["jsons"]:
                     continue
-                win_copy = copy.deepcopy(win)
+                win_copy = copy_json_data(win)
                 win_copy["id"] = new_wid
                 label = (
                     "[{}] {}".format(eid_num, html.escape(win_title))

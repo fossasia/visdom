@@ -37,6 +37,14 @@ WRITE_ENDPOINTS = {
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
 
 
+def build_cloud_context(slug, role):
+    """Serialise the console context for the index template, or None when not in a workspace."""
+    if not slug:
+        return None
+    payload = json.dumps({"slug": slug, "role": role})
+    return payload.replace("</", "<\\/")
+
+
 class WorkspaceScopedMixin:
     """Shared workspace resolution and state-binding for HTTP and socket handlers.
 
@@ -156,6 +164,13 @@ class BaseWebSocketHandler(
             return None
         return self.get_secure_cookie("user_password")
 
+    def write_message(self, message, binary=False):
+        try:
+            return super().write_message(message, binary)
+        except tornado.websocket.WebSocketClosedError:
+            logging.debug("Dropped a message for a closed socket")
+            return None
+
     async def get(self, *args, **kwargs):
         try:
             await self.resolve_workspace_off_loop()
@@ -208,6 +223,13 @@ class BaseHandler(
         self.set_header("Content-Type", "application/json; charset=UTF-8")
         self.set_header("X-Content-Type-Options", "nosniff")
         self.finish(body)
+
+    def render(self, template_name, **kwargs):
+        kwargs.setdefault(
+            "cloud_context",
+            build_cloud_context(self.workspace_slug, self.workspace_role),
+        )
+        return super().render(template_name, **kwargs)
 
     def write_text(self, body):
         """Answer with ``body`` as a plain-text body, typed and inert.

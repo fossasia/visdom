@@ -14,7 +14,6 @@ the data_model itself.
 """
 
 import asyncio
-import copy
 import getpass
 import hmac
 import json
@@ -29,6 +28,7 @@ from collections.abc import Mapping, Sequence
 
 import tornado.escape
 from visdom.utils.shared_utils import (
+    copy_json_data,
     get_rand_id,
     _coerce_image_slider_index,
     _is_missing_value,
@@ -368,11 +368,14 @@ class UpdateHandler(BaseHandler):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
-        # Deepcopy only the nested structures known to be mutated in-place.
+        # Deep-copy only the nested structures known to be mutated in-place,
+        # and as JSON rather than as arbitrary objects: a pane's content is
+        # what the client posted, so there is nothing in it for
+        # ``copy.deepcopy``'s generality to protect.
         if "content" in p:
-            old_p["content"] = copy.deepcopy(p["content"])
+            old_p["content"] = copy_json_data(p["content"])
         if "old_content" in p:
-            old_p["old_content"] = copy.deepcopy(p["old_content"])
+            old_p["old_content"] = copy_json_data(p["old_content"])
 
         p = UpdateHandler.update(
             p,
@@ -1180,11 +1183,11 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
-            if self.readonly:
-                reject_readonly(self)
-                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
+                if self.readonly:
+                    reject_readonly(self)
+                    return
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
 
