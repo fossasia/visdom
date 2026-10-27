@@ -1265,9 +1265,12 @@ paths:
       summary: Authenticate and create a session
       description: >
         Validates the username and password against the server's configured
-        credentials. The password is SHA-256 hashed on the server side
-        (the client should also pre-hash once before sending). On success,
-        sets a secure cookie (`user_password`). On failure, returns 400.
+        credentials. Accepted at both `POST /` and `POST /login`. The password
+        is SHA-256 hashed on the server side (the client should also pre-hash
+        once before sending). On success, sets a secure cookie (`user_password`).
+        On failure, returns 400 (if login is disabled on the server, the request
+        payload is malformed or not an object, required fields are missing,
+        non-string, or contain invalid UTF-8 surrogates, or credentials do not match).
       security: []
       requestBody:
         required: true
@@ -1279,13 +1282,13 @@ paths:
               properties:
                 username:
                   type: string
-                  description: Username for authentication.
+                  description: Username for authentication (must be a valid UTF-8 string).
                 password:
                   type: string
                   description: >
                     Password string (typically pre-hashed once on the
                     client side with SHA-256, then hashed again on the
-                    server).
+                    server). Must be a valid UTF-8 string.
       responses:
         "200":
           description: >
@@ -1297,7 +1300,78 @@ paths:
                 type: string
               description: Secure session cookie.
         "400":
-          description: Invalid credentials.
+          description: >
+            Invalid request. Returned when login is disabled on the server,
+            the request body is malformed or not an object, username or password
+            is missing, non-string, or contains invalid UTF-8 surrogates, or
+            credentials are invalid.
+        "404":
+          description: Path not found for unsupported subpaths.
+
+  /login:
+    get:
+      operationId: renderLoginPage
+      tags: [Authentication]
+      summary: Render the login page
+      description: >
+        Renders the Visdom login page (`login.html`) when login is enabled
+        and the user is not authenticated. If login is disabled or the user
+        is already authenticated, returns 404 (the main UI is served at `/`).
+      security: []
+      responses:
+        "200":
+          description: Login HTML page (`login.html`).
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Path not found (when login is disabled or user is already authenticated).
+
+    post:
+      operationId: loginAlt
+      tags: [Authentication]
+      summary: Authenticate and create a session (alias for POST /)
+      description: >
+        Alternative endpoint for authentication. Validates credentials and
+        authenticates a user session with identical behavior to `POST /`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  description: Username for authentication (must be a valid UTF-8 string).
+                password:
+                  type: string
+                  description: >
+                    Password string (typically pre-hashed once on the
+                    client side with SHA-256, then hashed again on the
+                    server). Must be a valid UTF-8 string.
+      responses:
+        "200":
+          description: >
+            Authentication successful. A `user_password` secure cookie is
+            set. No body returned.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Secure session cookie.
+        "400":
+          description: >
+            Invalid request. Returned when login is disabled on the server,
+            the request body is malformed or not an object, username or password
+            is missing, non-string, or contains invalid UTF-8 surrogates, or
+            credentials are invalid.
+        "404":
+          description: Path not found for unsupported subpaths.
+
 
   /socket:
     get:

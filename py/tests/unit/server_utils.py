@@ -141,6 +141,12 @@ def test_hash_password_full_login_flow():
     assert hash_password(client_hash, salt=salt) == stored
 
 
+def test_hash_password_bytes_input():
+    h1 = hash_password("secret")
+    salt = h1.split("$")[0]
+    assert hash_password(b"secret", salt=salt) == h1
+
+
 # ------------------------------------------------- create_args_for_append ----
 
 
