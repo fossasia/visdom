@@ -677,7 +677,7 @@ def create_args_for_append(args):
     title = created["layout"].get("title")
     title = title.get("text") if isinstance(title, dict) else title
     opts = args.get("opts") if isinstance(args.get("opts"), dict) else {}
-    if title and not opts.get("title"):
+    if title and opts.get("title") is None:
         created["opts"] = dict(opts, title=title)
     return created
 

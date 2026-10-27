@@ -3098,17 +3098,6 @@ class Visdom(object):
                 X.shape[0], num_steps
             )
 
-        if (
-            update == "append"
-            and win is not None
-            and self.use_preflight_checks
-            and not self.offline
-            and self.win_exists(win, env) is False
-        ):
-            # Appending to a window that isn't there creates it, so do that
-            # here and give it the defaults like any new window.
-            update = None
-
         opts = {} if opts is None else dict(opts)
         defaults = {"title": "Learning Curve", "xlabel": "step", "ylabel": "metric"}
         create_defaults = {k: v for k, v in defaults.items() if k not in opts}
@@ -3133,8 +3122,8 @@ class Visdom(object):
                 if update != "remove":
                     metric_opts = dict(opts)
                     metric_opts["legend"] = [name]
-                    if update == "append" and not self.use_preflight_checks:
-                        # Used only if the server creates the window from this.
+                    if update == "append":
+                        # Used only if this append ends up creating the window.
                         metric_opts["_create_defaults"] = create_defaults
                 result = self.line(
                     X=X,
@@ -3219,12 +3208,13 @@ class Visdom(object):
                 raise ValueError("Must define a window to update")
 
             if update == "append":
-                if not self.use_preflight_checks:
+                if not self.use_preflight_checks or self.offline:
                     send_layout_create = True
-                elif not self.offline:
+                else:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
+                        opts = dict(create_defaults, **(opts or {}))
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
