@@ -187,7 +187,7 @@ class VisdomSystemMonitor:
                     proc.cpu_percent(None) if pid in known else _lifetime_cpu(proc)
                 )
                 proc_rss = proc.memory_info().rss
-            except self._psutil.NoSuchProcess:
+            except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
                 continue
             cpu += proc_cpu
             rss += proc_rss
@@ -222,7 +222,7 @@ class VisdomSystemMonitor:
         except Exception as e:
             self._warn(e)
             return False
-        if not reply:
+        if reply != win:
             self._warn("the Visdom server did not accept the data")
             return False
         self._created.add(win)

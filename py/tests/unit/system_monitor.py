@@ -44,6 +44,7 @@ def _proc(pid=1, cpu=50.0, rss=100 * MB, children=(), cpu_time=0.0, age=10.0):
 def _fake_psutil(root=None, cores=4):
     ps = MagicMock()
     ps.NoSuchProcess = type("NoSuchProcess", (Exception,), {})
+    ps.AccessDenied = type("AccessDenied", (Exception,), {})
     ps.cpu_count.return_value = cores
     ps.Process.return_value = root or _proc()
     return ps
@@ -239,6 +240,16 @@ class TestSampling(unittest.TestCase):
         monitor._log()
         self.assertEqual(_y(monitor, 1), [100.0])
 
+    def test_unreadable_child_is_skipped(self):
+        ps = _fake_psutil()
+        locked = _proc(pid=2)
+        locked.memory_info.side_effect = ps.AccessDenied()
+        ps.Process.return_value = _proc(rss=100 * MB, children=[locked])
+        monitor = _monitor(ps)
+        monitor._log()
+        self.assertEqual(_y(monitor, 1), [100.0])
+        self.assertEqual(monitor._failures, 0)
+
     def test_unknown_core_count_does_not_divide_by_none(self):
         monitor = _monitor(_fake_psutil(_proc(cpu=30.0), cores=None))
         monitor._log()
@@ -267,6 +278,16 @@ class TestFailures(unittest.TestCase):
         self.assertEqual(len(caught), 1)
         self.assertIn("did not accept", str(caught[0].message))
         self.assertEqual(monitor._failures, 2)
+
+    def test_reply_that_is_not_the_window_id_counts_as_a_failure(self):
+        monitor = _monitor()
+        monitor.viz.line.side_effect = lambda *a, **kw: "win does not exist"
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            monitor._log()
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(monitor._failures, 1)
+        self.assertEqual(monitor._created, set())
 
     def test_failed_append_keeps_appending(self):
         monitor = _monitor()
