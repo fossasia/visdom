@@ -994,6 +994,8 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self.use_preflight_checks = use_preflight_checks
+        # Optional hook used by tracked clients to capture replay messages.
+        self._on_send = None
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1474,6 +1476,9 @@ class Visdom(object):
 
         if not from_log:
             self._log(msg, endpoint)
+
+        if self._on_send is not None:
+            self._on_send(msg, endpoint)
 
         if self.offline:
             # If offline, don't even try to post
@@ -2046,6 +2051,22 @@ class Visdom(object):
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
             self._send(msg, endpoint, from_log=True)
+
+    def restore_run(self, json_path, env=None, delay=None):
+        """Replay plots from a run recorded with ``record_data=True``.
+
+        ``json_path`` names the run's metadata file; its sibling
+        ``.events.jsonl`` file must also exist. Plots are sent in order to
+        ``env`` (or the recorded environment by default). Set ``delay`` to
+        wait between calls.
+
+        Returns a summary with the run details and replay results. Raises
+        ``RunRestoreError`` if the files contain no replayable calls and
+        ``ValueError`` if ``delay`` is invalid.
+        """
+        from visdom.tracking.restore import restore_run
+
+        return restore_run(json_path, self, env=env, delay=delay)
 
     # Content
 

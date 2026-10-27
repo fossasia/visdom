@@ -6,34 +6,13 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Auto-logging hook for Visdom's chart-drawing methods (Part 2).
-
-As (``tracking.core``) needs an explicit ``run.log_event(...)`` call
-every time something worth recording happens. This module removes that for
-the most common case -- plotting a metric -- by wrapping a ``Visdom``
-instance so calling e.g. ``.line()`` through the wrapper also records the
-update on the associated :class:`~visdom.tracking.core.RunTracker`, with no
-change to how the plotting call itself is made::
-
-    run = RunTracker("exp1", params={"lr": 0.01})
-    tvis = run.track(vis)
-
-    win = None
-    for epoch in range(epochs):
-        win = tvis.line(X=[epoch], Y=[loss], win=win, update="append" if win else None)
-        # ^ logged automatically: which window, whether this is the window's
-        # 1st/2nd/3rd... update, and how long since its previous update.
-
-Intentionally scoped to chart methods only (see ``GRAPH_METHODS`` below) --
-media methods like ``image``/``video``/``text``/``table`` are a separate
-concern for a later part, since "how many times has this metric updated and
-how far apart" isn't a meaningful question for a one-shot image upload the
-same way it is for a line plot.
-"""
+"""Wrap Visdom chart methods and record their updates with a RunTracker."""
 
 from __future__ import annotations
 
+import threading
 import warnings
+import weakref
 from typing import Any
 
 from visdom.tracking.core import RunAlreadyFinishedError
@@ -95,6 +74,7 @@ NON_GRAPH_METHODS = frozenset(
         "get_window_data",
         "register_event_handler",
         "replay_log",
+        "restore_run",
         "save",
         "save_plotly_figure",
         "set_window_data",
@@ -114,6 +94,21 @@ NON_GRAPH_METHODS = frozenset(
         "update_hparams",
     }
 )
+
+
+# A per-client lock keeps concurrent capture hooks from overwriting each
+# other. Weak keys let unused clients and locks be collected.
+_hook_lock_registry_lock = threading.Lock()
+_hook_locks: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _hook_lock_for(vis) -> threading.Lock:
+    with _hook_lock_registry_lock:
+        lock = _hook_locks.get(vis)
+        if lock is None:
+            lock = threading.Lock()
+            _hook_locks[vis] = lock
+        return lock
 
 
 def _resolve_win(result: Any, kwargs: dict) -> Any:
@@ -174,6 +169,9 @@ class TrackedVisdom:
         object.__setattr__(self, "_vis", vis)
         object.__setattr__(self, "_run", run)
         object.__setattr__(self, "_wrapped_cache", {})
+        # Populated for the duration of one wrapped call when
+        # `run.record_data` is set -- see `_wrap`/`_capture_send`.
+        object.__setattr__(self, "_captured_calls", None)
 
     def __getattr__(self, item):
         if item in GRAPH_METHODS:
@@ -194,48 +192,69 @@ class TrackedVisdom:
     def __repr__(self):
         return "TrackedVisdom({0!r}, run={1!r})".format(self._vis, self._run.run_id)
 
+    def _capture_send(self, msg, endpoint):
+        """Record each wire message sent by the current plot call."""
+        calls = self._captured_calls
+        if calls is not None:
+            calls.append({"endpoint": endpoint, "msg": msg})
+
     def _wrap(self, method_name, bound_method):
         def wrapper(*args, **kwargs):
+            record_data = bool(getattr(self._run, "record_data", False))
+            # Keep the call active until its tracking event is written so
+            # finish() cannot mark the run terminal first.
+            began = self._run._begin_call()
+            hook_lock = _hook_lock_for(self._vis) if record_data else None
+            if hook_lock is not None:
+                # The hook belongs to the shared client, so serialize
+                # capture calls until it has been restored.
+                hook_lock.acquire()
             try:
-                result = bound_method(*args, **kwargs)
-            except Exception as e:
-                self._log_best_effort(
-                    "plot_error",
-                    win=kwargs.get("win"),
-                    method=method_name,
-                    error="{0}: {1}".format(type(e).__name__, e),
-                )
-                raise
+                if record_data:
+                    object.__setattr__(self, "_captured_calls", [])
+                    prev_hook = self._vis._on_send
+                    self._vis._on_send = self._capture_send
+                try:
+                    try:
+                        result = bound_method(*args, **kwargs)
+                    except Exception as e:
+                        self._log_best_effort(
+                            "plot_error",
+                            win=kwargs.get("win"),
+                            method=method_name,
+                            error="{0}: {1}".format(type(e).__name__, e),
+                        )
+                        raise
+                finally:
+                    if record_data:
+                        self._vis._on_send = prev_hook
 
-            win = _resolve_win(result, kwargs)
-            if win is not None:
-                self._log_best_effort(
-                    "plot_update",
-                    win=win,
-                    method=method_name,
-                    update=kwargs.get("update"),
-                )
-            return result
+                win = _resolve_win(result, kwargs)
+                if win is not None:
+                    self._log_best_effort(
+                        "plot_update",
+                        win=win,
+                        method=method_name,
+                        update=kwargs.get("update"),
+                        calls=self._captured_calls if record_data else None,
+                    )
+                return result
+            finally:
+                if hook_lock is not None:
+                    hook_lock.release()
+                if began:
+                    self._run._end_call()
 
         wrapper.__name__ = getattr(bound_method, "__name__", method_name)
         wrapper.__doc__ = getattr(bound_method, "__doc__", None)
         return wrapper
 
-    def _log_best_effort(self, kind, win, method, **extra):
-        """Log to the run, but never let a tracking problem look like a
-        plotting problem (or mask a real one -- see the except Exception
-        callers above, which always re-raise their own exception after).
-
-        ``RunAlreadyFinishedError`` is expected/benign (the run simply
-        already ended) and is swallowed silently. Anything else is an
-        unexpected bug in the tracking code itself -- still swallowed, so
-        it can never surface as a broken plot call, but surfaced as a
-        warning rather than vanishing without a trace, since a silently
-        eaten TypeError/AttributeError here would otherwise be close to
-        undebuggable.
-        """
+    def _log_best_effort(self, kind, win, method, calls=None, **extra):
+        """Record tracking events without changing plot-call behavior."""
         try:
             if kind == "plot_update":
+                if calls:
+                    extra["calls"] = calls
                 self._run.log_plot_update(method, win, **extra)
             else:
                 self._run.log_event(kind, win=win, method=method, **extra)
