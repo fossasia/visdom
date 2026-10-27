@@ -20,6 +20,7 @@ them. A number produced here can be re-run on any two commits.
 | `payload_build.py` | What does the Python client spend building one payload? |
 | `encode.py` | What do `NanSafeEncoder` and `stringify` cost over `json.dumps`? |
 | `experiment_scan.py` | What does a search over every environment on disk cost? |
+| `env_snapshot.py` | What does the copy an environment save starts from cost? |
 
 ```bash
 python example/benchmarks/update_append.py
@@ -27,21 +28,26 @@ python example/benchmarks/update_append.py --breakdown
 python example/benchmarks/payload_build.py
 python example/benchmarks/encode.py
 python example/benchmarks/experiment_scan.py
+python example/benchmarks/env_snapshot.py
 ```
 
 Each accepts `--sizes` (comma-separated workload sizes), `--repeat` (timed
 calls per size) and `--warmup` (untimed calls first). `--breakdown` re-runs the
 append with the operations on the update path wrapped in timers, for a tenth
 of `--repeat`. `experiment_scan.py` also takes `--envs`, how many environments
-to put on disk.
+to put on disk, and `env_snapshot.py` takes `--panes`, how many windows to put
+in the environment it copies.
 
-`experiment_scan.py` is the one script here that compares two commits in a
-single process: it reads the baseline's `json_store.py` out of git with
-`git show` and imports it as a second live module, then times the two
-alternately. Reading one side per process would measure the machine's drift
-between the two runs as much as the code, which is the trap that makes import-
-and scan-time comparisons look like wins. It needs an `upstream` remote, since
-the baseline is `git merge-base upstream/dev HEAD`.
+`experiment_scan.py` and `env_snapshot.py` compare two implementations in one
+process, timing them alternately. Running one side per process would measure
+the machine's drift between the two runs as much as the code, which is the trap
+that makes import- and scan-time comparisons look like wins.
+
+`env_snapshot.py` inlines its baseline, because dev's snapshot is a single
+`copy.deepcopy` call. `experiment_scan.py` cannot: its baseline is a whole
+class, so it reads dev's `json_store.py` out of git with `git show` and imports
+it as a second live module. That needs an `upstream` remote, since the baseline
+is `git merge-base upstream/dev HEAD`.
 
 ## How they measure
 
