@@ -183,7 +183,9 @@ def _replay_one(call: dict, send: Callable[[dict, str], Any]) -> Optional[str]:
     """Send one call and return an error string instead of raising.
 
     ``Visdom._send`` can return ``False`` on connection errors without
-    raising, so treat that exact value as a failure too.
+    raising, so treat that exact value as a failure too. Successful replay
+    handlers return the requested window id; any other response can be an
+    application-level refusal returned with HTTP 200.
     """
     endpoint = call.get("endpoint")
     msg = call.get("msg")
@@ -197,6 +199,11 @@ def _replay_one(call: dict, send: Callable[[dict, str], Any]) -> Optional[str]:
                 "a connection/SSL failure that this client's "
                 "`raise_exceptions` setting swallowed instead of "
                 "raising".format(endpoint, msg.get("win"))
+            )
+        if result != msg.get("win"):
+            return (
+                "{0} (win={1!r}) failed: server returned {2!r}, expected the "
+                "window id".format(endpoint, msg.get("win"), result)
             )
         return None
     except Exception as e:

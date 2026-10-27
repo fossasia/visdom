@@ -193,9 +193,9 @@ class TrackedVisdom:
         return "TrackedVisdom({0!r}, run={1!r})".format(self._vis, self._run.run_id)
 
     def _capture_send(self, msg, endpoint):
-        """Record each wire message sent by the current plot call."""
+        """Record replayable wire messages sent by the current plot call."""
         calls = self._captured_calls
-        if calls is not None:
+        if calls is not None and endpoint in {"events", "update"}:
             calls.append({"endpoint": endpoint, "msg": msg})
 
     def _wrap(self, method_name, bound_method):

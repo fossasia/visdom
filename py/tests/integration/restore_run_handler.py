@@ -123,6 +123,78 @@ class TestRestoreRunReplaysIntoTheApplication(RestoreRunCase):
         # Replay uses the requested env, not the recorded one.
         self.assertNotIn("orig", self._app.state)
 
+    def test_a_rejected_update_does_not_poison_the_next_dispatch(self):
+        calls = [
+            {
+                "endpoint": "events",
+                "msg": content_args("text", "start", win="w1", eid="orig"),
+            },
+            {
+                "endpoint": "update",
+                "msg": {
+                    "win": "w1",
+                    "eid": "orig",
+                    "data": [{"type": "image_update_selected", "selected": 0}],
+                },
+            },
+            {
+                "endpoint": "update",
+                "msg": {
+                    "win": "w1",
+                    "eid": "orig",
+                    "data": [{"type": "text", "content": "after"}],
+                },
+            },
+        ]
+        rel_path = self.write_run("run_rejected_then_valid", calls)
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "replayed"})
+
+        self.assertEqual(resp.code, 200, resp.body)
+        body = json.loads(resp.body)
+        self.assertEqual(body["replayed"], 2)
+        self.assertEqual(body["failed"], 1)
+        self.assertIn("win is not image_history", body["errors"][0])
+        self.assertEqual(
+            next(iter(self.panes("replayed").values()))["content"], "start<br>after"
+        )
+
+    def test_an_update_to_a_missing_window_is_counted_as_failed(self):
+        calls = [
+            {
+                "endpoint": "events",
+                "msg": content_args("text", "start", win="w1", eid="orig"),
+            },
+            {
+                "endpoint": "update",
+                "msg": {
+                    "win": "missing",
+                    "eid": "orig",
+                    "data": [{"type": "text", "content": "lost"}],
+                },
+            },
+            {
+                "endpoint": "update",
+                "msg": {
+                    "win": "w1",
+                    "eid": "orig",
+                    "data": [{"type": "text", "content": "after"}],
+                },
+            },
+        ]
+        rel_path = self.write_run("run_missing_window", calls)
+
+        resp = self.post_json("/restore_run", {"path": rel_path, "eid": "replayed"})
+
+        self.assertEqual(resp.code, 200, resp.body)
+        body = json.loads(resp.body)
+        self.assertEqual(body["replayed"], 2)
+        self.assertEqual(body["failed"], 1)
+        self.assertIn("win does not exist", body["errors"][0])
+        self.assertEqual(
+            next(iter(self.panes("replayed").values()))["content"], "start<br>after"
+        )
+
     def test_omitting_eid_defaults_to_the_calls_own_recorded_env(self):
         calls = [
             {

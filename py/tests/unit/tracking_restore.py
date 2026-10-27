@@ -43,12 +43,14 @@ def _echo_assigned_win(url, data=None, **kwargs):
     return msg.get("win")
 
 
-def _unconnected_visdom():
+def _unconnected_visdom(use_preflight_checks=False):
     with (
         patch.object(visdom.Visdom, "_handle_post", return_value=True),
         patch.object(visdom.Visdom, "_start_session_reaper"),
     ):
-        client = visdom.Visdom(use_incoming_socket=False, use_preflight_checks=False)
+        client = visdom.Visdom(
+            use_incoming_socket=False, use_preflight_checks=use_preflight_checks
+        )
     client._handle_post = Mock(side_effect=_echo_assigned_win)
     return client
 
@@ -105,6 +107,34 @@ class TestRestoreRunEndToEnd(unittest.TestCase):
         # every replayed message was retargeted to the requested env
         self.assertTrue(all(m["eid"] == "replay_env" for m in sent))
         self.assertEqual(sent[0]["win"], win)
+
+    def test_default_client_preflight_checks_are_not_recorded_as_replay_calls(self):
+        """The default synchronous client probes win_exists before updates,
+        but those checks are not plot mutations and cannot be replayed."""
+        self.vis = _unconnected_visdom(use_preflight_checks=True)
+        run, win = self._track_a_run()
+        events = _read_events_jsonl(run.events_path)
+        plot_update = next(e for e in events if e["type"] == "plot_update")
+        endpoints = [c["endpoint"] for c in plot_update["data"]["calls"]]
+        self.assertEqual(endpoints, ["events"])
+        later_updates = [
+            e
+            for e in events
+            if e["type"] == "plot_update" and e["data"]["method"] == "line"
+        ]
+        self.assertEqual(len(later_updates), 3)
+        self.assertTrue(
+            all(
+                [c["endpoint"] for c in e["data"]["calls"]] in (["events"], ["update"])
+                for e in later_updates
+            )
+        )
+
+        replayed_vis = _unconnected_visdom()
+        result = restore_run(run.path, replayed_vis, env="default_replay")
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["replayed"], 3)
+        self.assertEqual(result["failed"], 0)
 
     def test_restore_run_via_client_method_delegates(self):
         """Visdom.restore_run is a thin wrapper -- exercise the real public
@@ -809,14 +839,14 @@ class TestReplayCalls(unittest.TestCase):
     def test_replays_in_order_and_counts_results(self):
         sent = []
 
-        def send(msg, endpoint):
-            sent.append((endpoint, msg["win"]))
-
         calls = [
             {"endpoint": "events", "msg": {"win": "a"}},
             {"endpoint": "update", "msg": {"win": "b"}},
         ]
-        result = replay_calls(calls, send)
+        result = replay_calls(
+            calls,
+            lambda msg, endpoint: sent.append((endpoint, msg["win"])) or msg["win"],
+        )
         self.assertEqual(result, {"total": 2, "replayed": 2, "failed": 0, "errors": []})
         self.assertEqual(sent, [("events", "a"), ("update", "b")])
 
@@ -824,6 +854,7 @@ class TestReplayCalls(unittest.TestCase):
         def send(msg, endpoint):
             if msg["win"] == "bad":
                 raise RuntimeError("boom")
+            return msg["win"]
 
         calls = [
             {"endpoint": "events", "msg": {"win": "bad"}},
@@ -842,14 +873,14 @@ class TestReplayCalls(unittest.TestCase):
             {"endpoint": "events", "msg": {"win": "c"}},
         ]
         with patch("visdom.tracking.restore.time.sleep") as mock_sleep:
-            replay_calls(calls, lambda msg, endpoint: None, delay=0.25)
+            replay_calls(calls, lambda msg, endpoint: msg["win"], delay=0.25)
         self.assertEqual(mock_sleep.call_count, 2)
         mock_sleep.assert_called_with(0.25)
 
     def test_zero_delay_does_not_sleep(self):
         calls = [{"endpoint": "events", "msg": {"win": "a"}}]
         with patch("visdom.tracking.restore.time.sleep") as mock_sleep:
-            replay_calls(calls, lambda msg, endpoint: None, delay=0)
+            replay_calls(calls, lambda msg, endpoint: msg["win"], delay=0)
         mock_sleep.assert_not_called()
 
     def test_invalid_delay_raises_before_replaying_anything(self):
@@ -869,27 +900,34 @@ class TestReplayCalls(unittest.TestCase):
             {"endpoint": "events", "msg": {"win": "a"}},
             {"endpoint": "events", "msg": {"win": "b"}},
         ]
-        result = replay_calls(calls, lambda msg, endpoint: msg["win"] != "a")
+        result = replay_calls(
+            calls, lambda msg, endpoint: False if msg["win"] == "a" else msg["win"]
+        )
         self.assertEqual(result["total"], 2)
         self.assertEqual(result["replayed"], 1)
         self.assertEqual(result["failed"], 1)
         self.assertIn("False", result["errors"][0])
 
-    def test_a_send_returning_none_or_other_falsy_values_still_counts_as_replayed(
-        self,
-    ):
-        """Only the exact sentinel False is a failure -- a legitimate
-        result can itself be None, 0, or "" (e.g. offline mode, or a
-        window id of "0"), and none of those should be misread as a
-        failure the way a bare `if not result` check would."""
+    def test_a_non_window_response_is_counted_as_failed(self):
+        """Successful endpoints echo their window id; text refusal bodies
+        can arrive with HTTP 200 and must not count as replayed."""
         for value in (None, 0, "", "0"):
             with self.subTest(value=value):
                 result = replay_calls(
                     [{"endpoint": "events", "msg": {"win": "a"}}],
                     lambda msg, endpoint, v=value: v,
                 )
-                self.assertEqual(result["replayed"], 1)
-                self.assertEqual(result["failed"], 0)
+                self.assertEqual(result["replayed"], 0)
+                self.assertEqual(result["failed"], 1)
+
+    def test_a_server_refusal_body_is_counted_as_failed(self):
+        result = replay_calls(
+            [{"endpoint": "update", "msg": {"win": "missing"}}],
+            lambda msg, endpoint: "win does not exist",
+        )
+        self.assertEqual(result["replayed"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertIn("win does not exist", result["errors"][0])
 
 
 class TestValidateCallsForReplay(unittest.TestCase):

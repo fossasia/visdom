@@ -102,6 +102,11 @@ class _CaptureHandler:
     def get_status(self):
         return self.status_code
 
+    def reset(self):
+        """Clear the prior dispatch response before handling another call."""
+        self.status_code = 200
+        self.written.clear()
+
 
 async def _replay_calls_paced(calls, send, delay=None):
     """Replay calls with async delays so the Tornado loop stays responsive."""
@@ -395,20 +400,25 @@ class RestoreRunHandler(BaseHandler):
 
     def _dispatch_call(self, capture, msg, endpoint, eid):
         """Dispatch one captured call through the normal server handlers."""
+        capture.reset()
         msg = dict(msg)
         msg["eid"] = eid
         if endpoint == "events":
             p = window(msg)
             register_window(capture, p, eid)
-            return
-        if endpoint == "update":
+        elif endpoint == "update":
             from visdom.server.handlers.web_handlers import UpdateHandler
 
             UpdateHandler.wrap_func(capture, msg)
-            if capture.status_code >= 400:
-                raise RuntimeError(
-                    "replayed update for window {0!r} was rejected ({1}): "
-                    "{2}".format(msg.get("win"), capture.status_code, capture.written)
+        else:
+            raise RuntimeError("cannot replay a recorded {0!r} call".format(endpoint))
+
+        expected_win = msg.get("win")
+        response = capture.written[-1] if capture.written else None
+        if capture.status_code >= 400 or response != expected_win:
+            raise RuntimeError(
+                "replayed {0} for window {1!r} was rejected ({2}): {3}".format(
+                    endpoint, expected_win, capture.status_code, capture.written
                 )
-            return
-        raise RuntimeError("cannot replay a recorded {0!r} call".format(endpoint))
+            )
+        return response
