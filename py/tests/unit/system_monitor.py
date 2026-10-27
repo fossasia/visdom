@@ -30,8 +30,19 @@ pytestmark = pytest.mark.unit
 MB = 2**20
 
 
-def _proc(pid=1, cpu=50.0, rss=100 * MB, children=(), cpu_time=0.0, age=10.0):
-    proc = Mock(pid=pid)
+class _Proc(Mock):
+    def __eq__(self, other):
+        if not isinstance(other, _Proc):
+            return NotImplemented
+        return (self.pid, self.started) == (other.pid, other.started)
+
+    __hash__ = object.__hash__
+
+
+def _proc(
+    pid=1, cpu=50.0, rss=100 * MB, children=(), cpu_time=0.0, age=10.0, started=0
+):
+    proc = _Proc(pid=pid, started=started)
     proc.cpu_percent.return_value = cpu
     proc.memory_info.return_value = SimpleNamespace(rss=rss)
     proc.children.return_value = list(children)
@@ -89,6 +100,14 @@ class TestInit(unittest.TestCase):
     def test_non_numeric_interval_raises(self):
         with self.assertRaises(TypeError):
             VisdomSystemMonitor(Mock(), interval="fast")
+
+    def test_async_client_raises(self):
+        class AsyncViz:
+            async def line(self, **kwargs):
+                return kwargs["win"]
+
+        with self.assertRaises(TypeError):
+            VisdomSystemMonitor(AsyncViz())
 
     def test_non_bool_is_main_process_raises(self):
         with self.assertRaises(TypeError):
@@ -153,7 +172,16 @@ class TestPlotting(unittest.TestCase):
         monitor._log()
         call = monitor.viz.line.call_args_list[0]
         self.assertEqual(call.kwargs["opts"]["xlabel"], "seconds")
-        self.assertGreaterEqual(call.kwargs["X"][0], 0)
+
+    def test_x_axis_grows_with_time(self):
+        monitor = _monitor()
+        monitor._t0 = 100.0
+        target = "visdom.loggers.system_monitor.time.monotonic"
+        with patch(target, side_effect=[101.0, 103.5]):
+            monitor._log()
+            monitor._log()
+        xs = [monitor.viz.line.call_args_list[i].kwargs["X"] for i in (0, 2)]
+        self.assertEqual(xs, [[1.0], [3.5]])
 
     def test_failed_create_is_retried_as_create(self):
         monitor = _monitor()
@@ -230,6 +258,19 @@ class TestSampling(unittest.TestCase):
         root.children.return_value = [_proc(pid=2)]
         monitor._log()
         self.assertEqual(first.cpu_percent.call_count, 2)
+
+    def test_child_that_reuses_a_pid_is_treated_as_new(self):
+        old = _proc(pid=2)
+        root = _proc(children=[old])
+        monitor = _monitor(_fake_psutil(root))
+        monitor._log()
+        replacement = _proc(pid=2, started=5, cpu_time=20.0, age=10.0)
+        root.children.return_value = [replacement]
+        monitor._log()
+        self.assertEqual(old.cpu_percent.call_count, 1)
+        replacement.cpu_percent.assert_called_once_with(None)
+        replacement.cpu_times.assert_called()
+        self.assertIs(monitor._known[2], replacement)
 
     def test_vanished_child_is_skipped(self):
         ps = _fake_psutil()
@@ -315,6 +356,11 @@ class TestFailures(unittest.TestCase):
         monitor._failures = 10_000
         self.assertEqual(monitor._delay(), capped)
         self.assertEqual(capped, 80)
+
+    def test_backoff_never_exceeds_the_wait_limit(self):
+        monitor = _monitor(interval=threading.TIMEOUT_MAX)
+        monitor._failures = 4
+        self.assertEqual(monitor._delay(), threading.TIMEOUT_MAX)
 
     def test_a_good_sample_ends_the_backoff(self):
         monitor = _monitor(interval=5)

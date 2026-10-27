@@ -5,6 +5,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import inspect
 import threading
 import time
 import warnings
@@ -83,6 +84,11 @@ class VisdomSystemMonitor:
                     is_main_process
                 )
             )
+        if inspect.iscoroutinefunction(getattr(viz, "line", None)):
+            raise TypeError(
+                "VisdomSystemMonitor needs the synchronous Visdom client, "
+                "not AsyncVisdom"
+            )
         self.viz = viz
         self.env = env
         self.interval = interval
@@ -158,7 +164,7 @@ class VisdomSystemMonitor:
         return False
 
     def _delay(self):
-        return self.interval * 2 ** min(self._failures, 4)
+        return min(self.interval * 2 ** min(self._failures, 4), threading.TIMEOUT_MAX)
 
     def _run(self):
         while not self._stop.wait(self._delay()):
@@ -179,12 +185,15 @@ class VisdomSystemMonitor:
     def _sample(self):
         known, self._known = self._known, {self._root.pid: self._root}
         for child in self._root.children(recursive=True):
-            self._known[child.pid] = known.get(child.pid, child)
+            cached = known.get(child.pid)
+            self._known[child.pid] = cached if cached == child else child
         cpu = rss = 0
         for pid, proc in self._known.items():
             try:
                 proc_cpu = (
-                    proc.cpu_percent(None) if pid in known else _lifetime_cpu(proc)
+                    proc.cpu_percent(None)
+                    if proc is known.get(pid)
+                    else _lifetime_cpu(proc)
                 )
                 proc_rss = proc.memory_info().rss
             except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
