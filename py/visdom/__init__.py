@@ -2546,7 +2546,8 @@ class Visdom(object):
                     hint = (
                         f" Shape {img.shape} looks like HxWxC (channels last), but"
                         " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
-                        " (numpy) or img.permute(2, 0, 1) (torch) first."
+                        " (numpy), img.permute(2, 0, 1) (torch) or"
+                        " np.transpose(img, (2, 0, 1)) (plain list) first."
                     )
                 raise ValueError(
                     f"Unsupported number of image channels: {nchannels}. "

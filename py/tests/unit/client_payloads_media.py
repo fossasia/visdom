@@ -291,6 +291,22 @@ def test_image_points_a_channels_last_array_to_transpose(offline_client, shape):
         offline_client.image(np.zeros(shape, dtype=np.uint8))
 
 
+def test_image_points_a_channels_last_list_to_a_fix_it_can_run(offline_client):
+    """A nested list has no transpose, so the hint names np.transpose too."""
+    with pytest.raises(ValueError) as error:
+        offline_client.image(np.zeros((32, 40, 3)).tolist())
+    assert "Shape (32, 40, 3) looks like HxWxC" in str(error.value)
+    assert "np.transpose(img, (2, 0, 1)) (plain list)" in str(error.value)
+
+
+def test_image_suggested_fixes_render(capture_send):
+    img = np.random.RandomState(0).rand(32, 40, 3)
+    for fixed in (img.transpose(2, 0, 1), np.transpose(img.tolist(), (2, 0, 1))):
+        sent = capture_send(lambda v, fixed=fixed: v.image(fixed))
+        assert sent["payload"]["data"][0]["type"] == "image"
+        assert sent["payload"]["opts"]["width"] == 40
+
+
 def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client):
     with pytest.raises(ValueError) as error:
         offline_client.image(np.zeros((5, 8, 8), dtype=np.uint8))
