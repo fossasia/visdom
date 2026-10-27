@@ -51,8 +51,9 @@ caller reports them like any other malformed query rather than crashing.
 
 The public surface is deliberately tiny: :func:`parse_query` (text → AST),
 the :class:`Query` convenience wrapper, :func:`build_record` (Experiment →
-queryable dict) with the :class:`ExperimentLike` shape it accepts, and
-:class:`QueryParseError`.
+queryable dict) with the :class:`ExperimentLike` shape it accepts,
+:func:`latest_metric_values` (the one value per metric key that record holds),
+and :class:`QueryParseError`.
 """
 
 from __future__ import annotations
@@ -76,6 +77,7 @@ __all__ = [
     "Query",
     "build_record",
     "ExperimentLike",
+    "latest_metric_values",
     "MAX_QUERY_LENGTH",
     "MAX_QUERY_DEPTH",
     "Node",
@@ -526,6 +528,12 @@ class ExperimentLike(Protocol):
     without inheriting from or knowing about it, and :mod:`query` needs no import
     of :mod:`~visdom.experiments.models`. Anything experiment-shaped — including
     a test fake — is accepted.
+
+    An implementation may additionally answer ``latest_metric_values()`` with
+    ``{key: latest value}``, which :func:`latest_metric_values` prefers over
+    walking :attr:`metrics`. It is deliberately not a member here: every member
+    of a protocol is required of every implementation, and this one is an
+    optimisation an experiment is free not to offer.
     """
 
     env_id: str
@@ -546,6 +554,27 @@ class ExperimentLike(Protocol):
     @property
     def tags(self) -> Sequence[_KeyValueLike]:
         ...
+
+
+def latest_metric_values(experiment: ExperimentLike) -> dict:
+    """Return ``{key: latest value}`` across ``experiment``'s metric series.
+
+    Metrics are a time series, but every reader of one — a query record, a
+    comparison, a hyper-parameter pane — wants a single value per key, and it
+    is the newest. An experiment that keeps its observations in their stored
+    form can answer that without building an object per observation, so it is
+    asked first; one that only exposes :attr:`metrics` is answered by the walk
+    back over the series this module has always done. The shortcut stays an
+    optimisation that way, rather than becoming part of the shape
+    :class:`ExperimentLike` requires.
+    """
+    answer = getattr(experiment, "latest_metric_values", None)
+    if answer is not None:
+        return answer()
+    latest: dict[str, Any] = {}
+    for metric in reversed(experiment.metrics):
+        latest.setdefault(metric.key, metric.value)
+    return latest
 
 
 def build_record(experiment: ExperimentLike) -> dict:
@@ -573,10 +602,7 @@ def build_record(experiment: ExperimentLike) -> dict:
     for param in experiment.params:
         record.setdefault(param.key, param.value)
         record["param." + param.key] = param.value
-    latest_metrics: dict[str, Any] = {}
-    for metric in reversed(experiment.metrics):
-        latest_metrics.setdefault(metric.key, metric.value)
-    for key, value in latest_metrics.items():
+    for key, value in latest_metric_values(experiment).items():
         record.setdefault(key, value)
         record["metric." + key] = value
     for tag in experiment.tags:

@@ -416,6 +416,217 @@ def test_images_promotes_a_grayscale_image_to_three_channels(capture_send):
     assert pixels.shape == (4, 4, 3)
 
 
+def _compressible(channels=3, size=128):
+    """A smooth image, so a PNG level really does change the payload size.
+
+    Random pixels are incompressible -- level 0 and level 9 come out within
+    bytes of each other -- which makes noise useless for asserting that the
+    dial is wired up at all.
+    """
+    ramp = np.linspace(0, 255, size, dtype=np.uint8)
+    plane = np.broadcast_to(ramp, (size, size))
+    return np.stack([plane] * channels)
+
+
+def _grid_dtype(client, batch, **kwargs):
+    """The dtype of the grid ``images`` hands to ``image``."""
+    seen = []
+    with patch.object(
+        client, "image", side_effect=lambda g, *a, **k: seen.append(g.dtype)
+    ):
+        client.images(batch, **kwargs)
+    assert len(seen) == 1
+    return seen[0]
+
+
+def test_images_grid_is_byte_identical_across_shapes_and_dtypes(capture_send):
+    """The vectorised tile fill must place every tile where the loop did.
+
+    The grid is built by writing one strided block per row of cells rather
+    than one block per tile, which is only valid if the slots it addresses are
+    exactly the old ``h_start:h_end``/``w_start:w_end`` windows. A partial last
+    row, ``padding=0`` (where the extra inset pixel is dropped) and a batch
+    smaller than ``nrow`` are the three ways that arithmetic can drift, so each
+    is checked against the pixels the reference loop produces.
+    """
+
+    def reference(tensor, nrow, padding):
+        nmaps = tensor.shape[0]
+        xmaps = min(nrow, nmaps)
+        ymaps = int(np.ceil(nmaps / xmaps))
+        height = tensor.shape[2] + 2 * padding
+        width = tensor.shape[3] + 2 * padding
+        offset = padding + 1 if padding > 0 else 0
+        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
+        k = 0
+        for y in range(ymaps):
+            for x in range(xmaps):
+                if k >= nmaps:
+                    break
+                h_start = y * height + offset
+                w_start = x * width + offset
+                grid[
+                    :,
+                    h_start : h_start + tensor.shape[2],
+                    w_start : w_start + tensor.shape[3],
+                ] = tensor[k]
+                k += 1
+        return grid
+
+    rng = np.random.default_rng(0)
+    batches = [
+        rng.integers(0, 256, (4, 3, 6, 6), dtype=np.uint8),  # exactly one row
+        rng.integers(0, 256, (10, 3, 5, 5), dtype=np.uint8),  # partial last row
+        rng.integers(0, 256, (3, 3, 4, 4), dtype=np.uint8),  # fewer than nrow
+        rng.integers(0, 2, (6, 3, 4, 4), dtype=np.uint8),  # uint8 that still scales
+        rng.random((5, 3, 4, 4)),  # float keeps the float grid
+    ]
+    for tensor in batches:
+        for nrow, padding in ((8, 2), (4, 1), (2, 0), (3, 3)):
+            sent = capture_send(
+                lambda v, t=tensor, n=nrow, p=padding: v.images(t, nrow=n, padding=p)
+            )
+            _, pixels = decode(sent)
+            expected = reference(tensor, nrow, padding)
+            # `image()` is what turns the grid into pixels, so compare through it
+            through_image = capture_send(lambda v, g=expected: v.image(g))
+            assert np.array_equal(pixels, decode(through_image)[1]), (
+                tensor.dtype,
+                tensor.shape,
+                nrow,
+                padding,
+            )
+
+
+def test_images_keeps_a_uint8_batch_in_uint8(offline_client):
+    """A uint8 batch no longer widens to float64 on its way through the grid.
+
+    The grid used to be ``np.ones(...)`` -- float64 -- which cost eight bytes a
+    pixel and then took ``image()``'s float branch with its full-size
+    temporaries. This is the observable half of that: the pixels are unchanged,
+    so the test watches the dtype the grid is actually built with.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch) == np.uint8
+
+
+def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client):
+    """The dtype shortcut is only taken where it cannot change a pixel.
+
+    ``image()`` stretches anything whose whole range fits in [0, 1] -- and the
+    grid's fill value of 1 means a uint8 batch holding only 0s and 1s is such a
+    grid. Keeping that case in float64 preserves the stretch pinned by
+    ``test_images_padding_colour_follows_the_input_dtype``.
+    """
+    batch = np.ones((2, 3, 2, 2), dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch) == np.float64
+
+
+def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
+    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+
+    A uint8 grid never reaches that branch, so taking the dtype shortcut under
+    ``normalize=True`` would accept the option and silently do nothing. The
+    batch here is uint8 with a maximum above 1, which is exactly what the
+    shortcut is for -- so the float grid can only be coming from the option.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
+    assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
+
+
+def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
+    """And the stretch itself reaches the pixels, not just the grid dtype.
+
+    A batch spanning only part of [0, 255] is min-max scaled onto the whole
+    range, so the decoded grid has to reach both ends; without the option it
+    keeps the input's own, narrower range.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    batch[:, :, 0, 0] = 40
+    stretched = decode(
+        capture_send(lambda v: v.images(batch, opts={"normalize": True}))
+    )[1]
+    plain = decode(capture_send(lambda v: v.images(batch)))[1]
+    assert (stretched.min(), stretched.max()) == (0, 255)
+    assert (plain.min(), plain.max()) == (1, 200)
+
+
+def test_images_forwards_the_compress_level(capture_send):
+    """``images`` hands its opts to ``image``, so the PNG dial reaches the grid."""
+    batch = np.stack([_compressible(size=32)] * 4)
+    fast = capture_send(lambda v: v.images(batch, opts=dict(compresslevel=0)))
+    small = capture_send(lambda v: v.images(batch, opts=dict(compresslevel=9)))
+    assert len(content(fast)["src"]) > len(content(small)["src"])
+    assert np.array_equal(decode(fast)[1], decode(small)[1])
+
+
+def test_image_compress_level_changes_the_payload_not_the_pixels(capture_send):
+    """``opts.compresslevel`` is a speed/size dial, so PNG stays lossless.
+
+    Level 0 stores the image uncompressed and level 9 spends the most time on
+    it, which is visible as a payload-size ordering; the decoded pixels have to
+    be identical either way, since a lossy level would be a silent data change.
+    """
+    img = _compressible()
+    stored = capture_send(lambda v: v.image(img, opts=dict(compresslevel=0)))
+    packed = capture_send(lambda v: v.image(img, opts=dict(compresslevel=9)))
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+    assert np.array_equal(decode(stored)[1], decode(packed)[1])
+    assert decode(stored)[0] == "data:image/png;base64"
+
+
+def test_image_default_compression_is_unchanged(capture_send):
+    """Omitting the opt must encode exactly as before: PIL's default of 6.
+
+    The point of exposing the level is that nobody's payload size moves unless
+    they ask, so an unset opt and an explicit 6 have to produce the same bytes.
+    """
+    img = np.random.default_rng(1).integers(0, 256, (3, 48, 48), dtype=np.uint8)
+    default = capture_send(lambda v: v.image(img))
+    explicit = capture_send(lambda v: v.image(img, opts=dict(compresslevel=6)))
+    assert content(default)["src"] == content(explicit)["src"]
+
+
+def test_image_jpeg_quality_wins_over_a_compress_level(capture_send):
+    """``compress_level`` is a PNG argument, so JPEG must not be handed one.
+
+    Passing both used to be impossible; now it has to pick the JPEG path and
+    drop the PNG dial rather than fail inside PIL.
+    """
+    img = np.random.default_rng(2).integers(0, 256, (3, 16, 16), dtype=np.uint8)
+    sent = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=1))
+    )
+    assert decode(sent)[0] == "data:image/jpeg;base64"
+
+
+def test_image_rgba_with_a_jpeg_quality_still_takes_the_compress_level(capture_send):
+    """An RGBA image stays PNG despite a quality, so the PNG dial still applies."""
+    img = _compressible(channels=4)
+    stored = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=0))
+    )
+    packed = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=9))
+    )
+    assert decode(stored)[0] == "data:image/png;base64"
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+
+
+def test_image_heatmap_takes_a_compress_level(capture_send):
+    img = _compressible()
+    heatmap = np.broadcast_to(np.linspace(0, 1, 128), (128, 128))
+    stored = capture_send(
+        lambda v: v.image_heatmap(img, heatmap, opts=dict(compresslevel=0))
+    )
+    packed = capture_send(
+        lambda v: v.image_heatmap(img, heatmap, opts=dict(compresslevel=9))
+    )
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+    assert np.array_equal(decode(stored)[1], decode(packed)[1])
+
+
 # --------------------------------------------------------- image_heatmap ----
 
 
