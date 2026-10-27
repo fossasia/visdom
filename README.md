@@ -1025,7 +1025,7 @@ function does not support any plot-specific `opts`.
 
 The following `opts` are supported:
 
-- `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+- `opts.fps`: FPS for the video (`number` > 0, e.g. 30 or 29.97; default = 25)
 
 Note: Using `tensor` input requires that ffmpeg is installed and working.
 Your ability to play video may depend on the browser you use: your browser has
