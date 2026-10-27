@@ -60,7 +60,7 @@ var PlotPane = (props) => {
   );
   const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
   const layoutUpdateTimeout = useRef(null);
-  const redrawn = useRef(Promise.resolve());
+  const redrawn = useRef(Promise.resolve(true));
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -213,8 +213,12 @@ var PlotPane = (props) => {
     if (!plotElement) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      redrawn.current.then(() => {
-        if (plotElement._fullLayout && isDisplayed(plotElement)) {
+      redrawn.current.then((redrawSucceeded) => {
+        if (
+          redrawSucceeded &&
+          plotElement._fullLayout &&
+          isDisplayed(plotElement)
+        ) {
           Plotly.Plots.resize(plotElement);
         }
       });
@@ -411,7 +415,13 @@ var PlotPane = (props) => {
         // dragging a note box leaves its arrow on the data point
         edits: { annotationTail: !sessionInfo?.readonly },
       }
-    ).catch(() => {});
+    ).then(
+      () => true,
+      (err) => {
+        console.error('Plotly failed to redraw pane ' + props.id, err);
+        return false;
+      }
+    );
   };
 
   // check if data can be smoothed
