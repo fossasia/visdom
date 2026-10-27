@@ -141,6 +141,26 @@ test.describe('plot redraws', () => {
     expect(width).toBe(5);
   });
 
+  test('a rejected numeric property edit restores the editor', async ({
+    page,
+  }) => {
+    const value = await openProperty(page, 'marker.line.width');
+    await value.fill('5');
+    await value.press('Enter');
+    await page.waitForTimeout(800);
+
+    await value.fill('');
+    await value.press('Enter');
+    await page.waitForTimeout(800);
+
+    await expect(value).toHaveValue('5');
+    const width = await page.evaluate(
+      (selector) => document.querySelector(selector).data[0].marker.line.width,
+      plotSelector
+    );
+    expect(width).toBe(5);
+  });
+
   test('a resize while the plot redraws still ends at the pane size', async ({
     page,
   }) => {

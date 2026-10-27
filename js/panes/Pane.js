@@ -268,12 +268,13 @@ function PropertyList(props) {
   const updateValue = (key, value) => {
     if (typeof content[key] === 'number') {
       const parsed = Number(value);
-      if (value === '' || !Number.isFinite(parsed)) return;
+      if (value === '' || !Number.isFinite(parsed)) return false;
       content[key] = parsed;
     } else {
       content[key] = value;
     }
     if (props.onUpdate) props.onUpdate();
+    return true;
   };
 
   // rendering
