@@ -2986,9 +2986,11 @@ class Visdom(object):
         points at the same x-coordinate.
 
         With a custom `opts['legend']` the traces are created named after the
-        legend entries, which is what an update addresses: give one entry per
-        metric being updated, in any order, or leave the legend out and the
-        names from the creation call on this client are reused.
+        legend entries, which is what an update addresses: the label belonging
+        to a metric being updated is looked up by that metric, so an update may
+        carry the whole legend, only the labels of the metrics it updates, or
+        no legend at all. A metric this client did not create keeps the label
+        the update gives it, one per metric in the order they came in.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3052,40 +3054,37 @@ class Visdom(object):
         created = self._learning_curve_names.get((env_key, win))
 
         if update is not None:
-            # A trace is named after the position of its metric in the legend,
-            # and an update may carry fewer metrics than the legend has entries.
-            # Then the positions it would take are the positions of other
-            # metrics, and a metric's values land on another metric's trace. One
-            # label per metric being updated is the only legend an update can be
-            # read against.
-            assert len(legend) == len(names), (
-                "an update needs one legend entry per metric, got {} for {} "
-                "metrics".format(len(legend), len(names))
-            )
-            trace_names = list(legend)
-            if created is not None:
-                stored = dict(created)
-                known = [stored.get(name) for name in names]
-                if not legend_given:
-                    # The caller kept the labels from the creation call out of
-                    # the update, so take them from there.
-                    trace_names = [
-                        name if label is None else label
-                        for name, label in zip(names, known)
-                    ]
-                    opts["legend"] = trace_names
-                elif (
-                    None not in known
-                    and len(set(legend)) == len(legend)
-                    and set(legend) == set(known)
-                ):
-                    # Every metric being updated was created under one of the
-                    # labels that came in, but they may be listed in another
-                    # order, or the update may carry only a subset of the
-                    # metrics. Position would send a metric's values to another
-                    # metric's trace, so each label is used for the metric it
-                    # was created for.
-                    trace_names = list(known)
+            # The trace to address is the one the creation call named, so a
+            # label is looked up by the metric it was created for rather than
+            # by its position. That is what lets an update carry the whole
+            # legend, only the labels of the metrics it updates, or none.
+            stored = None if created is None else dict(created)
+            known = None if stored is None else [stored.get(name) for name in names]
+            if known is not None and None not in known:
+                # Every metric being updated was created on this client, so the
+                # name it was created under is the name to send, whatever the
+                # legend of this call says: a legend entry cannot rename a trace
+                # the update did not create.
+                trace_names = known
+                opts["legend"] = trace_names
+            elif known is not None and not legend_given:
+                # The legend was left out, so the stored names are used where
+                # there are any and the metric keys elsewhere.
+                trace_names = [
+                    name if label is None else label
+                    for name, label in zip(names, known)
+                ]
+                opts["legend"] = trace_names
+            else:
+                # A metric being updated was not created on this client, so it
+                # is a name this call has to give: one label per metric, in the
+                # order the metrics came in. A single label would otherwise be
+                # used for a metric it was not created for.
+                assert len(legend) == len(names), (
+                    "an update needs one legend entry per metric, got {} for {} "
+                    "metrics".format(len(legend), len(names))
+                )
+                trace_names = list(legend)
             result = None
             failed = False
             # Send one named update per metric so mapping order cannot swap traces.

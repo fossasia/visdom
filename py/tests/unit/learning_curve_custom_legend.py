@@ -67,19 +67,61 @@ def test_learning_curve_remove_deletes_the_legend_named_trace(offline_client):
     assert removal["delete"] is True
 
 
-def test_learning_curve_subset_update_rejects_the_full_legend(offline_client):
+def test_learning_curve_subset_append_resolves_the_full_legend(offline_client):
     opts = {"legend": ["Training loss", "Validation loss"]}
     with patch.object(offline_client, "_send", return_value="w1"):
         offline_client.learning_curve(
             {"train": [1.0], "val": [1.2]}, step=[0], opts=opts
         )
 
-    # A subset update cannot be read against a legend longer than its metric
-    # list: the first label would send the values to another metric's trace.
+    # The legend is the one the creation call used, longer than the metric list
+    # of this update: the label is looked up by the metric it was created for,
+    # so the values go to the validation trace rather than to the first label.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9]}, step=[1], win="w1", opts=opts, update="append"
+        )
+
+    sent = {m["name"]: m["data"][0]["y"] for m in updates(send)}
+    assert sent == {"Validation loss": [0.9]}
+
+    # A label that disagrees with the one the trace was created under cannot
+    # rename it, so the created name is still what the update addresses.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.95]},
+            step=[2],
+            win="w1",
+            opts={"legend": ["val loss"]},
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(send)] == ["Validation loss"]
+
+
+def test_learning_curve_update_without_a_creation_reads_the_legend_in_order(
+    offline_client,
+):
+    """There is no stored label to look a metric up in, so one entry per metric."""
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9]},
+            step=[1],
+            win="w1",
+            opts={"legend": ["Validation loss"]},
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(send)] == ["Validation loss"]
+
     with patch.object(offline_client, "_send", return_value="w1"):
         with pytest.raises(AssertionError, match="one legend entry per metric"):
             offline_client.learning_curve(
-                {"val": [0.9]}, step=[1], win="w1", opts=opts, update="append"
+                {"val": [0.9]},
+                step=[1],
+                win="w1",
+                opts={"legend": ["Training loss", "Validation loss"]},
+                update="append",
             )
 
 
