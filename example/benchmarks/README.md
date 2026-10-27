@@ -21,6 +21,7 @@ them. A number produced here can be re-run on any two commits.
 | `encode.py` | What do `NanSafeEncoder` and `stringify` cost over `json.dumps`? |
 | `experiment_scan.py` | What does a search over every environment on disk cost? |
 | `env_snapshot.py` | What does the copy an environment save starts from cost? |
+| `media_encode.py` | What does sending an image cost, and what does the PNG level trade? |
 
 ```bash
 python example/benchmarks/update_append.py
@@ -29,6 +30,7 @@ python example/benchmarks/payload_build.py
 python example/benchmarks/encode.py
 python example/benchmarks/experiment_scan.py
 python example/benchmarks/env_snapshot.py
+python example/benchmarks/media_encode.py
 ```
 
 Each accepts `--sizes` (comma-separated workload sizes), `--repeat` (timed
@@ -36,7 +38,8 @@ calls per size) and `--warmup` (untimed calls first). `--breakdown` re-runs the
 append with the operations on the update path wrapped in timers, for a tenth
 of `--repeat`. `experiment_scan.py` also takes `--envs`, how many environments
 to put on disk, and `env_snapshot.py` takes `--panes`, how many windows to put
-in the environment it copies.
+in the environment it copies. `media_encode.py` reads `--sizes` as image edges
+in pixels, so its workload grows with the square of them.
 
 `experiment_scan.py` and `env_snapshot.py` compare two implementations in one
 process, timing them alternately. Running one side per process would measure
@@ -124,3 +127,10 @@ Small-payload client numbers are a floor, not a cost: a one-point append costs
 the client far less than the wire it is about to cross. Client CPU matters for
 large arrays, for media encodes, and under `AsyncVisdom`, where it is
 GIL-serialised across the bridge's threads.
+
+`media_encode.py` is where that last case is visible: the PNG encode is the
+whole cost of an image, it is charged per pixel, and the level it runs at is
+the one lever over it. Noise would make that table unreadable -- an
+incompressible image takes the same time and the same bytes at every level --
+so the fixture is a smooth, correlated-channel picture, like a photograph or a
+rendered plot.
