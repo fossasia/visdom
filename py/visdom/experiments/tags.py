@@ -38,6 +38,10 @@ def normalize_tags(tags) -> dict[str, str]:
             raise ValueError(
                 "tag names must not exceed {0} characters".format(MAX_TAG_LENGTH)
             )
+        if name in normalized:
+            raise ValueError(
+                "tag name {0!r} appears more than once after trimming".format(name)
+            )
         normalized[name] = value
 
     if len(normalized) > MAX_TAGS_PER_ENV:
