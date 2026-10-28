@@ -811,10 +811,12 @@ def _label_vector(y_true):
 
 
 def _calibration_pos_label(labels, pos_label):
-    """Return the positive class, with the same rules as sklearn.
+    """Return the positive class, refusing one that can't be told apart.
 
     Without ``pos_label`` the labels must be {0, 1} or {-1, 1} (or one of
-    them), and 1 is positive; any other labels need it passed explicitly.
+    them), and 1 is positive, as in sklearn. A given ``pos_label`` must occur
+    in ``y_true``, except for a batch with no positives from one of those
+    pairs, such as ``[0, 0]`` with ``pos_label=1``.
     """
     if pos_label is None:
         values = set(labels.tolist())
@@ -829,20 +831,19 @@ def _calibration_pos_label(labels, pos_label):
         return 1
     if np.any(labels == pos_label):
         return pos_label
-    # A string label can never equal a number, or the other way round.
-    if labels.dtype.kind in "US" and not isinstance(pos_label, str):
-        mismatch = True
-    elif labels.dtype.kind in "biuf" and isinstance(pos_label, str):
-        mismatch = True
-    else:
-        mismatch = len(labels) == 2
-    if mismatch:
-        raise ValueError(
-            "pos_label={!r} is not one of the labels {}".format(
-                pos_label, labels.tolist()
-            )
-        )
-    return pos_label
+    numeric = isinstance(pos_label, (numbers.Number, np.bool_)) and not isinstance(
+        pos_label, complex
+    )
+    if (
+        len(labels) == 1
+        and labels.dtype.kind in "biuf"
+        and numeric
+        and {labels[0].item(), pos_label} in ({0, 1}, {-1, 1})
+    ):
+        return pos_label
+    raise ValueError(
+        "pos_label={!r} is not one of the labels {}".format(pos_label, labels.tolist())
+    )
 
 
 def _compute_calibration_curve(
@@ -3914,9 +3915,9 @@ class Visdom(object):
         `quantile` (bins with about the same number of samples). Empty bins
         are skipped. The title shows the expected calibration error (ECE).
 
-        `pos_label` is the positive class. It can be left out when `y_true`
-        holds {0, 1} or {-1, 1} labels (1 is positive); other labels, such as
-        strings, need it.
+        `pos_label` is the positive class and must occur in `y_true`. It can
+        be left out when `y_true` holds {0, 1} or {-1, 1} labels (1 is
+        positive); other labels, such as strings, need it.
 
         The following `opts` are supported:
 

@@ -1041,13 +1041,15 @@ def test_calibration_curve_allows_a_single_class():
         ([False, False], None, [0.0, 0.0]),
         ([1, 1], None, [1.0, 1.0]),
         (["spam", "spam"], "spam", [1.0, 1.0]),
-        (["ham", "ham"], "spam", [0.0, 0.0]),
+        ([0, 0], 1, [0.0, 0.0]),
+        ([1, 1], 0, [0.0, 0.0]),
+        ([False, False], True, [0.0, 0.0]),
     ],
 )
 def test_calibration_curve_single_class_with_a_known_positive(
     y_true, pos_label, expected
 ):
-    """One class is fine when the positive class is clear, as in sklearn."""
+    """One class is fine when the positive class is clear."""
     prob_true, _, _, _ = _compute_calibration_curve(
         y_true, [0.2, 0.7], n_bins=2, pos_label=pos_label
     )
@@ -1062,12 +1064,15 @@ def test_calibration_curve_single_class_with_a_known_positive(
         ([2, 2], None, "pos_label is not specified"),
         (["spam", "spam"], 1, "pos_label=1 is not one of"),
         ([0, 0], "spam", "pos_label='spam' is not one of"),
+        (["ham", "ham"], "spam", "pos_label='spam' is not one of"),
+        ([0, 0], 2, "pos_label=2 is not one of"),
+        ([5, 5], 1, "pos_label=1 is not one of"),
     ],
 )
 def test_calibration_curve_single_class_needs_a_matching_pos_label(
     y_true, pos_label, message
 ):
-    """A lone label the positive class can't be told from is refused."""
+    """A pos_label missing from y_true would make every sample negative."""
     with pytest.raises(ValueError, match=message):
         _compute_calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
 

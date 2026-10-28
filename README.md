@@ -1212,9 +1212,9 @@ in it, next to a dashed "perfectly calibrated" diagonal. `strategy` is
 same number of samples); empty bins are skipped. The binning is the same as
 `sklearn.calibration.calibration_curve`. Hovering a point shows how many
 samples are in its bin, and the title shows the expected calibration error
-(ECE). `pos_label` is the positive class; it can be left out for {0, 1} or
-{-1, 1} labels (1 is positive), and is required for other labels such as
-strings.
+(ECE). `pos_label` is the positive class and must occur in `y_true`; it can
+be left out for {0, 1} or {-1, 1} labels (1 is positive), and is required for
+other labels such as strings.
 
 ```python
 vis.calibration_curve(y_true, y_prob, n_bins=10, strategy="uniform")
