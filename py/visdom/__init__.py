@@ -779,6 +779,37 @@ def _squeeze_vector(x):
     return x
 
 
+def _is_missing(value):
+    if value is None:
+        return True
+    try:
+        return bool(value != value)  # NaN and NaT
+    except (TypeError, ValueError):
+        return True  # pandas NA can't be compared
+
+
+def _label_vector(y_true):
+    """Return labels as a typed 1-D array, refusing missing or mixed values.
+
+    Checked value by value first: numpy would turn ``["yes", nan]`` into
+    ``["yes", "nan"]`` and ``[0, "1"]`` into ``["0", "1"]``.
+    """
+    if isinstance(y_true, (list, tuple)):
+        y_true = np.array(y_true, dtype=object)
+    y_true = _squeeze_vector(y_true)
+    if y_true.dtype != object or y_true.ndim != 1:
+        return y_true
+    values = y_true.tolist()
+    if any(isinstance(value, (list, tuple)) for value in values):
+        raise ValueError("y_true and y_prob should have 1 dim")
+    text = [isinstance(value, (str, bytes)) for value in values]
+    if any(text) and not all(text) or any(_is_missing(v) for v in values):
+        raise ValueError(
+            "y_true should hold only numbers or only strings, with no " "missing values"
+        )
+    return np.array(values)
+
+
 def _calibration_pos_label(labels, pos_label):
     """Return the positive class, with the same rules as sklearn.
 
@@ -825,17 +856,8 @@ def _compute_calibration_curve(
     the ``pos_label`` rules are the same as
     ``sklearn.calibration.calibration_curve``.
     """
-    y_true = _squeeze_vector(y_true)
+    y_true = _label_vector(y_true)
     y_prob = _squeeze_vector(y_prob)
-    # Object arrays (pandas string, categorical or object columns) take the
-    # type of their values, so they are checked like any other array.
-    if y_true.dtype == object and y_true.ndim == 1:
-        y_true = np.array(y_true.tolist())
-        if y_true.dtype == object:
-            raise ValueError(
-                "y_true should hold only numbers or only strings, with no "
-                "missing values"
-            )
     if y_prob.dtype == object and y_prob.ndim == 1:
         y_prob = np.array(y_prob.tolist())
     if np.iscomplexobj(y_prob):
@@ -3871,7 +3893,6 @@ class Visdom(object):
             }
         )
 
-    @pytorch_wrap
     def calibration_curve(
         self,
         y_true,
@@ -3905,6 +3926,10 @@ class Visdom(object):
         - `opts.ylabel`     : y-axis label (`string`; default = `Fraction of positives`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
         """
+        # Lists are not converted up front, so missing labels can be seen.
+        if not isinstance(y_true, (list, tuple)):
+            y_true = _to_numpy(y_true)
+        y_prob = _to_numpy(y_prob)
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)

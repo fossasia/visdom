@@ -969,7 +969,11 @@ def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
             {"y_true": [2, 3], "y_prob": [0.1, 0.2], "pos_label": 1},
             "pos_label=1 is not one of",
         ),
-        ({"y_true": [1, float("nan")], "y_prob": [0.1, 0.2]}, "y_true should only"),
+        ({"y_true": [1, float("nan")], "y_prob": [0.1, 0.2]}, "no missing values"),
+        (
+            {"y_true": np.array([1.0, np.inf]), "y_prob": [0.1, 0.2]},
+            "y_true should only contain finite",
+        ),
         ({"y_true": [[0, 1], [1, 0]], "y_prob": [[0.2, 0.8], [0.7, 0.3]]}, "1 dim"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),
@@ -1104,7 +1108,7 @@ def test_calibration_curve_reads_object_arrays_by_their_values():
     [
         (np.array([0, 1, None], dtype=object), [0.1, 0.4, 0.6], "no missing"),
         (np.array(["a", None], dtype=object), [0.1, 0.4], "no missing"),
-        (np.array([0.0, np.nan], dtype=object), [0.1, 0.4], "finite values"),
+        (np.array([0.0, np.nan], dtype=object), [0.1, 0.4], "no missing"),
         ([0, 1], ["0.1", "0.4"], "numeric probabilities"),
         ([0, 1], np.array([0.1, None], dtype=object), "numeric probabilities"),
     ],
@@ -1114,6 +1118,30 @@ def test_calibration_curve_refuses_missing_or_non_numeric_values(
 ):
     with pytest.raises(ValueError, match=message):
         _compute_calibration_curve(y_true, y_prob, pos_label="a")
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label",
+    [
+        (np.array(["yes", np.nan], dtype=object), "yes"),
+        (["yes", np.nan], "yes"),
+        (["yes", None], "yes"),
+        ([0, np.nan], None),
+        ([0, "1"], "1"),
+        (np.array([0, "1"], dtype=object), "1"),
+    ],
+)
+def test_calibration_curve_refuses_missing_or_mixed_labels(
+    offline_client, y_true, pos_label
+):
+    """numpy would read ["yes", nan] as ["yes", "nan"], a silent negative."""
+    with pytest.raises(ValueError, match="only numbers or only strings"):
+        offline_client.calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
+
+
+def test_calibration_curve_refuses_a_ragged_label_list():
+    with pytest.raises(ValueError, match="1 dim"):
+        _compute_calibration_curve([[0], [1, 0]], [0.2, 0.7])
 
 
 def test_calibration_curve_takes_pandas_columns():
@@ -1128,10 +1156,12 @@ def test_calibration_curve_takes_pandas_columns():
             y_true, y_prob, n_bins=2, pos_label="yes"
         )
         assert prob_true.tolist() == [0.0, 1.0]
-    with pytest.raises(ValueError, match="no missing"):
-        _compute_calibration_curve(
-            pd.Series(["no", None], dtype="string"), [0.1, 0.4], pos_label="yes"
-        )
+    for y_true in (
+        pd.Series(["no", None], dtype="string"),
+        pd.Series(["yes", np.nan]),
+    ):
+        with pytest.raises(ValueError, match="no missing"):
+            _compute_calibration_curve(y_true, [0.1, 0.4], pos_label="yes")
 
 
 def test_calibration_curve_takes_string_labels_with_pos_label(capture_send):
