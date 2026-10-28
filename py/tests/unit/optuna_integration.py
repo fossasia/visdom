@@ -8,7 +8,10 @@
 
 """Unit tests for the optional Optuna experiment integration."""
 
+import os
 import sys
+import tempfile
+import threading
 import types
 import unittest
 import warnings
@@ -272,16 +275,7 @@ class TestOptunaIntermediateValues(unittest.TestCase):
 
 
 class TestOptunaRejectedWrites(unittest.TestCase):
-    """A write the server refuses must not pass for a recorded trial.
-
-    How the rejection is reported depends on the HTTP status of the request,
-    read from ``viz._last_response_status`` exactly as the real client leaves
-    it -- a 409 conflict gets the "use a new study_name" advice, which is
-    wrong for every other status, so those get a message naming the status
-    instead. A reply with no status attached at all (the generic case below,
-    and what a bare ``Mock()`` gives) still warns and still closes the trial;
-    it just cannot name a reason beyond the reply itself.
-    """
+    """A write the server refuses must not pass for a recorded trial."""
 
     # What visdom hands back for a generic rejection with no status recorded.
     REJECTED = "<html><title>Visdom - Error</title></html>"
@@ -362,9 +356,17 @@ class TestOptunaRejectedWrites(unittest.TestCase):
     def _metric_write_raises(viz):
         viz.log_metrics.side_effect = ConnectionError("network down")
 
+    @staticmethod
+    def _metric_write_server_error(viz):
+        reject_with_status(viz, "log_metrics", 503)
+
     def test_a_transient_metric_failure_leaves_the_trial_open(self):
-        """A network error isn't final, so the trial isn't closed as failed."""
-        for break_it in (self._unreachable_metric_write, self._metric_write_raises):
+        """A network or server error isn't final, so the trial stays open."""
+        for break_it in (
+            self._unreachable_metric_write,
+            self._metric_write_raises,
+            self._metric_write_server_error,
+        ):
             viz = recording_viz()
             break_it(viz)
             trial = make_trial()
@@ -440,6 +442,40 @@ class TestOptunaRejectedWrites(unittest.TestCase):
             status="failed", env="optuna_quadratic_trial_000000"
         )
 
+    def test_a_refused_cleanup_is_reported_with_the_original_error(self):
+        viz = recording_viz()
+        reject_with_status(viz, "log_metrics", 409)
+        reject_with_status(viz, "finish_experiment", 403)
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            callback(make_study([trial]), trial)
+        messages = [str(w.message) for w in caught]
+        self.assertTrue(
+            any(
+                "could not mark trial 0 as failed" in m and "403" in m for m in messages
+            )
+        )
+        self.assertTrue(
+            any(
+                "failed to log trial 0" in m and "already finished" in m
+                for m in messages
+            )
+        )
+
+    def test_a_refused_cleanup_does_not_hide_the_original_error(self):
+        viz = recording_viz()
+        reject_with_status(viz, "log_metrics", 409)
+        reject_with_status(viz, "finish_experiment", 403)
+        trial = make_trial()
+        callback = OptunaCallback(
+            viz, dashboard_env="optuna_quadratic", raise_on_error=True
+        )
+        with self.assertWarnsRegex(RuntimeWarning, "could not mark trial 0"):
+            with self.assertRaisesRegex(RuntimeError, "already finished"):
+                callback(make_study([trial]), trial)
+
     def test_a_rejection_with_no_status_still_closes_the_trial(self):
         """Covers a client that leaves no status (an older or custom one),
         so the old behaviour -- warn and still close a half-written trial --
@@ -477,6 +513,30 @@ class TestOptunaRejectedWrites(unittest.TestCase):
             warnings.simplefilter("error")
             callback(make_study([trial]), trial)
         self.assertEqual(callback._trial_envs, ["optuna_quadratic_trial_000000"])
+
+
+class TestResponseStatusPerThread(unittest.TestCase):
+    """Callbacks run on Optuna's worker threads and share one client."""
+
+    def test_each_thread_reads_its_own_status(self):
+        import visdom
+
+        with tempfile.TemporaryDirectory() as tmp:
+            viz = visdom.Visdom(
+                offline=True, log_to_filename=os.path.join(tmp, "visdom.log")
+            )
+        viz._last_response_status = 409
+        seen = []
+
+        def other_worker():
+            seen.append(viz._last_response_status)
+            viz._last_response_status = 403
+
+        worker = threading.Thread(target=other_worker)
+        worker.start()
+        worker.join()
+        self.assertEqual(seen, [None])
+        self.assertEqual(viz._last_response_status, 409)
 
 
 class TestOptunaIntermediateDashboard(unittest.TestCase):

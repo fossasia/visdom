@@ -41,14 +41,7 @@ _OPTUNA_TAG_NAMES = {
 
 
 class _WriteRejected(RuntimeError):
-    """The server refused a trial write outright (not a network failure).
-
-    Covers every HTTP error the server can answer a trial write with -- a 409
-    conflict with an experiment already finished there, a 400/404 from a
-    malformed or out-of-order request, a 401/403 from an expired key or a
-    readonly server. Whatever the reason, the write did not happen, so the
-    caller must stop treating the trial as still in progress.
-    """
+    """The server refused a trial write (a 4xx reply), so retrying won't help."""
 
 
 class OptunaCallback:
@@ -609,18 +602,9 @@ class OptunaCallback:
         """Raise unless the reply is the stored experiment.
 
         ``True`` is the client's offline sentinel: nothing was sent, so there is
-        nothing to confirm. Anything else that is not a stored experiment (error
-        text, ``False`` when the server can't be reached) was not recorded.
-
-        A rejection is reported differently depending on why the server gave
-        it, read from the status of the request just made
-        (``self.viz._last_response_status``, set by the client for every
-        request and ``None`` for one that never reached the server). Only 409
-        means a terminal experiment already sits in ``env`` -- the "use a new
-        study_name" advice is specific to that case and wrong for the others:
-        400 is a malformed request (a bug in this integration, not the run),
-        401/403 is an expired key or a readonly server, and anything else is
-        reported with whatever the server said rather than guessed at.
+        nothing to confirm. A 4xx reply raises ``_WriteRejected`` with a reason
+        that matches its status; no reply or a 5xx raises ``RuntimeError``,
+        since the server may still accept the write later.
         """
         if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
             return
@@ -632,6 +616,11 @@ class OptunaCallback:
         status = getattr(self.viz, "_last_response_status", None)
         if not isinstance(status, int) or isinstance(status, bool):
             status = None
+        if status is not None and status >= 500:
+            raise RuntimeError(
+                "visdom did not record it in env {!r}: server error "
+                "(status {})".format(env, status)
+            )
         if status == 409:
             # Trial envs come from dashboard_env when it is set, else study_name.
             rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
@@ -656,6 +645,21 @@ class OptunaCallback:
                 env, reply
             )
         )
+
+    def _close_as_failed(self, trial: Any, env: str) -> None:
+        """Mark a half-written trial failed, warning if that is refused too."""
+        try:
+            self._check_recorded(
+                self.viz.finish_experiment(status="failed", env=env), env
+            )
+        except Exception as error:
+            warnings.warn(
+                "OptunaCallback could not mark trial {} as failed: {}".format(
+                    trial.number, error
+                ),
+                RuntimeWarning,
+                stacklevel=3,
+            )
 
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
@@ -692,12 +696,9 @@ class OptunaCallback:
             )
         except Exception as error:
             if unfinished and isinstance(error, _WriteRejected):
-                # Only a refused write is final; after a network error the
-                # trial is left as it is so it can still be logged.
-                try:
-                    self.viz.finish_experiment(status="failed", env=env)
-                except Exception:
-                    pass
+                # Only a refused write is final; after a network or server
+                # error the trial is left open so it can still be logged.
+                self._close_as_failed(trial, env)
             if self.raise_on_error:
                 raise
             warnings.warn(
