@@ -827,8 +827,21 @@ def _compute_calibration_curve(
     """
     y_true = _squeeze_vector(y_true)
     y_prob = _squeeze_vector(y_prob)
+    # Object arrays (pandas string, categorical or object columns) take the
+    # type of their values, so they are checked like any other array.
+    if y_true.dtype == object and y_true.ndim == 1:
+        y_true = np.array(y_true.tolist())
+        if y_true.dtype == object:
+            raise ValueError(
+                "y_true should hold only numbers or only strings, with no "
+                "missing values"
+            )
+    if y_prob.dtype == object and y_prob.ndim == 1:
+        y_prob = np.array(y_prob.tolist())
     if np.iscomplexobj(y_prob):
         raise ValueError("y_prob should only contain real values")
+    if y_prob.dtype.kind not in "biuf":
+        raise ValueError("y_prob should be numeric probabilities")
     y_prob = y_prob.astype(float)
     if y_true.ndim != 1 or y_prob.ndim != 1:
         raise ValueError("y_true and y_prob should have 1 dim")

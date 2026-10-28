@@ -1087,6 +1087,53 @@ def test_calibration_curve_matches_sklearn_pos_label_rules():
         np.testing.assert_allclose(prob_true, expected)
 
 
+def test_calibration_curve_reads_object_arrays_by_their_values():
+    """Object columns (pandas strings, categoricals) act like typed arrays."""
+    prob_true, _, _, _ = _compute_calibration_curve(
+        np.array([0, 1, 1, 0], dtype=object), [0.1, 0.6, 0.9, 0.4], n_bins=2
+    )
+    assert prob_true.tolist() == [0.0, 1.0]
+    with pytest.raises(ValueError, match="pos_label=1 is not one of"):
+        _compute_calibration_curve(
+            np.array(["spam"] * 2, dtype=object), [0.2, 0.7], pos_label=1
+        )
+
+
+@pytest.mark.parametrize(
+    "y_true, y_prob, message",
+    [
+        (np.array([0, 1, None], dtype=object), [0.1, 0.4, 0.6], "no missing"),
+        (np.array(["a", None], dtype=object), [0.1, 0.4], "no missing"),
+        (np.array([0.0, np.nan], dtype=object), [0.1, 0.4], "finite values"),
+        ([0, 1], ["0.1", "0.4"], "numeric probabilities"),
+        ([0, 1], np.array([0.1, None], dtype=object), "numeric probabilities"),
+    ],
+)
+def test_calibration_curve_refuses_missing_or_non_numeric_values(
+    y_true, y_prob, message
+):
+    with pytest.raises(ValueError, match=message):
+        _compute_calibration_curve(y_true, y_prob, pos_label="a")
+
+
+def test_calibration_curve_takes_pandas_columns():
+    pd = pytest.importorskip("pandas")
+    y_prob = pd.Series([0.1, 0.6, 0.9, 0.4])
+    for y_true in (
+        pd.Series(["no", "yes", "yes", "no"]),
+        pd.Series(["no", "yes", "yes", "no"], dtype="string"),
+        pd.Categorical(["no", "yes", "yes", "no"]),
+    ):
+        prob_true, _, _, _ = _compute_calibration_curve(
+            y_true, y_prob, n_bins=2, pos_label="yes"
+        )
+        assert prob_true.tolist() == [0.0, 1.0]
+    with pytest.raises(ValueError, match="no missing"):
+        _compute_calibration_curve(
+            pd.Series(["no", None], dtype="string"), [0.1, 0.4], pos_label="yes"
+        )
+
+
 def test_calibration_curve_takes_string_labels_with_pos_label(capture_send):
     sent = capture_send(
         lambda v: v.calibration_curve(
