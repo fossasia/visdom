@@ -114,15 +114,56 @@ def test_learning_curve_update_without_a_creation_reads_the_legend_in_order(
 
     assert [m["name"] for m in updates(send)] == ["Validation loss"]
 
-    with patch.object(offline_client, "_send", return_value="w1"):
-        with pytest.raises(AssertionError, match="one legend entry per metric"):
-            offline_client.learning_curve(
-                {"val": [0.9]},
-                step=[1],
-                win="w1",
-                opts={"legend": ["Training loss", "Validation loss"]},
-                update="append",
-            )
+
+def test_learning_curve_update_without_a_creation_keeps_the_metric_key(
+    offline_client,
+):
+    """A legend longer than the metric list names nothing this client can tell
+    apart, so the metric key is used rather than a label that may belong to
+    another metric's trace, and the call is not refused."""
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9]},
+            step=[1],
+            win="w1",
+            opts={"legend": ["Training loss", "Validation loss"]},
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(send)] == ["val"]
+
+
+def test_learning_curve_append_that_creates_the_window_records_its_names(
+    offline_client,
+):
+    """An append is what created the window here, so the names it was created
+    under have to be kept for the updates that follow it."""
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1") as created:
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]},
+            step=[0],
+            win="w1",
+            opts=opts,
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(created)] == [
+        "Training loss",
+        "Validation loss",
+    ]
+
+    # The legend is left out, so the names the window carries are the ones to
+    # address: the metric keys would add a second set of traces.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"train": [0.7], "val": [0.9]}, step=[1], win="w1", update="append"
+        )
+
+    assert [m["name"] for m in updates(send)] == [
+        "Training loss",
+        "Validation loss",
+    ]
 
 
 def test_learning_curve_subset_update_uses_the_label_it_is_given(offline_client):

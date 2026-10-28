@@ -2989,8 +2989,10 @@ class Visdom(object):
         legend entries, which is what an update addresses: the label belonging
         to a metric being updated is looked up by that metric, so an update may
         carry the whole legend, only the labels of the metrics it updates, or
-        no legend at all. A metric this client did not create keeps the label
-        the update gives it, one per metric in the order they came in.
+        no legend at all. A metric this client has no record of -- the window
+        was made by another process -- takes one label per metric in the order
+        the metrics came in when the legend has exactly that many entries, and
+        its own key otherwise.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3060,31 +3062,21 @@ class Visdom(object):
             # legend, only the labels of the metrics it updates, or none.
             stored = None if created is None else dict(created)
             known = None if stored is None else [stored.get(name) for name in names]
-            if known is not None and None not in known:
-                # Every metric being updated was created on this client, so the
-                # name it was created under is the name to send, whatever the
-                # legend of this call says: a legend entry cannot rename a trace
-                # the update did not create.
-                trace_names = known
-                opts["legend"] = trace_names
-            elif known is not None and not legend_given:
-                # The legend was left out, so the stored names are used where
-                # there are any and the metric keys elsewhere.
-                trace_names = [
-                    name if label is None else label
-                    for name, label in zip(names, known)
-                ]
-                opts["legend"] = trace_names
-            else:
-                # A metric being updated was not created on this client, so it
-                # is a name this call has to give: one label per metric, in the
-                # order the metrics came in. A single label would otherwise be
-                # used for a metric it was not created for.
-                assert len(legend) == len(names), (
-                    "an update needs one legend entry per metric, got {} for {} "
-                    "metrics".format(len(legend), len(names))
-                )
-                trace_names = list(legend)
+            # A metric this client created keeps the name it was created under,
+            # whatever the legend of this call says: a legend entry cannot
+            # rename a trace the update did not create. One this client has no
+            # record of is named by this call, one label per metric in the
+            # order the metrics came in. A legend that does not line up with
+            # the metrics one for one names nothing that can be told apart, so
+            # the metric's own key is used: another metric's label would put
+            # these values on that metric's trace, and refusing the call would
+            # strand a client that did not create the window.
+            ordered = legend if legend_given and len(legend) == len(names) else names
+            trace_names = [
+                ordered[index] if label is None else label
+                for index, label in enumerate(known or [None] * len(names))
+            ]
+            opts["legend"] = trace_names
             result = None
             failed = False
             # Send one named update per metric so mapping order cannot swap traces.
@@ -3106,7 +3098,18 @@ class Visdom(object):
                 # failure. Answering with the last call's result would tell the
                 # caller everything went through when part of it did not.
                 failed = failed or result is False
-            return False if failed else result
+            if failed:
+                return False
+            # The window now carries the names just sent -- this update is what
+            # created it, or another process made it and this client is only
+            # now learning what its traces are called. Keeping them lets the
+            # updates that follow reuse them instead of falling back to the
+            # metric keys.
+            if update != "remove" and created is None and win is not None:
+                self._learning_curve_names[(env_key, win)] = list(
+                    zip(names, trace_names)
+                )
+            return result
 
         Y = np.column_stack(series)
 
