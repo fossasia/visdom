@@ -334,7 +334,7 @@ class Visdom:
         y_prob: Tensor,
         n_bins: int = ...,
         strategy: Text = ...,
-        pos_label: Union[int, float, str] = ...,
+        pos_label: Optional[Union[int, float, str]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

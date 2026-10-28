@@ -622,15 +622,51 @@ def _squeeze_vector(x):
     return x
 
 
+def _calibration_pos_label(labels, pos_label):
+    """Return the positive class, with the same rules as sklearn.
+
+    Without ``pos_label`` the labels must be {0, 1} or {-1, 1} (or one of
+    them), and 1 is positive; any other labels need it passed explicitly.
+    """
+    if pos_label is None:
+        values = set(labels.tolist())
+        if labels.dtype.kind not in "biuf" or not (
+            values <= {0, 1} or values <= {-1, 1}
+        ):
+            raise ValueError(
+                "y_true takes values {} and pos_label is not specified: make "
+                "y_true take values in {{0, 1}} or {{-1, 1}}, or pass "
+                "pos_label".format(labels.tolist())
+            )
+        return 1
+    if np.any(labels == pos_label):
+        return pos_label
+    # A string label can never equal a number, or the other way round.
+    if labels.dtype.kind in "US" and not isinstance(pos_label, str):
+        mismatch = True
+    elif labels.dtype.kind in "biuf" and isinstance(pos_label, str):
+        mismatch = True
+    else:
+        mismatch = len(labels) == 2
+    if mismatch:
+        raise ValueError(
+            "pos_label={!r} is not one of the labels {}".format(
+                pos_label, labels.tolist()
+            )
+        )
+    return pos_label
+
+
 def _compute_calibration_curve(
-    y_true, y_prob, n_bins=10, strategy="uniform", pos_label=1
+    y_true, y_prob, n_bins=10, strategy="uniform", pos_label=None
 ):
     """Bin predicted probabilities and compare them with observed frequencies.
 
     Returns ``(prob_true, prob_pred, counts, ece)`` for the non-empty bins:
     the fraction of positives, the mean predicted probability, the number of
-    samples in each bin, and the expected calibration error. The binning is
-    the same as ``sklearn.calibration.calibration_curve``.
+    samples in each bin, and the expected calibration error. The binning and
+    the ``pos_label`` rules are the same as
+    ``sklearn.calibration.calibration_curve``.
     """
     y_true = _squeeze_vector(y_true)
     y_prob = _squeeze_vector(y_prob)
@@ -647,15 +683,12 @@ def _compute_calibration_curve(
         raise ValueError("y_prob should only contain finite values")
     if y_prob.min() < 0 or y_prob.max() > 1:
         raise ValueError("y_prob should be probabilities in [0, 1]")
+    if y_true.dtype.kind == "f" and not np.all(np.isfinite(y_true)):
+        raise ValueError("y_true should only contain finite values")
     labels = np.unique(y_true)
     if len(labels) > 2:
         raise ValueError("calibration_curve supports binary labels only")
-    if len(labels) == 2 and not np.any(labels == pos_label):
-        raise ValueError(
-            "pos_label={!r} is not one of the labels {}".format(
-                pos_label, labels.tolist()
-            )
-        )
+    pos_label = _calibration_pos_label(labels, pos_label)
     if isinstance(n_bins, bool) or not isinstance(n_bins, (int, np.integer)):
         raise ValueError("n_bins should be a positive integer")
     if n_bins < 1:
@@ -3487,7 +3520,7 @@ class Visdom(object):
         y_prob,
         n_bins=10,
         strategy="uniform",
-        pos_label=1,
+        pos_label=None,
         win=None,
         env=None,
         opts=None,
@@ -3501,6 +3534,10 @@ class Visdom(object):
         of positives in it. `strategy` is `uniform` (equal-width bins) or
         `quantile` (bins with about the same number of samples). Empty bins
         are skipped. The title shows the expected calibration error (ECE).
+
+        `pos_label` is the positive class. It can be left out when `y_true`
+        holds {0, 1} or {-1, 1} labels (1 is positive); other labels, such as
+        strings, need it.
 
         The following `opts` are supported:
 

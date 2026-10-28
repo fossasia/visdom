@@ -882,7 +882,12 @@ def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
         ({"y_true": [0, 1], "y_prob": [0.1, float("nan")]}, "finite values"),
         ({"y_true": [0, 1], "y_prob": np.array([0.1 + 0.5j, 0.2])}, "real values"),
         ({"y_true": [0, 1, 2], "y_prob": [0.1, 0.2, 0.3]}, "binary labels only"),
-        ({"y_true": [2, 3], "y_prob": [0.1, 0.2]}, "pos_label=1 is not one of"),
+        ({"y_true": [2, 3], "y_prob": [0.1, 0.2]}, "pos_label is not specified"),
+        (
+            {"y_true": [2, 3], "y_prob": [0.1, 0.2], "pos_label": 1},
+            "pos_label=1 is not one of",
+        ),
+        ({"y_true": [1, float("nan")], "y_prob": [0.1, 0.2]}, "y_true should only"),
         ({"y_true": [[0, 1], [1, 0]], "y_prob": [[0.2, 0.8], [0.7, 0.3]]}, "1 dim"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),
@@ -941,3 +946,72 @@ def test_calibration_curve_allows_a_single_class():
     """A batch with no positives is still valid input."""
     prob_true, _, _, _ = _compute_calibration_curve([0, 0], [0.2, 0.7])
     assert prob_true.tolist() == [0.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label, expected",
+    [
+        ([-1, -1], None, [0.0, 0.0]),
+        ([False, False], None, [0.0, 0.0]),
+        ([1, 1], None, [1.0, 1.0]),
+        (["spam", "spam"], "spam", [1.0, 1.0]),
+        (["ham", "ham"], "spam", [0.0, 0.0]),
+    ],
+)
+def test_calibration_curve_single_class_with_a_known_positive(
+    y_true, pos_label, expected
+):
+    """One class is fine when the positive class is clear, as in sklearn."""
+    prob_true, _, _, _ = _compute_calibration_curve(
+        y_true, [0.2, 0.7], n_bins=2, pos_label=pos_label
+    )
+    assert prob_true.tolist() == expected
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label, message",
+    [
+        (["spam", "spam"], None, "pos_label is not specified"),
+        (["1", "1"], None, "pos_label is not specified"),
+        ([2, 2], None, "pos_label is not specified"),
+        (["spam", "spam"], 1, "pos_label=1 is not one of"),
+        ([0, 0], "spam", "pos_label='spam' is not one of"),
+    ],
+)
+def test_calibration_curve_single_class_needs_a_matching_pos_label(
+    y_true, pos_label, message
+):
+    """A lone label the positive class can't be told from is refused."""
+    with pytest.raises(ValueError, match=message):
+        _compute_calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
+
+
+def test_calibration_curve_matches_sklearn_pos_label_rules():
+    calibration = pytest.importorskip("sklearn.calibration")
+    y_prob = np.array([0.1, 0.4, 0.6, 0.9])
+    for y_true, pos_label in [
+        ([0, 1, 1, 0], None),
+        ([-1, 1, 1, -1], None),
+        ([False, True, True, False], None),
+        (["ham", "spam", "spam", "ham"], "spam"),
+        ([0, 0, 0, 0], None),
+    ]:
+        expected, _ = calibration.calibration_curve(
+            y_true, y_prob, n_bins=2, pos_label=pos_label
+        )
+        prob_true, _, _, _ = _compute_calibration_curve(
+            y_true, y_prob, n_bins=2, pos_label=pos_label
+        )
+        np.testing.assert_allclose(prob_true, expected)
+
+
+def test_calibration_curve_takes_string_labels_with_pos_label(capture_send):
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=["ham", "spam", "spam"],
+            y_prob=[0.2, 0.7, 0.9],
+            n_bins=2,
+            pos_label="spam",
+        )
+    )
+    assert sent["payload"]["data"][0]["y"] == [0.0, 1.0]
