@@ -4477,12 +4477,17 @@ class Visdom(object):
         ), "X should be one or two-dimensional"
 
         # Preserve existing behavior for row-vector X inputs (e.g. shape (1, N)):
-        # Treat as 1D sequence of points unless explicitly a single-timestamp
-        # multi-series matrix (e.g. Y has 1 timestamp, or multi-series legend).
+        # Treat as 1D sequence of points when Y is absent or 1D sequential points,
+        # unless explicitly a multi-series input (e.g. multi-series legend, single timestamp Y,
+        # or matching 2D (1, M) X and Y matrices).
         if X.ndim == 2 and X.shape[0] == 1 and X.shape[1] > 1:
+            y_arr = None if Y is None else np.asarray(Y)
             has_multi_legend = "legend" in opts and len(opts["legend"]) == X.shape[1]
-            y_is_single_timestamp = Y is not None and np.asarray(Y).size == 1
-            if not has_multi_legend and not y_is_single_timestamp:
+            y_matches_2d = (
+                y_arr is not None and y_arr.ndim == 2 and y_arr.shape == X.shape
+            )
+            y_is_single_timestamp = y_arr is not None and y_arr.size == 1
+            if not (has_multi_legend or y_matches_2d or y_is_single_timestamp):
                 X = np.squeeze(X)
 
         is_1d_x = X.ndim <= 1
