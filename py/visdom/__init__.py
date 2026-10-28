@@ -4464,12 +4464,27 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
+        opts = {} if opts is None else opts.copy()
+        opts["mode"] = "lines"
+        _title2str(opts)
+        _assert_opts(opts)
+
         X = np.asarray(X)
         if X.ndim > 2:
             X = np.squeeze(X)
         assert (
             X.ndim == 0 or X.ndim == 1 or X.ndim == 2
         ), "X should be one or two-dimensional"
+
+        # Preserve existing behavior for row-vector X inputs (e.g. shape (1, N)):
+        # Treat as 1D sequence of points unless explicitly a single-timestamp
+        # multi-series matrix (e.g. Y has 1 timestamp, or multi-series legend).
+        if X.ndim == 2 and X.shape[0] == 1 and X.shape[1] > 1:
+            has_multi_legend = "legend" in opts and len(opts["legend"]) == X.shape[1]
+            y_is_single_timestamp = Y is not None and np.asarray(Y).size == 1
+            if not has_multi_legend and not y_is_single_timestamp:
+                X = np.squeeze(X)
+
         is_1d_x = X.ndim <= 1
         if is_1d_x:
             X = np.atleast_1d(X)[:, None]
@@ -4508,11 +4523,6 @@ class Visdom(object):
         data = np.column_stack((Y.flatten(), X.flatten()))
         labels = np.arange(1, X.shape[1] + 1)[None, :]
         labels = np.tile(labels, (X.shape[0], 1)).flatten()
-
-        opts = {} if opts is None else opts.copy()
-        opts["mode"] = "lines"
-        _title2str(opts)
-        _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
 

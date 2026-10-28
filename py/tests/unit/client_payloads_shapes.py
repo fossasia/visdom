@@ -287,15 +287,43 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent1["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent1["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # (1, M) single-row 2D timestamp array matching M series
+    # (1, M) single-row 2D timestamp array matching M series with legend
     sent2 = capture_send(
-        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([[100.0, 200.0]]))
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([[100.0, 200.0]]),
+            opts={"legend": ["Series A", "Series B"]},
+        )
     )
     assert len(sent2["payload"]["data"]) == 2
+    assert sent2["payload"]["data"][0]["name"] == "Series A"
+    assert sent2["payload"]["data"][1]["name"] == "Series B"
     assert segments(sent2["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
     assert segments(sent2["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
     assert segments(sent2["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent2["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+
+def test_stem_handles_row_vector_x_inputs(capture_send):
+    """Row-vector X inputs (1, N) preserve existing behavior as 1D series of N points."""
+    # Row-vector X without Y defaults to 1..N timestamps in 1 series
+    sent = capture_send(lambda v: v.stem(X=np.array([[10.0, 20.0, 30.0]])))
+    assert len(sent["payload"]["data"]) == 1
+    t = trace(sent)
+    assert segments(t["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(t["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
+
+    # Row-vector X with row-vector Y (1, N)
+    sent_with_y = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0, 30.0]]),
+            Y=np.array([[1.0, 2.0, 3.0]]),
+        )
+    )
+    assert len(sent_with_y["payload"]["data"]) == 1
+    t_y = trace(sent_with_y)
+    assert segments(t_y["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(t_y["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
 
 
 def test_stem_handles_1d_x_with_row_vector_y(capture_send):
