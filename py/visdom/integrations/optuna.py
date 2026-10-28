@@ -41,7 +41,14 @@ _OPTUNA_TAG_NAMES = {
 
 
 class _WriteRejected(RuntimeError):
-    """The server answered a trial write with an error."""
+    """The server refused a trial write outright (not a network failure).
+
+    Covers every HTTP error the server can answer a trial write with -- a 409
+    conflict with an experiment already finished there, a 400/404 from a
+    malformed or out-of-order request, a 401/403 from an expired key or a
+    readonly server. Whatever the reason, the write did not happen, so the
+    caller must stop treating the trial as still in progress.
+    """
 
 
 class OptunaCallback:
@@ -604,6 +611,16 @@ class OptunaCallback:
         ``True`` is the client's offline sentinel: nothing was sent, so there is
         nothing to confirm. Anything else that is not a stored experiment (error
         text, ``False`` when the server can't be reached) was not recorded.
+
+        A rejection is reported differently depending on why the server gave
+        it, read from the status of the request just made
+        (``self.viz._last_response_status``, set by the client for every
+        request and ``None`` for one that never reached the server). Only 409
+        means a terminal experiment already sits in ``env`` -- the "use a new
+        study_name" advice is specific to that case and wrong for the others:
+        400 is a malformed request (a bug in this integration, not the run),
+        401/403 is an expired key or a readonly server, and anything else is
+        reported with whatever the server said rather than guessed at.
         """
         if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
             return
@@ -612,12 +629,31 @@ class OptunaCallback:
                 "visdom did not record it in env {!r}: the server could not be "
                 "reached".format(env)
             )
-        # Trial envs come from dashboard_env when it is set, else from study_name.
-        rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+        status = getattr(self.viz, "_last_response_status", None)
+        if not isinstance(status, int) or isinstance(status, bool):
+            status = None
+        if status == 409:
+            # Trial envs come from dashboard_env when it is set, else study_name.
+            rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: an experiment already "
+                "finished there. If an earlier run used the same {}, use a "
+                "new one or delete the old trial envs".format(env, rename)
+            )
+        if status in (401, 403):
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server refused the "
+                "request (status {}). Check the API key and whether the "
+                "server is running in readonly mode".format(env, status)
+            )
+        if status is not None and 400 <= status < 500:
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server rejected "
+                "the request (status {})".format(env, status)
+            )
         raise _WriteRejected(
-            "visdom did not record it in env {!r}. If an earlier run already "
-            "finished there, use a new {} or delete the old trial envs".format(
-                env, rename
+            "visdom did not record it in env {!r}: unexpected reply {!r}".format(
+                env, reply
             )
         )
 

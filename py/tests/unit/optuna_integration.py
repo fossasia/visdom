@@ -51,13 +51,36 @@ def make_study(trials):
 
 
 def recording_viz():
-    """A client whose experiment writes come back recorded, as from a server."""
+    """A client whose experiment writes come back recorded, as from a server.
+
+    ``_last_response_status`` is set to ``None`` rather than left for ``Mock``
+    to auto-create, since a real client always has it (``None`` until a
+    request is made, then the status of the last one) and the integration
+    reads it to tell a 409 conflict apart from another rejection.
+    """
     viz = Mock()
+    viz._last_response_status = None
     stored = {"env_id": "stored"}
     viz.experiment.return_value = stored
     viz.log_metrics.return_value = stored
     viz.finish_experiment.return_value = stored
     return viz
+
+
+def reject_with_status(viz, method, status, body="<html>error</html>"):
+    """Make ``viz.<method>`` answer like a real client call that got ``status``.
+
+    Sets the return value to the rejected body and ``_last_response_status``
+    to ``status``, mirroring what ``Visdom._experiment_request`` leaves behind
+    after a real request: the two always change together.
+    """
+    getattr(viz, method).return_value = body
+
+    def record_status(*args, **kwargs):
+        viz._last_response_status = status
+        return body
+
+    getattr(viz, method).side_effect = record_status
 
 
 def fake_visualization_module(
@@ -249,21 +272,31 @@ class TestOptunaIntermediateValues(unittest.TestCase):
 
 
 class TestOptunaRejectedWrites(unittest.TestCase):
-    """A write the server refuses must not pass for a recorded trial."""
+    """A write the server refuses must not pass for a recorded trial.
 
-    # What visdom hands back when the server answers with an error page.
-    REJECTED = "<html><title>Visdom - Error 409</title></html>"
+    How the rejection is reported depends on the HTTP status of the request,
+    read from ``viz._last_response_status`` exactly as the real client leaves
+    it -- a 409 conflict gets the "use a new study_name" advice, which is
+    wrong for every other status, so those get a message naming the status
+    instead. A reply with no status attached at all (the generic case below,
+    and what a bare ``Mock()`` gives) still warns and still closes the trial;
+    it just cannot name a reason beyond the reply itself.
+    """
+
+    # What visdom hands back for a generic rejection with no status recorded.
+    REJECTED = "<html><title>Visdom - Error</title></html>"
 
     def test_rerun_into_a_finished_trial_env_warns(self):
         viz = recording_viz()
-        viz.experiment.return_value = self.REJECTED
+        reject_with_status(viz, "experiment", 409)
         trial = make_trial()
         callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
 
         with self.assertWarnsRegex(
             RuntimeWarning,
             "failed to log trial 0: visdom did not record it in env "
-            "'optuna_quadratic_trial_000000'.*use a new dashboard_env or delete",
+            "'optuna_quadratic_trial_000000'.*already finished there"
+            ".*same dashboard_env, use a new one or delete",
         ):
             callback(make_study([trial]), trial)
         viz.log_metrics.assert_not_called()
@@ -272,18 +305,19 @@ class TestOptunaRejectedWrites(unittest.TestCase):
 
     def test_advice_names_study_name_when_envs_come_from_it(self):
         viz = recording_viz()
-        viz.experiment.return_value = self.REJECTED
+        reject_with_status(viz, "experiment", 409)
         trial = make_trial()
         callback = OptunaCallback(viz)
         with self.assertWarnsRegex(
             RuntimeWarning,
-            "'optuna_quadratic_trial_000000'.*use a new study_name or delete",
+            "'optuna_quadratic_trial_000000'.*already finished there"
+            ".*same study_name, use a new one or delete",
         ):
             callback(make_study([trial]), trial)
 
     def test_rejection_raises_with_raise_on_error(self):
         viz = recording_viz()
-        viz.experiment.return_value = self.REJECTED
+        reject_with_status(viz, "experiment", 409)
         trial = make_trial()
         callback = OptunaCallback(
             viz, dashboard_env="optuna_quadratic", raise_on_error=True
@@ -295,7 +329,7 @@ class TestOptunaRejectedWrites(unittest.TestCase):
         trial = make_trial(intermediate_values={0: 0.9})
         for method in ("log_metrics", "finish_experiment"):
             viz = recording_viz()
-            getattr(viz, method).return_value = self.REJECTED
+            reject_with_status(viz, method, 409)
             callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
             with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
                 callback(make_study([trial]), trial)
@@ -311,7 +345,7 @@ class TestOptunaRejectedWrites(unittest.TestCase):
 
     def test_a_rejected_metric_closes_the_created_trial_as_failed(self):
         viz = recording_viz()
-        viz.log_metrics.return_value = self.REJECTED
+        reject_with_status(viz, "log_metrics", 409)
         trial = make_trial()
         callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
         with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
@@ -342,7 +376,7 @@ class TestOptunaRejectedWrites(unittest.TestCase):
 
     def test_a_rejected_finish_is_not_sent_again(self):
         viz = recording_viz()
-        viz.finish_experiment.return_value = self.REJECTED
+        reject_with_status(viz, "finish_experiment", 409)
         trial = make_trial()
         callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
         with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
@@ -358,6 +392,66 @@ class TestOptunaRejectedWrites(unittest.TestCase):
         callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
         with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
             callback(make_study([trial]), trial)
+
+    def test_a_401_or_403_names_the_key_or_readonly_mode_not_an_old_run(self):
+        """An expired key or a readonly server is not a conflict with a past run."""
+        for status in (401, 403):
+            viz = recording_viz()
+            reject_with_status(viz, "log_metrics", status)
+            trial = make_trial()
+            callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+            with self.assertWarnsRegex(
+                RuntimeWarning,
+                r"status {}.*API key.*readonly".format(status),
+            ) as caught:
+                callback(make_study([trial]), trial)
+            self.assertNotIn("study_name", str(caught.warning))
+            self.assertNotIn("dashboard_env", str(caught.warning))
+            # Still a final rejection: the half-written trial is closed.
+            viz.finish_experiment.assert_called_once_with(
+                status="failed", env="optuna_quadratic_trial_000000"
+            )
+
+    def test_a_400_names_the_status_not_an_old_run(self):
+        """A malformed request is a bug in this integration, not a stale run."""
+        viz = recording_viz()
+        reject_with_status(viz, "experiment", 400)
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with self.assertWarnsRegex(RuntimeWarning, "status 400") as caught:
+            callback(make_study([trial]), trial)
+        self.assertNotIn("study_name", str(caught.warning))
+        self.assertNotIn("already finished there", str(caught.warning))
+
+    def test_a_404_mid_trial_still_closes_it_as_failed(self):
+        """A rejection the server never gave a status 409 still ends the trial.
+
+        This is the gap that used to leave a trial open forever: a rejection
+        that was not the one case the old code recognised as final was never
+        closed, so it never finished and stayed out of the dashboard.
+        """
+        viz = recording_viz()
+        reject_with_status(viz, "log_metrics", 404)
+        trial = make_trial(intermediate_values={0: 0.9})
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with self.assertWarnsRegex(RuntimeWarning, "status 404"):
+            callback(make_study([trial]), trial)
+        viz.finish_experiment.assert_called_once_with(
+            status="failed", env="optuna_quadratic_trial_000000"
+        )
+
+    def test_a_rejection_with_no_status_still_closes_the_trial(self):
+        """Covers a client that leaves no status (an older or custom one),
+        so the old behaviour -- warn and still close a half-written trial --
+        is kept rather than silently leaving it open."""
+        viz = recording_viz()
+        viz.experiment.return_value = self.REJECTED
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with self.assertWarnsRegex(RuntimeWarning, "did not record it"):
+            callback(make_study([trial]), trial)
+        viz.log_metrics.assert_not_called()
+        viz.finish_experiment.assert_not_called()
 
     def test_offline_client_is_not_a_rejection(self):
         """True is the client's offline sentinel; nothing could be confirmed."""

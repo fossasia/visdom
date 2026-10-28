@@ -1358,6 +1358,13 @@ class Visdom(object):
         does not raise on a 4xx. Each distinct reason is logged once, so a
         training loop is not flooded.
         """
+        # Every post passes through here, so this is also where the status of
+        # the most recent one is kept for callers that need more than the
+        # decoded body -- _experiment_request reads it right after, to tell a
+        # real conflict (409) apart from a validation or auth failure, which
+        # the body alone cannot do once debug mode turns both into the same
+        # generic error page.
+        self._last_response_status = status
         if status not in REFUSED_STATUSES:
             return
         message = "The visdom server refused this request ({0}): {1}".format(
@@ -1515,8 +1522,14 @@ class Visdom(object):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
         Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string).
+        the raw response (e.g. an error string). ``_last_response_status`` is
+        reset first and is then the HTTP status of this request specifically
+        (``None`` offline, where nothing is sent) -- a caller that needs to
+        tell a 409 conflict apart from a 400/403/404 rejection, which an error
+        page's body does not say outside debug mode, reads it right after
+        calling this.
         """
+        self._last_response_status = None
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
             return response
