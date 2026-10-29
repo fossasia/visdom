@@ -14,6 +14,7 @@ Importable as ``testutils`` because ``py/tests`` is on ``pythonpath`` (see
 shipped to users as a top-level ``tests`` distribution.
 """
 
+from testutils.arrays import RecordingArray, recording_array
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args, env_payload, plot_data, window_args
@@ -29,6 +30,7 @@ from testutils.sockets import (
 __all__ = [
     "FakeHandler",
     "FakeSocket",
+    "RecordingArray",
     "SpyStore",
     "VisdomHTTPTestCase",
     "commands",
@@ -38,6 +40,7 @@ __all__ = [
     "open_source",
     "open_sub",
     "plot_data",
+    "recording_array",
     "sent",
     "socket_double",
     "window_args",
