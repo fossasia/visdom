@@ -166,6 +166,40 @@ def test_learning_curve_append_that_creates_the_window_records_its_names(
     ]
 
 
+def test_learning_curve_append_records_the_names_of_a_metric_it_adds(
+    offline_client,
+):
+    """An append that adds a metric to a window this client already knows has to
+    record the name that metric's trace was created under. Without it the update
+    after it falls back to the metric key and adds a second trace."""
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0]}, step=[0], win="w1", opts={"legend": ["Training loss"]}
+        )
+
+    with patch.object(offline_client, "_send", return_value="w1") as added:
+        offline_client.learning_curve(
+            {"val": [1.2]},
+            step=[1],
+            win="w1",
+            opts={"legend": ["Validation loss"]},
+            update="append",
+        )
+
+    assert [m["name"] for m in updates(added)] == ["Validation loss"]
+
+    # No legend on either of these: the metric keys would be sent if the append
+    # above had not been recorded, which is a second set of traces rather than
+    # the ones already on the screen. The metric on record keeps its own name.
+    with patch.object(offline_client, "_send", return_value="w1") as send:
+        offline_client.learning_curve(
+            {"val": [0.9], "train": [0.7]}, step=[2], win="w1", update="append"
+        )
+
+    sent = {m["name"]: m["data"][0]["y"] for m in updates(send)}
+    assert sent == {"Validation loss": [0.9], "Training loss": [0.7]}
+
+
 def test_learning_curve_subset_update_uses_the_label_it_is_given(offline_client):
     opts = {"legend": ["Training loss", "Validation loss"]}
     with patch.object(offline_client, "_send", return_value="w1"):

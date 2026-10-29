@@ -3101,14 +3101,17 @@ class Visdom(object):
             if failed:
                 return False
             # The window now carries the names just sent -- this update is what
-            # created it, or another process made it and this client is only
-            # now learning what its traces are called. Keeping them lets the
-            # updates that follow reuse them instead of falling back to the
-            # metric keys.
-            if update != "remove" and created is None and win is not None:
-                self._learning_curve_names[(env_key, win)] = list(
-                    zip(names, trace_names)
-                )
+            # created it, another process made it and this client is only now
+            # learning what its traces are called, or it is an append that added
+            # a metric to a window this client already knows. All three have to
+            # be recorded: the next update of a metric with no record falls back
+            # to its key and adds a second trace instead of extending the one on
+            # the screen. The metrics already on record keep the names they were
+            # created under.
+            if update != "remove" and win is not None:
+                merged = dict(created or {})
+                merged.update(zip(names, trace_names))
+                self._learning_curve_names[(env_key, win)] = list(merged.items())
             return result
 
         Y = np.column_stack(series)
