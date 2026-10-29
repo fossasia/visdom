@@ -714,9 +714,17 @@ def _plain_scalar(value, what):
     count = numel() if callable(numel) else getattr(value, "size", 1)
     if count != 1:
         raise TypeError("{} must be a single value, got {} values".format(what, count))
+    # A masked value is missing; item() would give its hidden fill instead.
+    if np.ma.is_masked(value):
+        return None
     value = item()
+    if not isinstance(value, np.floating):
+        return value
     # np.longdouble.item() stays a numpy scalar, which json can't encode.
-    return float(value) if isinstance(value, np.floating) else value
+    number = float(value)
+    if math.isinf(number) and np.isfinite(value):
+        raise ValueError("{} is too large to send: {}".format(what, value))
+    return number
 
 
 def pytorch_wrap(f):

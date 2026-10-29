@@ -846,6 +846,48 @@ def test_log_metrics_sends_a_longdouble_as_a_float(offline_client):
     json.dumps(msg)
 
 
+@pytest.mark.parametrize(
+    "masked",
+    [
+        np.ma.masked_array([3.5], mask=[True]),
+        np.ma.masked_array(2.0, mask=True),
+        np.ma.masked,
+    ],
+    ids=["one_element", "zero_dim", "constant"],
+)
+def test_a_masked_value_is_sent_as_missing(offline_client, masked):
+    """Masking means no value; its hidden fill must not be logged."""
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics({"loss": masked})
+        params, _ = offline_client.experiment(params={"lr": masked})
+    assert msg["metrics"] == {"loss": None}
+    assert params["params"] == {"lr": None}
+
+
+def test_an_unmasked_value_is_kept(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"loss": np.ma.masked_array([3.5], mask=[False])}
+        )
+    assert msg["metrics"] == {"loss": 3.5}
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).max <= np.finfo(np.float64).max,
+    reason="longdouble is no wider than float64 on this platform",
+)
+def test_a_longdouble_too_large_for_a_float_is_refused(offline_client):
+    """It would become inf and then be sent as null, losing the value."""
+    with pytest.raises(ValueError, match="metric 'loss' is too large to send"):
+        offline_client.log_metrics({"loss": np.longdouble("1e400")})
+
+
+def test_an_infinite_longdouble_is_not_mistaken_for_an_overflow(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics({"loss": np.longdouble("inf")})
+    assert msg["metrics"] == {"loss": float("inf")}
+
+
 def test_experiment_accepts_tensor_params(offline_client):
     torch = pytest.importorskip("torch")
     with echoes(offline_client):
