@@ -816,6 +816,44 @@ the trial is running. Optuna does not support `trial.report()` or
 `trial.should_prune()` for multi-objective studies, so intermediate-value and
 pruning support applies only to single-objective studies.
 
+### System Monitor
+
+**Requirements:** `pip install psutil`
+
+`visdom.loggers.VisdomSystemMonitor` plots the CPU and RAM usage of the running script. A background thread samples the current process and its child processes (for example `DataLoader` workers) and appends the values to two line plots, `CPU usage (%)` and `RAM usage (MB)`. The x-axis is seconds since `start()`. The values come straight from the OS through psutil, so it works with any framework or none.
+
+```python
+import visdom
+from visdom.loggers import VisdomSystemMonitor
+
+viz = visdom.Visdom()
+
+with VisdomSystemMonitor(viz, env="my_run", interval=5):
+    train()
+```
+
+Or start and stop it yourself:
+
+```python
+monitor = VisdomSystemMonitor(viz, env="my_run").start()
+train()
+monitor.stop()
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment to plot in (default: the client's own env)
+- `interval`: seconds between samples (default: 5)
+- `is_main_process`: set `True` or `False` to choose which process is monitored; by default only global rank 0 of a distributed job is
+
+**Note:** the windows have fixed ids (`system_cpu`, `system_ram`), so a second run in the same env replaces them instead of adding more.
+
+**Note:** CPU is the summed usage of the script and its children, divided by the number of cores the script may use. That is the size of its CPU affinity mask (a SLURM job pinned to 8 of 64 cores tops out at 100%), or all cores where the OS has no such mask, such as macOS. A container CPU quota is not taken into account. RAM is RSS summed per process, so memory shared between workers is counted once per worker.
+
+**Note:** sampling and sending run on a daemon thread, so a slow or unreachable server never stalls training. While the server keeps failing, the wait between samples doubles up to 16 times `interval`, and goes back to `interval` once a sample gets through. A warning is raised once. Without psutil, `start()` warns and the monitor does nothing.
+
+See `example/system_monitor_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
@@ -837,6 +875,7 @@ img = img.permute(2, 0, 1)     # PyTorch
 The following `opts` are supported:
 
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
@@ -878,6 +917,7 @@ The following `opts` are supported:
 - `colormap`: matplotlib colormap name (`string`; default = `'jet'`). Falls back to a blue-red gradient if matplotlib is not installed.
 - `caption`: caption for the image pane
 - `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
+- `compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
 
 > **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
@@ -892,6 +932,7 @@ The following arguments and `opts` are supported:
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
 - `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `opts.compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
