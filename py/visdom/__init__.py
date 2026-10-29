@@ -2467,8 +2467,9 @@ class Visdom(object):
         is within [0, 1] are scaled to [0, 255] (so a 0/1 or bool mask is drawn
         black and white); images whose full range is within [-1, 1] but
         includes negative values are mapped from [-1, 1] to [0, 255]; all other
-        values are clipped to [0, 255]. Pass `opts.normalize=True` to min-max
-        scale the image to fill [0, 255] instead.
+        values are clipped to [0, 255], with a `UserWarning` when that clip
+        changes an integer image. Pass `opts.normalize=True` to min-max scale
+        the image to fill [0, 255] instead.
 
         The following `opts` are supported:
 

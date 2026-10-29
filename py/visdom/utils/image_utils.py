@@ -19,11 +19,21 @@ Integers and floats follow the same rules and come out as the same bytes, but
 they are converted apart. A float image has to be scaled in floating point; an
 integer one does not, and widening it to float64 first cost eight bytes a pixel
 before any work was done, and rounded together 64-bit values past 2**53.
+
+An integer image that the clip changes, such as a 16-bit depth map, issues a
+``UserWarning`` that points at ``normalize``.
 """
+
+import os
+import warnings
 
 import numpy as np
 
 from visdom.utils.shared_utils import _finite_range
+
+#: The visdom package directory. The clip warning is reported against the first
+#: frame outside it, which is the caller's own line however deep the call runs.
+_PACKAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "")
 
 #: Value ranges an image is recognised as being in, tried in order. The first
 #: one the whole image fits in is stretched onto [0, 255]; an image that fits
@@ -111,8 +121,25 @@ def _integer_to_uint8(img, normalize):
     low, high = _integer_range(img)
     target = (low, high) if normalize else _known_range(low, high)
     if target is None:
+        if low < 0 or high > 255:
+            _warn_clipped(img.dtype)
         return _clip_to_bytes(img)
     return _stretch_integers(img, *target)
+
+
+def _warn_clipped(dtype):
+    """Warn that an integer image is losing the values outside [0, 255].
+
+    The message names only the dtype, never the range, so Python's default
+    filter shows it once per calling line instead of on every frame of a loop.
+    """
+    warnings.warn(
+        "{} image values outside [0, 255] are clipped to 0 and 255. Pass "
+        "opts.normalize=True to stretch the image's own range onto [0, 255] "
+        "instead, e.g. for a depth map.".format(dtype),
+        UserWarning,
+        skip_file_prefixes=(_PACKAGE_DIR,),
+    )
 
 
 def _integer_range(img):

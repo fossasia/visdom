@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import sys
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -209,8 +210,21 @@ def test_image_draws_a_binary_mask_black_and_white(capture_send, mask):
 
 def test_image_clips_integers_outside_the_byte_range(capture_send):
     img = np.array([[-5, 300], [0, 255]], dtype=np.int16)
-    _, pixels = decode(capture_send(lambda v: v.image(img)))
+    with pytest.warns(UserWarning, match="int16 image values outside"):
+        _, pixels = decode(capture_send(lambda v: v.image(img)))
     assert pixels.tolist() == [[0, 255], [0, 255]]
+
+
+def test_image_warns_once_for_a_stream_of_clipped_frames(capture_send):
+    """Each depth frame spans its own range; the warning still shows only once,
+    and against the line that called ``image``, not one inside visdom."""
+    frames = [np.array([[0, 1000 * i]], dtype=np.uint16) for i in range(1, 4)]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default")
+        for frame in frames:
+            capture_send(lambda v: v.image(frame))
+    assert [str(w.message).split()[0] for w in caught] == ["uint16"]
+    assert caught[0].filename == __file__
 
 
 def test_image_normalize_stretches_an_integer_image(capture_send):

@@ -12,10 +12,12 @@
 ``client_payloads_media.py`` decodes the PNG a call would send. These pin what
 a decoded image cannot show: that an integer image comes out as the bytes the
 float path gives the same values, that it gets there without a float copy of
-the image, and that 64-bit values float64 cannot hold apart stay apart.
+the image, that 64-bit values float64 cannot hold apart stay apart, and that
+only an integer image the clip changes warns.
 """
 
 import tracemalloc
+import warnings
 
 import numpy as np
 import pytest
@@ -51,6 +53,7 @@ INTEGER_IMAGES = {
 }
 
 
+@pytest.mark.filterwarnings("ignore:.*are clipped to 0 and 255")
 @pytest.mark.parametrize("normalize", [False, True], ids=["rules", "normalize"])
 @pytest.mark.parametrize("name", INTEGER_IMAGES)
 def test_integers_draw_as_the_float_path_draws_the_same_values(name, normalize):
@@ -58,6 +61,29 @@ def test_integers_draw_as_the_float_path_draws_the_same_values(name, normalize):
     img = INTEGER_IMAGES[name]
     expected = image_to_uint8(img.astype(np.float64), normalize)
     np.testing.assert_array_equal(image_to_uint8(img, normalize), expected)
+
+
+CLIPPED = ["out_of_range", "int8_extremes", "uint16_depth", "span_past_the_table"]
+
+
+@pytest.mark.parametrize("name", CLIPPED)
+def test_an_integer_image_the_clip_changes_warns(name):
+    img = INTEGER_IMAGES[name]
+    match = r"{} image values outside \[0, 255\] are clipped".format(img.dtype)
+    with pytest.warns(UserWarning, match=match):
+        image_to_uint8(img)
+
+
+@pytest.mark.parametrize(
+    "name, normalize",
+    [(name, False) for name in INTEGER_IMAGES if name not in CLIPPED]
+    + [(name, True) for name in CLIPPED],
+)
+def test_an_integer_image_that_loses_nothing_does_not_warn(name, normalize):
+    """Masks, [-1, 1], [0, 255] and anything ``normalize`` stretches draw whole."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        image_to_uint8(INTEGER_IMAGES[name], normalize)
 
 
 @pytest.mark.parametrize(
