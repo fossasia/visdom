@@ -3959,6 +3959,8 @@ class Visdom(object):
         matrix for a single series.
         Masked observations are omitted from each column. A fully masked
         column keeps its series and label with an empty list of observations.
+        Unmasked NaN and positive or negative infinity are passed through in
+        the plot data; only masked observations are excluded.
 
         The following plot-specific `opts` are currently supported:
         - `opts.legend`: labels for each of the columns in `X`

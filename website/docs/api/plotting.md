@@ -275,6 +275,8 @@ provided, the number of labels must match the number of columns.
 For NumPy masked arrays, masked observations are omitted independently from
 each column. A fully masked column still has a series and label, but its
 observation list is empty. The input data and mask are not modified.
+This filtering applies only to masked observations: unmasked `NaN`, positive
+infinity and negative infinity are passed through in the plot data.
 
 Previously, a single-row matrix could be flattened into one series. To plot
 all values in one box, pass a vector or an `Nx1` matrix instead. A single label

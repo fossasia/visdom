@@ -1307,6 +1307,8 @@ flattening behavior, a single label cannot merge those columns into one box.
 For one box containing all observations, pass a vector or an `Nx1` matrix.
 Masked observations are excluded independently from each column. Fully masked
 columns retain their series and label with an empty observation list.
+Only masked observations are excluded; unmasked `NaN`, positive infinity and
+negative infinity are passed through in the plot data.
 
 The following plot-specific `opts` are currently supported:
 

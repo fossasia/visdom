@@ -690,6 +690,23 @@ def test_boxplot_uniform_mask_keeps_series(capture_send, mask):
     assert traces[0]["y"] == ([] if mask is True else [1.0, 2.0, 3.0])
 
 
+@pytest.mark.parametrize("shape", [(5,), (5, 1)])
+def test_boxplot_keeps_unmasked_nonfinite_observations(capture_send, shape):
+    values = np.ma.array(
+        [1.0, np.nan, np.inf, -np.inf, 100.0],
+        mask=[False, False, False, False, True],
+    ).reshape(shape)
+    original_data = values.data.copy()
+    original_mask = np.ma.getmaskarray(values).copy()
+
+    sent = capture_send(lambda v: v.boxplot(values))
+    traces = sent["payload"]["data"]
+    assert len(traces) == 1
+    np.testing.assert_array_equal(traces[0]["y"], [1.0, np.nan, np.inf, -np.inf])
+    np.testing.assert_array_equal(values.data, original_data)
+    np.testing.assert_array_equal(np.ma.getmaskarray(values), original_mask)
+
+
 @pytest.mark.parametrize("values", [[[1.0, 2.0, 3.0]], np.array([[1.0, 2.0, 3.0]])])
 def test_boxplot_single_row_with_column_labels_keeps_separate_columns(
     capture_send, values
