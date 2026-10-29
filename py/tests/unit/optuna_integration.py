@@ -371,10 +371,12 @@ class TestOptunaRejectedWrites(unittest.TestCase):
             break_it(viz)
             trial = make_trial()
             callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
-            with self.assertWarns(RuntimeWarning):
+            callback._retry_delay = 0
+            with self.assertWarnsRegex(RuntimeWarning, "logged with the next"):
                 callback(make_study([trial]), trial)
             viz.finish_experiment.assert_not_called()
             self.assertEqual(callback._trial_envs, [])
+            self.assertIn("optuna_quadratic_trial_000000", callback._pending)
 
     def test_a_rejected_finish_is_not_sent_again(self):
         viz = recording_viz()
@@ -513,6 +515,226 @@ class TestOptunaRejectedWrites(unittest.TestCase):
             warnings.simplefilter("error")
             callback(make_study([trial]), trial)
         self.assertEqual(callback._trial_envs, ["optuna_quadratic_trial_000000"])
+
+
+class FlakyServer:
+    """A stand-in client that stores trials and fails while ``down`` is set.
+
+    It keeps what a real server would hold, so a test can check that a
+    retried trial ends up stored exactly once, with no metric repeated.
+    """
+
+    def __init__(self):
+        self._last_response_status = None
+        self.down = False
+        self.calls = 0
+        self.stored = {}
+        self.lock = threading.Lock()
+
+    def _write(self, env, apply):
+        with self.lock:
+            self.calls += 1
+            if self.down:
+                return False
+            run = self.stored.setdefault(env, {"metrics": [], "status": None})
+            if run["status"] is not None:
+                self._last_response_status = 409
+                return "<html>409</html>"
+            apply(run)
+            return {"env_id": env}
+
+    def experiment(self, env=None, **kwargs):
+        return self._write(env, lambda run: run.update(name=kwargs["name"]))
+
+    def log_metrics(self, metrics, step=None, env=None):
+        return self._write(env, lambda run: run["metrics"].append((step, metrics)))
+
+    def finish_experiment(self, status="finished", env=None):
+        return self._write(env, lambda run: run.update(status=status))
+
+
+class TestOptunaTransientFailures(unittest.TestCase):
+    """A server blip or outage must not lose or repeat any part of a trial."""
+
+    ENV = "optuna_quadratic_trial_{:06d}"
+
+    def callback(self, viz, **kwargs):
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic", **kwargs)
+        callback._retry_delay = 0
+        return callback
+
+    def assert_stored_once(self, server, trial):
+        run = server.stored[self.ENV.format(trial.number)]
+        expected = [
+            (step, {"intermediate_value": value})
+            for step, value in sorted(trial.intermediate_values.items())
+        ] + [(None, {"objective": trial.values[0]})]
+        self.assertEqual(run["metrics"], expected)
+        self.assertEqual(run["status"], "finished")
+
+    def test_a_blip_is_retried_and_the_trial_is_logged(self):
+        viz = recording_viz()
+        stored = viz.log_metrics.return_value
+        viz.log_metrics.side_effect = [False, stored]
+        trial = make_trial()
+        callback = self.callback(viz)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            callback(make_study([trial]), trial)
+        self.assertEqual(viz.log_metrics.call_count, 2)
+        viz.finish_experiment.assert_called_once_with(
+            status="finished", env=self.ENV.format(0)
+        )
+        self.assertEqual(callback._trial_envs, [self.ENV.format(0)])
+
+    def test_retries_back_off(self):
+        viz = recording_viz()
+        viz.log_metrics.return_value = False
+        trial = make_trial()
+        callback = OptunaCallback(viz, dashboard_env="optuna_quadratic")
+        with patch("visdom.integrations.optuna.time.sleep") as sleep:
+            with self.assertWarns(RuntimeWarning):
+                callback(make_study([trial]), trial)
+        self.assertEqual(viz.log_metrics.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [0.5, 1.0])
+
+    def test_a_refusal_is_not_retried(self):
+        viz = recording_viz()
+        reject_with_status(viz, "log_metrics", 403)
+        trial = make_trial()
+        callback = self.callback(viz)
+        with self.assertWarns(RuntimeWarning):
+            callback(make_study([trial]), trial)
+        self.assertEqual(viz.log_metrics.call_count, 1)
+        self.assertEqual(callback._pending, {})
+
+    def test_an_outage_is_resumed_without_repeating_writes(self):
+        server = FlakyServer()
+        callback = self.callback(server)
+        first = make_trial(0, intermediate_values={0: 0.9, 1: 0.8})
+        second = make_trial(1, intermediate_values={0: 0.7})
+        study = make_study([first, second])
+
+        callback(study, make_trial(9))
+        # Down after the experiment and the first step went through.
+        writes = server.calls
+        server.down = False
+        original = server._write
+
+        def fail_after_two(env, apply):
+            if server.calls >= writes + 2:
+                server.down = True
+            return original(env, apply)
+
+        server._write = fail_after_two
+        with self.assertWarnsRegex(RuntimeWarning, "logged with the next"):
+            callback(study, first)
+        self.assertEqual(list(callback._pending), [self.ENV.format(0)])
+
+        server._write = original
+        server.down = False
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            callback(study, second)
+        self.assert_stored_once(server, first)
+        self.assert_stored_once(server, second)
+        self.assertEqual(callback._pending, {})
+        self.assertEqual(
+            callback._trial_envs,
+            [self.ENV.format(9), self.ENV.format(0), self.ENV.format(1)],
+        )
+
+    def test_trials_wait_in_order_while_the_server_is_down(self):
+        server = FlakyServer()
+        callback = self.callback(server)
+        trials = [make_trial(n) for n in range(3)]
+        study = make_study(trials)
+        server.down = True
+        for trial in trials[:2]:
+            with self.assertWarns(RuntimeWarning):
+                callback(study, trial)
+        self.assertEqual(
+            list(callback._pending), [self.ENV.format(0), self.ENV.format(1)]
+        )
+        server.down = False
+        callback(study, trials[2])
+        for trial in trials:
+            self.assert_stored_once(server, trial)
+        self.assertEqual(callback._trial_envs, [self.ENV.format(n) for n in (0, 1, 2)])
+
+    def test_update_dashboard_logs_waiting_trials(self):
+        server = FlakyServer()
+        callback = self.callback(server)
+        trial = make_trial(intermediate_values={0: 0.9})
+        server.down = True
+        with self.assertWarns(RuntimeWarning):
+            callback(make_study([trial]), trial)
+        server.down = False
+        with patch.object(callback, "_write_dashboard", return_value=True):
+            self.assertTrue(callback.update_dashboard(make_study([trial])))
+        self.assert_stored_once(server, trial)
+        self.assertEqual(callback._pending, {})
+
+    def test_the_dashboard_refreshes_after_a_failed_trial(self):
+        viz = recording_viz()
+        viz.log_metrics.return_value = False
+        trial = make_trial()
+        callback = self.callback(viz, create_dashboard=True)
+        with patch.object(callback, "_write_dashboard") as write_dashboard:
+            with self.assertWarns(RuntimeWarning):
+                callback(make_study([trial]), trial)
+        write_dashboard.assert_called_once()
+
+    def test_raise_on_error_still_parks_the_trial(self):
+        viz = recording_viz()
+        viz.log_metrics.return_value = False
+        trial = make_trial()
+        callback = self.callback(viz, raise_on_error=True)
+        with self.assertRaisesRegex(RuntimeError, "could not be reached"):
+            callback(make_study([trial]), trial)
+        self.assertIn(self.ENV.format(0), callback._pending)
+
+    def test_concurrent_trials_through_a_flaky_server_are_stored_once(self):
+        """Optuna's n_jobs>1 runs callbacks on several threads at once."""
+        import random
+
+        server = FlakyServer()
+        rng = random.Random(0)
+        original = server._write
+
+        def flaky(env, apply):
+            with server.lock:
+                server.down = rng.random() < 0.3
+            return original(env, apply)
+
+        server._write = flaky
+        callback = self.callback(server)
+        trials = [
+            make_trial(n, values=(n / 10,), intermediate_values={0: 1.0, 1: 0.5})
+            for n in range(40)
+        ]
+        study = make_study(trials)
+
+        def run(chunk):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for trial in chunk:
+                    callback(study, trial)
+
+        workers = [threading.Thread(target=run, args=(trials[i::4],)) for i in range(4)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        server._write = original
+        server.down = False
+        callback._retry_pending()
+        for trial in trials:
+            self.assert_stored_once(server, trial)
+        self.assertEqual(callback._pending, {})
+        self.assertEqual(
+            sorted(callback._trial_envs), sorted(self.ENV.format(n) for n in range(40))
+        )
 
 
 class TestResponseStatusPerThread(unittest.TestCase):
