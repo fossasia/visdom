@@ -340,13 +340,15 @@ class UpdateHandler(BaseHandler):
         # data, so pair the traces from the end, where the data trace is.
         if len(idxs) > 0 and all(pdata[i]["type"] == "heatmap" for i in idxs):
             updateDir = args["updateDir"]
-            for idx, new_trace in zip(reversed(idxs), reversed(new_data)):
-                plot = pdata[idx]
-                dz = new_trace["z"]
+            pairs = list(zip(reversed(idxs), reversed(new_data)))
 
-                # first check if operation is valid
-                if updateDir != "replace":
-                    del new_trace["z"]
+            # check every trace before changing any, so a failed check does
+            # not leave the pane partially updated
+            updateNames = {}
+            if updateDir != "replace":
+                for idx, new_trace in pairs:
+                    plot = pdata[idx]
+                    dz = new_trace["z"]
 
                     if updateDir in ["appendRow", "prependRow"]:
                         checkdir = "y"
@@ -364,10 +366,10 @@ class UpdateHandler(BaseHandler):
                                 % (len(plot["z"]), len(dz))
                             )
                             return p
-                    updateNames = False
+                    updateNames[idx] = False
                     if plot[checkdir] is not None and new_trace[checkdir] is not None:
-                        updateNames = True
-                        if plot[checkdir] is not None and any(
+                        updateNames[idx] = True
+                        if any(
                             label in plot[checkdir] for label in new_trace[checkdir]
                         ):
                             logging.error(
@@ -385,27 +387,34 @@ class UpdateHandler(BaseHandler):
                         )
                         return p
 
+            # all checks passed, now apply the update to every trace
+            for idx, new_trace in pairs:
+                plot = pdata[idx]
+                dz = new_trace["z"]
+                if updateDir != "replace":
+                    del new_trace["z"]
+
                 # append according to direction
                 if updateDir == "appendRow":
                     plot["z"] += dz
-                    if updateNames:
+                    if updateNames[idx]:
                         plot["y"] += new_trace["y"]
 
                 elif updateDir == "prependRow":
                     plot["z"] = dz + plot["z"]
-                    if updateNames:
+                    if updateNames[idx]:
                         plot["y"] = new_trace["y"] + plot["y"]
 
                 elif updateDir == "appendColumn":
                     for i, dzi in enumerate(dz):
                         plot["z"][i] += dzi
-                    if updateNames:
+                    if updateNames[idx]:
                         plot["x"] += new_trace["x"]
 
                 elif updateDir == "prependColumn":
                     for i, dzi in enumerate(dz):
                         plot["z"][i] = dzi + plot["z"][i]
-                    if updateNames:
+                    if updateNames[idx]:
                         plot["x"] = new_trace["x"] + plot["x"]
 
                 # update opts

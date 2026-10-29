@@ -260,6 +260,15 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
             [trace["z"] for trace in self.traces(win)], [[[0, 0]], [[5, 6]]]
         )
 
+    def test_a_failed_check_on_one_trace_changes_no_trace(self):
+        win = self.create_nan_heatmap()
+        # grow only the data trace, so the two traces differ in shape
+        self.update_nan_heatmap(win, [[5, 6]], "appendRow", y=["e"], nancolor=None)
+        before = self.traces(win)
+        # three rows fit the data trace but not the two-row background
+        self.update_nan_heatmap(win, [[7], [8], [9]], "appendColumn", x=["f"])
+        self.assertEqual(self.traces(win), before)
+
 
 class TestTraceUpdates(PlotUpdateTestCase):
     """A ``name`` selects which traces the update applies to."""
