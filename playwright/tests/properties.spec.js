@@ -26,18 +26,13 @@ test.describe('Properties Pane', () => {
 
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toBe(
-      'visdom_properties.json'
-    );
+    expect(download.suggestedFilename()).toBe('visdom_properties.json');
   });
 
   test('properties_callbacks', async ({ page }) => {
     await runDemo(page, 'properties_callbacks', { asyncrun: true });
 
-    await page
-      .locator('input[value="initial"]')
-      .first()
-      .fill('changed');
+    await page.locator('input[value="initial"]').first().fill('changed');
 
     await page.keyboard.press('Enter');
 
@@ -45,15 +40,9 @@ test.describe('Properties Pane', () => {
       page.locator('.layout .react-grid-item .content-text').first()
     ).toContainText('Updated: Text input => changed');
 
-    await expect(
-      page.locator('input[value="changed_updated"]')
-    ).toBeVisible();
+    await expect(page.locator('input[value="changed_updated"]')).toBeVisible();
 
-
-    await page
-      .locator('input[value="12"]')
-      .first()
-      .fill('42');
+    await page.locator('input[value="12"]').first().fill('42');
 
     await page.keyboard.press('Enter');
 
@@ -61,17 +50,35 @@ test.describe('Properties Pane', () => {
       page.locator('.layout .react-grid-item .content-text').first()
     ).toContainText('Updated: Number input => 42');
 
-    await expect(
-      page.locator('input[value="420"]')
-    ).toBeVisible();
+    await expect(page.locator('input[value="420"]')).toBeVisible();
 
+    await page.locator('input[value="420"]').first().fill('-15.5');
+
+    await page.keyboard.press('Enter');
+
+    await expect(
+      page.locator('.layout .react-grid-item .content-text').first()
+    ).toContainText('Updated: Number input => -15.5');
+
+    await expect(page.locator('input[value="-15.50"]')).toBeVisible();
+
+    await page.locator('input[value="-15.50"]').first().fill('-');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('input[value="-15.50"]')).toBeVisible();
+
+    await page.locator('input[value="-15.50"]').first().fill('-.');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('input[value="-15.50"]')).toBeVisible();
+
+    await page.locator('input[value="-15.50"]').first().fill('42.');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('input[value="-15.50"]')).toBeVisible();
 
     await page.getByText('Start').click();
 
     await expect(
       page.locator('.layout .react-grid-item .content-text').first()
     ).toContainText('Updated: Button => clicked');
-
 
     const checkbox = page.locator('input[type="checkbox"]').first();
 
@@ -83,7 +90,6 @@ test.describe('Properties Pane', () => {
     ).toContainText('Updated: Checkbox => False');
 
     await expect(checkbox).not.toBeChecked();
-
 
     const select = page.locator('select').first();
 
