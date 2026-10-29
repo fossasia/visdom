@@ -226,6 +226,33 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
+def _audio_sample_rate(rate, channels=1):
+    """``rate`` as an int that fits the WAV header of 16-bit audio.
+
+    The header stores the rate and the bytes per second (rate * channels * 2)
+    in 32 bits each. The range is checked before anything turns ``rate`` into
+    a float, so a huge int, NaN and inf are all rejected.
+    """
+    # A 0-d numpy array or a one-element tensor holds a plain number.
+    size = rate.size if isinstance(rate, np.ndarray) else None
+    if size is None and callable(getattr(rate, "numel", None)):
+        size = rate.numel()
+    if size == 1 and callable(getattr(rate, "item", None)):
+        rate = rate.item()
+    limit = 0xFFFFFFFF // (2 * channels)
+    if (
+        isinstance(rate, (bool, np.bool_))
+        or not isinstance(rate, numbers.Real)
+        or not 0 < rate <= limit
+        or rate != int(rate)
+    ):
+        raise ValueError(
+            "sample_frequency should be a positive whole number up to {} for "
+            "{}-channel audio, got {!r}".format(limit, channels, rate)
+        )
+    return int(rate)
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -2864,11 +2891,17 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.sample_frequency`: sample frequency (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
+        if tensor is not None:
+            # A 2-D tensor with a side of 2 is stereo, (1, 2) included.
+            channels = 2 if tensor.ndim == 2 and 2 in tensor.shape else 1
+            opts["sample_frequency"] = _audio_sample_rate(
+                opts["sample_frequency"], channels
+            )
         _title2str(opts)
         _assert_opts(opts)
         assert (

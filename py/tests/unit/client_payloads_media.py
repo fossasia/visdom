@@ -834,6 +834,88 @@ def test_audio_rejects_malformed_input(offline_client, kwargs, message):
         offline_client.audio(**kwargs)
 
 
+def _wav_rate(sent):
+    """The sample rate in the header of the WAV that audio() embedded."""
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[0]
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [16000, 16e3, 22050.0, np.float32(16000), np.int64(8000), np.array(16000)],
+)
+def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
+    """16e3 or a rate read from a config is a float, which used to crash."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == int(rate)
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize("make", ["int", "float", "one_element"])
+def test_audio_accepts_a_sample_rate_tensor(capture_send, make):
+    """torch.tensor(16000) worked before; float and 1-element tensors too now."""
+    torch = pytest.importorskip("torch")
+    rate = {
+        "int": torch.tensor(16000),
+        "float": torch.tensor(16000.0),
+        "one_element": torch.tensor([16000]),
+    }[make]
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == 16000
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [22050.5, 0, -16000, 2**32, 10**400, float("nan"), float("inf"), True, "16000"],
+    ids=[
+        "fraction",
+        "zero",
+        "negative",
+        "2**32",
+        "huge_int",
+        "nan",
+        "inf",
+        "bool",
+        "str",
+    ],
+)
+def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
+    with pytest.raises(ValueError, match="positive whole number"):
+        offline_client.audio(
+            tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate}
+        )
+
+
+@pytest.mark.parametrize(
+    "wave, limit",
+    [
+        (np.sin(np.arange(64)), 2**31 - 1),
+        (np.sin(np.arange(128)).reshape(64, 2), 2**30 - 1),
+        (np.array([[0.5, -0.5]]), 2**30 - 1),
+    ],
+    ids=["mono", "stereo", "one_stereo_frame"],
+)
+def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
+    """Bytes per second (rate * channels * 2) must fit the 32-bit header too."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit})
+    )
+    assert _wav_rate(sent) == limit
+    with pytest.raises(ValueError, match="up to {}".format(limit)):
+        capture_send(
+            lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit + 1})
+        )
+
+
 # ----------------------------------------------------------------- video ----
 
 
