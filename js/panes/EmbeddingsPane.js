@@ -650,6 +650,10 @@ class Scene extends React.Component {
   }
 
   removeHighlights(hoverContainer) {
+    for (const highlight of hoverContainer.children) {
+      highlight.geometry.dispose();
+      highlight.material.dispose();
+    }
     hoverContainer.remove(...hoverContainer.children);
   }
 
