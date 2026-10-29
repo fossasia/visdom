@@ -87,13 +87,20 @@ const ApiProvider = ({ children }) => {
 
     // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      // eslint-disable-next-line prefer-const
-      let pollerInstance = new Poller(
-        correctPathname,
-        handleMessage,
-        () => _onConnect(pollerInstance),
-        () => _onDisconnect(pollerInstance)
-      );
+      let pollerInstance;
+      try {
+        pollerInstance = new Poller(
+          correctPathname,
+          handleMessage,
+          () => _onConnect(pollerInstance),
+          () => _onDisconnect(pollerInstance)
+        );
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[Visdom API] Failed to start poller:', e);
+        setConnected(false);
+        return;
+      }
       _socket.current = pollerInstance;
       return;
     }
@@ -102,7 +109,15 @@ const ApiProvider = ({ children }) => {
     const wsUrl =
       protocol + '://' + window.location.host + correctPathname() + 'socket';
 
-    const socket = new WebSocket(wsUrl);
+    let socket;
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to create WebSocket:', e);
+      setConnected(false);
+      return;
+    }
     socket.onmessage = handleMessage;
     socket.onopen = () => _onConnect(socket);
     socket.onerror = (event) => {
@@ -148,6 +163,7 @@ const ApiProvider = ({ children }) => {
     setConnected(false);
   };
 
+  // -------------------//
   // API receive events //
   // -------------------//
 
