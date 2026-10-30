@@ -37,6 +37,7 @@ import warnings
 import time
 import errno
 from collections import OrderedDict
+from fractions import Fraction
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -228,6 +229,20 @@ def isnum(n):
 
 def isndarray(n):
     return isinstance(n, (np.ndarray))
+
+
+def _frame_rate(fps):
+    # PyAV wants an int or Fraction, but OpenCV and others give fps as a float.
+    if isinstance(fps, numbers.Rational):
+        return Fraction(int(fps.numerator), int(fps.denominator))
+    fps = float(fps)
+    if not math.isfinite(fps):
+        raise ValueError("fps should be a finite number, got %r" % fps)
+    # Up to 1001 keeps NTSC rates exact, e.g. 29.97002997 -> 30000/1001.
+    rate = Fraction(fps).limit_denominator(1001)
+    if rate <= 0:
+        raise ValueError("fps is too small to encode, got %r" % fps)
+    return rate
 
 
 from visdom.utils.shared_utils import NanSafeEncoder
@@ -2936,7 +2951,7 @@ class Visdom(object):
         content = BytesIO()
         container = av.open(content, "w", "mp4")
 
-        stream = container.add_stream("h264", rate=fps)
+        stream = container.add_stream("h264", rate=_frame_rate(fps))
         stream.height = tensor.shape[1]
         stream.width = tensor.shape[2]
         stream.pix_fmt = "yuv420p"
@@ -2971,7 +2986,7 @@ class Visdom(object):
         The function does not support any plot-specific `opts`. The following
         video `opts` are supported:
 
-        - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+        - `opts.fps`: FPS for the video (`number` > 0, e.g. 30 or 29.97; default = 25)
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         - `opts.caption`: caption to display below the player (`string`; optional)
