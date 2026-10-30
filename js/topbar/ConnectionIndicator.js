@@ -8,31 +8,44 @@
  */
 import React, { useContext } from 'react';
 const classNames = require('classnames');
+import './ConnectionIndicator.css';
+
 import ApiContext from '../api/ApiContext';
 
 function ConnectionIndicator(props) {
   const { connected, sessionInfo } = useContext(ApiContext);
-  const readonly = sessionInfo.readonly;
+  const readonly = sessionInfo ? sessionInfo.readonly : false;
   const { onClick } = props;
 
-  const label = connected ? (readonly ? 'readonly' : 'online') : 'offline';
-  const title = connected
-    ? readonly
-      ? 'Read-only connection'
-      : 'Connected'
-    : 'Disconnected -- click to reconnect';
+  // Tri-state evaluation:
+  // connected === null  -> initial connection in progress
+  // connected === true  -> online or readonly
+  // connected === false -> offline / disconnected
+  const isConnecting = connected === null;
+  const isOnline = connected === true;
 
-  // rendering
-  // ---------
+  let label = 'offline';
+  let title = 'Disconnected -- click to reconnect';
+
+  if (isConnecting) {
+    label = 'connecting';
+    title = 'Connecting to server...';
+  } else if (isOnline) {
+    label = readonly ? 'readonly' : 'online';
+    title = readonly ? 'Read-only connection' : 'Connected';
+  }
+
   return (
     <button
       className={classNames('btn', 'btn-sm', 'topbar-conn', {
-        'topbar-conn-warn': connected && readonly,
-        'topbar-conn-ok': connected && !readonly,
-        'topbar-conn-off': !connected,
+        'topbar-conn-warn': isOnline && readonly,
+        'topbar-conn-ok': isOnline && !readonly,
+        'topbar-conn-connecting': isConnecting,
+        'topbar-conn-off': !isOnline && !isConnecting,
       })}
       title={title}
-      onClick={onClick}
+      onClick={isConnecting ? undefined : onClick}
+      disabled={isConnecting}
     >
       <span className="topbar-conn-dot" />
       {label}
