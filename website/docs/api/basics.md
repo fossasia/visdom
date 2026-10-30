@@ -16,6 +16,8 @@ vis.image(img, win=None, env=None, opts=None)
 
 This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image. Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format. Passing images in that format will raise errors or lead to incorrect rendering.
 
+`img` can hold `uint8` values, which are drawn as they are, or any other integer type, `bool`, or float. Those are converted: an image within `[0, 1]` is scaled to `[0, 255]` (so a 0/1 or boolean mask is drawn black and white), one within `[-1, 1]` is mapped onto `[0, 255]`, and anything else is clipped to `[0, 255]`, with a `UserWarning` when that clip changes an integer image. Pass `opts.normalize=True` to stretch the image's own range onto `[0, 255]` instead, e.g. for a 16-bit depth map.
+
 ```python
 import numpy as np
 

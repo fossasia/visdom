@@ -864,6 +864,8 @@ This function draws an `img`. It takes as input an `CxHxW` tensor `img` that con
 Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format.
 Passing images in that format will raise errors or lead to incorrect rendering.
 
+`img` can hold `uint8` values, which are drawn as they are, or any other integer type, `bool`, or float. Those are converted: an image within `[0, 1]` is scaled to `[0, 255]` (so a 0/1 or boolean mask is drawn black and white), one within `[-1, 1]` is mapped onto `[0, 255]`, and anything else is clipped to `[0, 255]`, with a `UserWarning` when that clip changes an integer image. Pass `opts.normalize=True` to stretch the image's own range onto `[0, 255]` instead, e.g. for a 16-bit depth map.
+
 For example:
 
 ```python
@@ -896,7 +898,7 @@ The `index` is 0-based and is clamped to the valid range by the server. NumPy in
 
 #### vis.image_heatmap
 
-This function overlays a saliency or attention heatmap on top of an image. It takes a `CxHxW` or `HxW` array `img` (uint8 or float) and an `HxW` float array `heatmap` with values in `[0, 1]`. The blending is per-pixel — pixels where the heatmap is near zero stay close to the original image, so a zero-gradient background does not get tinted by the colormap.
+This function overlays a saliency or attention heatmap on top of an image. It takes a `CxHxW` or `HxW` array `img` (uint8, any other integer type, bool, or float, converted as in [`vis.image`](#visimage)) and an `HxW` float array `heatmap` with values in `[0, 1]`. The blending is per-pixel — pixels where the heatmap is near zero stay close to the original image, so a zero-gradient background does not get tinted by the colormap.
 
 ```python
 import numpy as np
@@ -904,7 +906,7 @@ from visdom import Visdom
 
 viz = Visdom()
 
-# img: CxHxW uint8 or float in [0, 1]
+# img: CxHxW uint8, any other integer type, bool, or float in [0, 1]
 # heatmap: HxW float in [0, 1] — e.g. from a saliency method or attention map
 viz.image_heatmap(img, heatmap, opts=dict(title="Saliency", alpha=0.6, colormap="jet"))
 ```

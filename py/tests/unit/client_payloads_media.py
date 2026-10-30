@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import sys
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -176,6 +177,64 @@ def test_image_normalize_of_a_flat_image_is_black(capture_send):
     assert set(np.unique(pixels)) == {0}
 
 
+BYTE_PIXELS = np.array([[0, 128], [200, 255]])
+
+
+@pytest.mark.parametrize("dtype", [np.int16, np.int32, np.int64, np.uint16, np.uint32])
+@pytest.mark.parametrize("shape", [(2, 2), (3, 2, 2)], ids=["HxW", "CxHxW"])
+def test_image_draws_other_integer_dtypes_as_their_uint8_copy(
+    capture_send, dtype, shape
+):
+    """Regression: Pillow cannot encode these, so every one of them used to raise.
+
+    int64 is what ``np.random.randint`` and ``torch.long`` hand over.
+    """
+    img = np.broadcast_to(BYTE_PIXELS, shape)
+    _, expected = decode(capture_send(lambda v: v.image(img.astype(np.uint8))))
+    _, pixels = decode(capture_send(lambda v: v.image(img.astype(dtype))))
+    np.testing.assert_array_equal(pixels, expected)
+
+
+@pytest.mark.parametrize(
+    "mask",
+    [
+        np.array([[True, False], [False, True]]),
+        np.array([[1, 0], [0, 1]], dtype=np.int64),
+    ],
+    ids=["bool", "int64"],
+)
+def test_image_draws_a_binary_mask_black_and_white(capture_send, mask):
+    _, pixels = decode(capture_send(lambda v: v.image(mask)))
+    assert pixels.tolist() == [[255, 0], [0, 255]]
+
+
+def test_image_clips_integers_outside_the_byte_range(capture_send):
+    img = np.array([[-5, 300], [0, 255]], dtype=np.int16)
+    with pytest.warns(UserWarning, match="int16 image values outside"):
+        _, pixels = decode(capture_send(lambda v: v.image(img)))
+    assert pixels.tolist() == [[0, 255], [0, 255]]
+
+
+def test_image_warns_once_for_a_stream_of_clipped_frames(capture_send):
+    """Each depth frame spans its own range; the warning still shows only once,
+    and against the line that called ``image``, not one inside visdom."""
+    frames = [np.array([[0, 1000 * i]], dtype=np.uint16) for i in range(1, 4)]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default")
+        for frame in frames:
+            capture_send(lambda v: v.image(frame))
+    assert [str(w.message).split()[0] for w in caught] == ["uint16"]
+    assert caught[0].filename == __file__
+
+
+def test_image_normalize_stretches_an_integer_image(capture_send):
+    """A 16-bit depth map spans its own range; normalize fills the bytes with it."""
+    img = np.array([[1000, 2000], [2000, 3000]], dtype=np.uint16)
+    sent = capture_send(lambda v: v.image(img, opts=dict(normalize=True)))
+    _, pixels = decode(sent)
+    assert pixels.tolist() == [[0, 127], [127, 255]]
+
+
 def test_image_encodes_as_jpeg_when_a_quality_is_given(capture_send):
     sent = capture_send(
         lambda v: v.image(np.zeros((3, 4, 4), dtype=np.uint8), opts=dict(jpgquality=80))
@@ -280,6 +339,11 @@ def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
 def test_image_rejects_unsupported_shapes(offline_client, img, message):
     with pytest.raises(ValueError, match=message):
         offline_client.image(img)
+
+
+def test_image_rejects_a_dtype_with_no_pixel_meaning(offline_client):
+    with pytest.raises(TypeError, match="Unsupported image dtype: complex128"):
+        offline_client.image(np.zeros((2, 2), dtype=np.complex128))
 
 
 # ---------------------------------------------------------------- images ----
