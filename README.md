@@ -804,10 +804,12 @@ The summary pane links directly to the best and latest terminal trial
 environments. The callback never opens a browser on its own.
 
 Pass `raise_on_error=True` if a Visdom logging failure should stop optimization;
-by default it emits a warning and allows the study to continue. A write that
-gets no reply or a server error is retried; if the server stays down, the
-trial is logged from where it stopped by the next trial or by
-`update_dashboard()`, so no metric is recorded twice. Single- and
+by default it emits a warning and allows the study to continue. A trial whose
+writes get no reply or a server error is set aside without waiting and logged
+later, from where it stopped, by a later trial, `flush()` or
+`update_dashboard()`; a write whose reply was lost is checked against what the
+server stored first, so no metric is recorded twice. Call `flush()` after
+`study.optimize()` when no dashboard is kept. Single- and
 multi-objective studies are supported, and `COMPLETE`, `PRUNED` and `FAIL`
 states are preserved in the `optuna_state` tag. A pruned trial retains every
 intermediate value reported before pruning. Optuna remains responsible for the
