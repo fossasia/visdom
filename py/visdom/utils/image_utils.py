@@ -99,7 +99,9 @@ def _float_to_uint8(img, normalize):
 def _stretch_to_bytes(img, low, high):
     """Map ``[low, high]`` linearly onto [0, 255]; a flat image maps to 0."""
     if high <= low:
-        return np.zeros_like(img)
+        # Nothing to stretch, so every finite pixel is 0. NaN and the
+        # infinities are left for the saturation step, as in a stretched image.
+        return np.where(np.isfinite(img), 0.0, img)
     return (img - low) / (high - low) * 255.0
 
 

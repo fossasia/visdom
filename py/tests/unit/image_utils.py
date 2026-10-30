@@ -126,6 +126,20 @@ def test_integers_convert_without_a_float_copy(img):
     assert _peak_bytes(lambda: image_to_uint8(img.astype(np.float64))) > budget
 
 
+@pytest.mark.parametrize(
+    "img, expected",
+    [
+        ([[np.inf, np.inf]], [[255, 255]]),
+        ([[np.nan, np.inf, -np.inf]], [[0, 255, 0]]),
+        ([[5.0, 5.0, np.inf]], [[0, 0, 255]]),
+    ],
+    ids=["all_infinite", "no_finite_value", "flat_with_infinity"],
+)
+def test_normalize_saturates_when_there_is_no_range_to_stretch(img, expected):
+    """A flat range collapses to black, but the infinities still saturate."""
+    assert image_to_uint8(np.array(img), normalize=True).tolist() == expected
+
+
 def test_uint8_is_returned_untouched():
     img = np.arange(6, dtype=np.uint8).reshape(2, 3)
     assert image_to_uint8(img) is img
