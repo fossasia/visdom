@@ -91,6 +91,7 @@ from components.plot_roc_pr import (
     plot_roc_curve,
     plot_pr_curve,
     plot_roc_precomputed,
+    plot_calibration_curve,
 )
 from components.properties import properties_basic, properties_callbacks
 from components.plot_confusion_matrix import (
@@ -222,6 +223,7 @@ def run_demo(viz, env, args):
     plot_roc_curve(viz, env, args)
     plot_pr_curve(viz, env, args)
     plot_roc_precomputed(viz, env, args)
+    plot_calibration_curve(viz, env, args)
     # ================ #
     # confusion matrix #
     # ================ #

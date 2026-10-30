@@ -392,6 +392,7 @@ The following API is currently supported:
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.roc_curve`](#visroc_curve)  : ROC curves
 - [`vis.pr_curve`](#vispr_curve)  : precision-recall curves
+- [`vis.calibration_curve`](#viscalibration_curve)  : calibration curves (reliability diagrams)
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
@@ -1237,6 +1238,32 @@ The following `opts` are supported:
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
 
+
+#### vis.calibration_curve
+This function draws a calibration curve (reliability diagram) for binary
+classification from labels `y_true` and predicted probabilities `y_prob`.
+
+The probabilities are grouped into `n_bins` bins (default `10`), and each
+bin's mean predicted probability is plotted against the fraction of positives
+in it, next to a dashed "perfectly calibrated" diagonal. `strategy` is
+`uniform` (equal-width bins, the default) or `quantile` (bins with about the
+same number of samples); empty bins are skipped. The binning is the same as
+`sklearn.calibration.calibration_curve`. Hovering a point shows how many
+samples are in its bin, and the title shows the expected calibration error
+(ECE). `pos_label` is the positive class; it can be left out for {0, 1} or
+{-1, 1} labels (1 is positive), and is required for other labels such as
+strings. When both classes are present it must be one of them.
+
+```python
+vis.calibration_curve(y_true, y_prob, n_bins=10, strategy="uniform")
+```
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes ECE)
+- `opts.legend`     : two legend labels for curve and diagonal (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `Mean predicted probability`)
+- `opts.ylabel`     : y-axis label (`string`; default = `Fraction of positives`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
 
 #### vis.learning_curve
 This function draws named machine-learning metrics as line plots. It accepts a mapping from metric names to scalar values or equal-length 1D series and forwards to [`vis.line`](#visline).

@@ -771,6 +771,134 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     return precision, recall
 
 
+def _squeeze_vector(x):
+    """Turn a single row or column into 1-D; other shapes are left as they are."""
+    x = np.asarray(x)
+    if x.ndim > 1 and max(x.shape) == x.size:
+        x = x.reshape(-1)
+    return x
+
+
+def _is_missing(value):
+    if value is None:
+        return True
+    try:
+        return bool(value != value)  # NaN and NaT
+    except (TypeError, ValueError):
+        return True  # pandas NA can't be compared
+
+
+def _label_vector(y_true):
+    """Return labels as a typed 1-D array, refusing missing or mixed values.
+
+    Checked value by value first: numpy would turn ``["yes", nan]`` into
+    ``["yes", "nan"]`` and ``[0, "1"]`` into ``["0", "1"]``.
+    """
+    if isinstance(y_true, (list, tuple)):
+        y_true = np.array(y_true, dtype=object)
+    y_true = _squeeze_vector(y_true)
+    if y_true.dtype != object or y_true.ndim != 1:
+        return y_true
+    values = y_true.tolist()
+    if any(isinstance(value, (list, tuple)) for value in values):
+        raise ValueError("y_true and y_prob should have 1 dim")
+    text = [isinstance(value, (str, bytes)) for value in values]
+    if any(text) and not all(text) or any(_is_missing(v) for v in values):
+        raise ValueError(
+            "y_true should hold only numbers or only strings, with no " "missing values"
+        )
+    return np.array(values)
+
+
+def _calibration_pos_label(labels, pos_label):
+    """Return the positive class, following sklearn.
+
+    Without ``pos_label`` the labels must be {0, 1} or {-1, 1} (or one of
+    them), and 1 is positive. When both classes are present, ``pos_label``
+    must be one of them; a single class without it has no positives.
+    """
+    if pos_label is None:
+        values = set(labels.tolist())
+        if labels.dtype.kind not in "biuf" or not (
+            values <= {0, 1} or values <= {-1, 1}
+        ):
+            raise ValueError(
+                "y_true takes values {} and pos_label is not specified: make "
+                "y_true take values in {{0, 1}} or {{-1, 1}}, or pass "
+                "pos_label".format(labels.tolist())
+            )
+        return 1
+    if len(labels) == 2 and not np.any(labels == pos_label):
+        raise ValueError(
+            "pos_label={!r} is not one of the labels {}".format(
+                pos_label, labels.tolist()
+            )
+        )
+    return pos_label
+
+
+def _compute_calibration_curve(
+    y_true, y_prob, n_bins=10, strategy="uniform", pos_label=None
+):
+    """Bin predicted probabilities and compare them with observed frequencies.
+
+    Returns ``(prob_true, prob_pred, counts, ece)`` for the non-empty bins:
+    the fraction of positives, the mean predicted probability, the number of
+    samples in each bin, and the expected calibration error. The binning and
+    the ``pos_label`` rules are the same as
+    ``sklearn.calibration.calibration_curve``.
+    """
+    y_true = _label_vector(y_true)
+    y_prob = _squeeze_vector(y_prob)
+    if y_prob.dtype == object and y_prob.ndim == 1:
+        y_prob = np.array(y_prob.tolist())
+    if np.iscomplexobj(y_prob):
+        raise ValueError("y_prob should only contain real values")
+    if y_prob.dtype.kind not in "biuf":
+        raise ValueError("y_prob should be numeric probabilities")
+    y_prob = y_prob.astype(float)
+    if y_true.ndim != 1 or y_prob.ndim != 1:
+        raise ValueError("y_true and y_prob should have 1 dim")
+    if y_true.shape[0] != y_prob.shape[0]:
+        raise ValueError("y_true and y_prob should match")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_prob should be non-empty")
+    if not np.all(np.isfinite(y_prob)):
+        raise ValueError("y_prob should only contain finite values")
+    if y_prob.min() < 0 or y_prob.max() > 1:
+        raise ValueError("y_prob should be probabilities in [0, 1]")
+    if y_true.dtype.kind == "f" and not np.all(np.isfinite(y_true)):
+        raise ValueError("y_true should only contain finite values")
+    labels = np.unique(y_true)
+    if len(labels) > 2:
+        raise ValueError("calibration_curve supports binary labels only")
+    pos_label = _calibration_pos_label(labels, pos_label)
+    if isinstance(n_bins, bool) or not isinstance(n_bins, (int, np.integer)):
+        raise ValueError("n_bins should be a positive integer")
+    if n_bins < 1:
+        raise ValueError("n_bins should be a positive integer")
+
+    if strategy == "uniform":
+        bins = np.linspace(0.0, 1.0, n_bins + 1)
+    elif strategy == "quantile":
+        bins = np.percentile(y_prob, np.linspace(0, 1, n_bins + 1) * 100)
+    else:
+        raise ValueError("strategy should be 'uniform' or 'quantile'")
+
+    positive = (y_true == pos_label).astype(float)
+    binids = np.searchsorted(bins[1:-1], y_prob)
+    bin_sums = np.bincount(binids, weights=y_prob, minlength=n_bins)
+    bin_true = np.bincount(binids, weights=positive, minlength=n_bins)
+    bin_total = np.bincount(binids, minlength=n_bins)
+
+    nonzero = bin_total != 0
+    counts = bin_total[nonzero]
+    prob_true = bin_true[nonzero] / counts
+    prob_pred = bin_sums[nonzero] / counts
+    ece = float(np.sum(counts * np.abs(prob_true - prob_pred)) / y_prob.shape[0])
+    return prob_true, prob_pred, counts, ece
+
+
 def _coerce_curve_xy(x, y, x_name, y_name, y_tiebreak_descending=False):
     """Validate and sort precomputed curve arrays by x, breaking ties in y.
 
@@ -3746,6 +3874,92 @@ class Visdom(object):
                     "line": {"dash": "dash"},
                 }
             )
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    def calibration_curve(
+        self,
+        y_true,
+        y_prob,
+        n_bins=10,
+        strategy="uniform",
+        pos_label=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a calibration curve (reliability diagram) for binary
+        classification.
+
+        Predicted probabilities `y_prob` are grouped into `n_bins` bins, and
+        each bin's mean predicted probability is plotted against the fraction
+        of positives in it. `strategy` is `uniform` (equal-width bins) or
+        `quantile` (bins with about the same number of samples). Empty bins
+        are skipped. The title shows the expected calibration error (ECE).
+
+        `pos_label` is the positive class. It can be left out when `y_true`
+        holds {0, 1} or {-1, 1} labels (1 is positive); other labels, such as
+        strings, need it. When both classes are present it must be one of them.
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes ECE)
+        - `opts.legend`     : two legend labels for curve and diagonal (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `Mean predicted probability`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `Fraction of positives`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        # Lists are not converted up front, so missing labels can be seen.
+        if not isinstance(y_true, (list, tuple)):
+            y_true = _to_numpy(y_true)
+        y_prob = _to_numpy(y_prob)
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        prob_true, prob_pred, counts, ece = _compute_calibration_curve(
+            y_true=y_true,
+            y_prob=y_prob,
+            n_bins=n_bins,
+            strategy=strategy,
+            pos_label=pos_label,
+        )
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Mean predicted probability")
+        opts["ylabel"] = opts.get("ylabel", "Fraction of positives")
+        opts["legend"] = _curve_legend(
+            opts.get("legend"), ["Model", "Perfectly calibrated"]
+        )
+        opts["title"] = opts.get("title", "Calibration Curve (ECE={:.4f})".format(ece))
+
+        data = [
+            {
+                "x": prob_pred.tolist(),
+                "y": prob_true.tolist(),
+                "text": ["n={}".format(int(c)) for c in counts],
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines+markers",
+            },
+            {
+                "x": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "name": opts["legend"][1],
+                "type": "scatter",
+                "mode": "lines",
+                "line": {"dash": "dash"},
+            },
+        ]
 
         return self._send(
             {
