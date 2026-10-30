@@ -250,6 +250,21 @@ class TestCreateOnAppendLayout(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200, resp.body)
         self.assertEqual(self.layout_of(win), {"title": "original"})
 
+    def test_layout_create_title_names_the_created_pane(self):
+        self.append_scatter("named", layout={}, layout_create={"title": {"text": "t"}})
+        self.assertEqual(self.get_win_data("named")["title"], "t")
+
+    def test_opts_title_wins_over_the_layout_create_title(self):
+        self.update(
+            "both",
+            self.SCATTER,
+            append=True,
+            layout={},
+            layout_create={"title": "layout"},
+            opts={"title": "opts"},
+        )
+        self.assertEqual(self.get_win_data("both")["title"], "opts")
+
     def test_a_non_object_layout_create_is_rejected(self):
         resp = self.append_scatter("made", layout={}, layout_create="title")
         self.assertEqual(resp.code, 400)
@@ -308,6 +323,19 @@ class TestClientCreatesWithoutPreflight(VisdomHTTPTestCase):
             for per_window in ("id", "contentID", "i"):
                 pane.pop(per_window, None)
         self.assertEqual(direct, probed)
+
+    def test_learning_curve_append_creates_the_same_pane(self):
+        probed, direct = self.created_by(
+            lambda vis, win: vis.learning_curve(
+                {"loss": [0.9]}, step=[1], win=win, update="append"
+            ),
+            "lc",
+        )
+        self.assertEqual(direct["title"], "Learning Curve")
+        layout = direct["content"]["layout"]
+        self.assertEqual(layout["title"], {"text": "Learning Curve"})
+        self.assertEqual(layout["yaxis"]["title"], {"text": "metric"})
+        self.assertSamePane(probed, direct)
 
     def test_image_store_history_creates_an_image_history_pane(self):
         opts = dict(store_history=True, title="frames", caption="c0")
