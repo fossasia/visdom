@@ -811,12 +811,11 @@ def _label_vector(y_true):
 
 
 def _calibration_pos_label(labels, pos_label):
-    """Return the positive class, refusing one that can't be told apart.
+    """Return the positive class, following sklearn.
 
     Without ``pos_label`` the labels must be {0, 1} or {-1, 1} (or one of
-    them), and 1 is positive, as in sklearn. A given ``pos_label`` must occur
-    in ``y_true``, except for a batch with no positives from one of those
-    pairs, such as ``[0, 0]`` with ``pos_label=1``.
+    them), and 1 is positive. When both classes are present, ``pos_label``
+    must be one of them; a single class without it has no positives.
     """
     if pos_label is None:
         values = set(labels.tolist())
@@ -829,21 +828,13 @@ def _calibration_pos_label(labels, pos_label):
                 "pos_label".format(labels.tolist())
             )
         return 1
-    if np.any(labels == pos_label):
-        return pos_label
-    numeric = isinstance(pos_label, (numbers.Number, np.bool_)) and not isinstance(
-        pos_label, complex
-    )
-    if (
-        len(labels) == 1
-        and labels.dtype.kind in "biuf"
-        and numeric
-        and {labels[0].item(), pos_label} in ({0, 1}, {-1, 1})
-    ):
-        return pos_label
-    raise ValueError(
-        "pos_label={!r} is not one of the labels {}".format(pos_label, labels.tolist())
-    )
+    if len(labels) == 2 and not np.any(labels == pos_label):
+        raise ValueError(
+            "pos_label={!r} is not one of the labels {}".format(
+                pos_label, labels.tolist()
+            )
+        )
+    return pos_label
 
 
 def _compute_calibration_curve(
@@ -3915,9 +3906,9 @@ class Visdom(object):
         `quantile` (bins with about the same number of samples). Empty bins
         are skipped. The title shows the expected calibration error (ECE).
 
-        `pos_label` is the positive class and must occur in `y_true`. It can
-        be left out when `y_true` holds {0, 1} or {-1, 1} labels (1 is
-        positive); other labels, such as strings, need it.
+        `pos_label` is the positive class. It can be left out when `y_true`
+        holds {0, 1} or {-1, 1} labels (1 is positive); other labels, such as
+        strings, need it. When both classes are present it must be one of them.
 
         The following `opts` are supported:
 

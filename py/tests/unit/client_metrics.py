@@ -1062,17 +1062,12 @@ def test_calibration_curve_single_class_with_a_known_positive(
         (["spam", "spam"], None, "pos_label is not specified"),
         (["1", "1"], None, "pos_label is not specified"),
         ([2, 2], None, "pos_label is not specified"),
-        (["spam", "spam"], 1, "pos_label=1 is not one of"),
-        ([0, 0], "spam", "pos_label='spam' is not one of"),
-        (["ham", "ham"], "spam", "pos_label='spam' is not one of"),
-        ([0, 0], 2, "pos_label=2 is not one of"),
-        ([5, 5], 1, "pos_label=1 is not one of"),
+        (["ham", "spam"], 1, "pos_label=1 is not one of"),
+        ([0, 2], 1, "pos_label=1 is not one of"),
     ],
 )
-def test_calibration_curve_single_class_needs_a_matching_pos_label(
-    y_true, pos_label, message
-):
-    """A pos_label missing from y_true would make every sample negative."""
+def test_calibration_curve_refuses_an_unclear_pos_label(y_true, pos_label, message):
+    """No pos_label for non-{0, 1} labels, or one matching neither class."""
     with pytest.raises(ValueError, match=message):
         _compute_calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
 
@@ -1086,6 +1081,9 @@ def test_calibration_curve_matches_sklearn_pos_label_rules():
         ([False, True, True, False], None),
         (["ham", "spam", "spam", "ham"], "spam"),
         ([0, 0, 0, 0], None),
+        ([2, 2, 2, 2], 2),
+        ([2, 2, 2, 2], 1),
+        (["ham", "ham", "ham", "ham"], "spam"),
     ]:
         expected, _ = calibration.calibration_curve(
             y_true, y_prob, n_bins=2, pos_label=pos_label
@@ -1104,7 +1102,7 @@ def test_calibration_curve_reads_object_arrays_by_their_values():
     assert prob_true.tolist() == [0.0, 1.0]
     with pytest.raises(ValueError, match="pos_label=1 is not one of"):
         _compute_calibration_curve(
-            np.array(["spam"] * 2, dtype=object), [0.2, 0.7], pos_label=1
+            np.array(["ham", "spam"], dtype=object), [0.2, 0.7], pos_label=1
         )
 
 
