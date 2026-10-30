@@ -393,10 +393,11 @@ const App = () => {
     if (!currLayout) return false;
 
     let w = newPane.width ? p2w(newPane.width) : currLayout.w;
-    let h = newPane.height
-      ? Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT))
-      : currLayout.h;
-    if (newPane.content && newPane.content.caption) h += 1;
+    let h = currLayout.h;
+    if (newPane.height) {
+      h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
+      if (newPane.content && newPane.content.caption) h += 1;
+    }
     if (w === currLayout.w && h === currLayout.h) return false;
 
     newLayout[newLayout.indexOf(currLayout)] = { ...currLayout, w: w, h: h };

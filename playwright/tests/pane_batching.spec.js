@@ -52,6 +52,32 @@ viz.line(
 )
 `;
 
+const captionScript = `
+import sys, visdom
+env, win = sys.argv[1], sys.argv[2]
+start, count = int(sys.argv[3]), int(sys.argv[4])
+viz = visdom.Visdom(port=8098, env=env, raise_exceptions=True)
+src = (
+    'data:image/gif;base64,'
+    'R0lGODlhQABAAIAAAP///wAAACH5BAEAAAAALAAAAABAAEAAAAIxhI+py+0Po5y02ouz3rz7'
+    'D4biSJbmiabqyrbuC8fyTNf2jef6zvf+DwwKh8Si8VgoAAA7'
+)
+for i in range(start, start + count):
+    viz._send(
+        {
+            'data': [
+                {
+                    'content': {'src': src, 'caption': 'frame %d' % i},
+                    'type': 'image',
+                }
+            ],
+            'win': win,
+            'eid': env,
+            'opts': {'title': 'captioned'},
+        }
+    )
+`;
+
 const gridItem = '.layout .react-grid-item';
 
 function newEnv() {
@@ -82,6 +108,23 @@ async function openThreePanes(page, env) {
   await page.waitForTimeout(1500);
 }
 
+function paneByTitle(page, title) {
+  return page.locator('.layout .window').filter({ hasText: title });
+}
+
+function plottedPoints(page, title) {
+  return paneByTitle(page, title)
+    .locator('.js-plotly-plot')
+    .first()
+    .evaluate((el) => el.data[0].x.length);
+}
+
+function paneHeight(page, title) {
+  return paneByTitle(page, title).evaluate(
+    (el) => el.closest('.react-grid-item').getBoundingClientRect().height
+  );
+}
+
 async function countLayoutWrites(page, env) {
   await page.evaluate((prefix) => {
     window.__layoutWrites = 0;
@@ -98,13 +141,36 @@ test('appending to one pane does not rewrite every pane layout', async ({
 }) => {
   const env = newEnv();
   await openThreePanes(page, env);
+  const before = await plottedPoints(page, 'batching 0');
   await countLayoutWrites(page, env);
 
   runPython(appendScript, [env, 'pane0', '6', '0.15']);
+  await expect.poll(() => plottedPoints(page, 'batching 0')).toBe(before + 6);
   await page.waitForTimeout(1200);
 
   expect(await page.evaluate(() => window.__layoutWrites)).toBe(0);
   await expect(page.locator(gridItem)).toHaveCount(3);
+});
+
+test('repeated updates to a captioned pane do not grow it', async ({
+  page,
+}) => {
+  const env = newEnv();
+  await openThreePanes(page, env);
+  runPython(captionScript, [env, 'caption0', '0', '1']);
+  await expect(page.locator(gridItem)).toHaveCount(4);
+  await expect(paneByTitle(page, 'captioned')).toContainText('frame 0');
+  await page.waitForTimeout(1000);
+
+  const before = await paneHeight(page, 'captioned');
+  await countLayoutWrites(page, env);
+
+  runPython(captionScript, [env, 'caption0', '1', '5']);
+  await expect(paneByTitle(page, 'captioned')).toContainText('frame 5');
+  await page.waitForTimeout(1200);
+
+  expect(await paneHeight(page, 'captioned')).toBe(before);
+  expect(await page.evaluate(() => window.__layoutWrites)).toBe(0);
 });
 
 test('an update that changes a pane height still rewrites the layout', async ({
@@ -137,8 +203,9 @@ test('the title filter still hides panes after an update', async ({ page }) => {
   const env = newEnv();
   await openThreePanes(page, env);
 
+  const before = await plottedPoints(page, 'batching 0');
   runPython(appendScript, [env, 'pane0', '3', '0.15']);
-  await page.waitForTimeout(600);
+  await expect.poll(() => plottedPoints(page, 'batching 0')).toBe(before + 3);
 
   await page.locator('[data-cy=filter]').fill('batching 1');
   await expect
@@ -155,21 +222,18 @@ test('focus still follows a click after an update', async ({ page }) => {
   const env = newEnv();
   await openThreePanes(page, env);
 
+  const before = await plottedPoints(page, 'batching 0');
   runPython(appendScript, [env, 'pane0', '3', '0.15']);
-  await page.waitForTimeout(600);
+  await expect.poll(() => plottedPoints(page, 'batching 0')).toBe(before + 3);
 
-  const second = page
-    .locator('.layout .window')
-    .filter({ hasText: 'batching 1' });
+  const second = paneByTitle(page, 'batching 1');
   await second.locator('.bar > div.pull-right').click();
   await expect(second).toHaveClass(/focus/);
   await expect
     .poll(() => page.locator('.layout .window.focus').count())
     .toBe(1);
 
-  const third = page
-    .locator('.layout .window')
-    .filter({ hasText: 'batching 2' });
+  const third = paneByTitle(page, 'batching 2');
   await third.locator('.bar > div.pull-right').click();
   await expect(third).toHaveClass(/focus/);
   await expect
@@ -182,8 +246,11 @@ test('a pane closed while updates stream stays closed', async ({ page }) => {
   const env = newEnv();
   await openThreePanes(page, env);
 
-  streamPython(appendScript, [env, 'pane0', '80', '0.025']);
-  await page.waitForTimeout(400);
+  const before = await plottedPoints(page, 'batching 0');
+  streamPython(appendScript, [env, 'pane0', '160', '0.025']);
+  await expect
+    .poll(() => plottedPoints(page, 'batching 0'))
+    .toBeGreaterThan(before);
 
   await page
     .locator(gridItem)
@@ -192,6 +259,12 @@ test('a pane closed while updates stream stays closed', async ({ page }) => {
     .click({ force: true });
 
   await expect(page.locator(gridItem)).toHaveCount(2);
+  const duringClose = await plottedPoints(page, 'batching 0');
+  await expect
+    .poll(() => plottedPoints(page, 'batching 0'))
+    .toBeGreaterThan(duringClose);
+  await expect(page.locator(gridItem)).toHaveCount(2);
+
   await page.waitForTimeout(1600);
   await expect(page.locator(gridItem)).toHaveCount(2);
 });
