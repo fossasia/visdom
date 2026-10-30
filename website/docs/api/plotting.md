@@ -268,14 +268,46 @@ vis.boxplot(X, win=None, env=None, opts=None)
 ```
 
 This function draws boxplots. It takes as input an `N` or an `NxM` tensor `X`.
+Each matrix column is a separate boxplot, including when the matrix has only
+one row. Legend labels name these columns without changing their number; if
+provided, the number of labels must match the number of columns.
+
+For NumPy masked arrays, masked observations are omitted independently from
+each column. A fully masked column still has a series and label, but its
+observation list is empty. The input data and mask are not modified.
+This filtering applies only to masked observations: unmasked `NaN`, positive
+infinity and negative infinity are passed through in the plot data.
+
+Previously, a single-row matrix could be flattened into one series. To plot
+all values in one box, pass a vector or an `Nx1` matrix instead. A single label
+for a multi-column matrix now raises the same validation error as it does for
+multi-row matrices.
 
 ```python
 import numpy as np
+
+# One box with three observations:
+vis.boxplot(X=np.array([1.0, 2.0, 3.0]), opts=dict(legend=['Exp A']))
+
+# Three columns, each with one observation and a default column name:
+vis.boxplot(X=np.array([[1.0, 2.0, 3.0]]))
 
 vis.boxplot(
     X=np.random.randn(100, 3),
     opts=dict(legend=['Exp A', 'Exp B', 'Exp C'], title='Boxplots'),
 )
+
+# One observation in each of three separate series:
+vis.boxplot(
+    X=np.array([[1.0, 2.0, 3.0]]),
+    opts=dict(legend=['Exp A', 'Exp B', 'Exp C'], title='Single-observation boxplots'),
+)
+```
+
+To try two single-observation series against a running server:
+
+```bash
+python example/demo.py -run plot_special_boxplot -args "Single observations" 1
 ```
 
 **Supported opts:**

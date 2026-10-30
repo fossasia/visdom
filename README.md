@@ -1357,7 +1357,14 @@ The following plot-specific `opts` are currently supported:
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
 an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
-to construct the `M` boxplots.
+to construct the `M` boxplots. A single-row matrix keeps one box per column,
+and any legend must contain one label per column. Unlike the previous
+flattening behavior, a single label cannot merge those columns into one box.
+For one box containing all observations, pass a vector or an `Nx1` matrix.
+Masked observations are excluded independently from each column. Fully masked
+columns retain their series and label with an empty observation list.
+Only masked observations are excluded; unmasked `NaN`, positive infinity and
+negative infinity are passed through in the plot data.
 
 The following plot-specific `opts` are currently supported:
 
