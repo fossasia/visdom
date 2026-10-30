@@ -326,6 +326,41 @@ def test_legend_renames_traces_positionally(two_trace_pane, legend, expected):
     assert trace_names(two_trace_pane) == expected
 
 
+def numbered_pane(*names):
+    return window(window_args(data=[plot_data(name=n) for n in names]))
+
+
+@pytest.mark.parametrize(
+    "names,legend,expected",
+    [
+        (["1", "2"], ["a", "b"], ["a", "b"]),
+        (["2", "3"], ["a", "b", "c"], ["b", "c"]),
+        (["3", "1"], ["a", "b", "c"], ["c", "a"]),
+        (["2"], ["cat", "dog"], ["dog"]),
+        (["1", "4"], ["a", "b"], ["a", "4"]),
+    ],
+)
+def test_legend_renames_numbered_traces_by_their_number(names, legend, expected):
+    """A scatter created from some labels has its numbered traces out of place."""
+    pane = numbered_pane(*names)
+    update_window(pane, {"opts": {"legend": legend}})
+    assert trace_names(pane) == expected
+
+
+@pytest.mark.parametrize(
+    "names,expected",
+    [
+        (["0", "1"], ["a", "b"]),
+        (["2", "cat"], ["a", "b"]),
+        (["²", "1"], ["a", "b"]),
+    ],
+)
+def test_traces_not_all_numbered_from_one_are_renamed_by_position(names, expected):
+    pane = numbered_pane(*names)
+    update_window(pane, {"opts": {"legend": ["a", "b"]}})
+    assert trace_names(pane) == expected
+
+
 @pytest.mark.parametrize(
     "name,legend,expected",
     [

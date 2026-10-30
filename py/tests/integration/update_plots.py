@@ -304,6 +304,44 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
         self.assertEqual(self.xs(win), {"2": [1], "3": [2], "1": [9]})
 
 
+class TestLegendOnAppend(PlotUpdateTestCase):
+    """An append with a legend onto traces that still have their number names."""
+
+    def create_numbered(self, *labels):
+        return self.create_window(
+            [
+                {"type": "scatter", "x": [10 * n], "y": [n], "name": str(n)}
+                for n in labels
+            ],
+            layout={"title": "numbered"},
+        )
+
+    def append(self, win, legend, *labels):
+        data = [
+            {"type": "scatter", "x": [10 * n + 1], "y": [n], "name": legend[n - 1]}
+            for n in labels
+        ]
+        return self.update(win, data, append=True, opts={"legend": legend})
+
+    def xs(self, win):
+        return {t["name"]: t["x"] for t in self.traces(win)}
+
+    def test_each_label_joins_its_own_trace(self):
+        win = self.create_numbered(2, 3)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        self.assertEqual(self.xs(win), {"b": [20, 21], "c": [30, 31]})
+
+    def test_an_unseen_label_gets_its_own_trace(self):
+        win = self.create_numbered(2)
+        self.append(win, ["cat", "dog"], 1, 2)
+        self.assertEqual(self.xs(win), {"dog": [20, 21], "cat": [11]})
+
+    def test_a_line_keeps_its_traces(self):
+        win = self.create_numbered(1, 2)
+        self.append(win, ["train", "val"], 1, 2)
+        self.assertEqual(self.xs(win), {"train": [10, 11], "val": [20, 21]})
+
+
 class TestMarkerUpdates(PlotUpdateTestCase):
     """Marker colours concatenate alongside the points they belong to."""
 

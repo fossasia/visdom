@@ -545,16 +545,26 @@ def update_window(p, args):
                     if d.get("name") == name:
                         d["name"] = legend[0]
         else:
-            if len(legend) < len(pdata):
+            names = [d.get("name") for d in pdata]
+            # Traces still named by their label number take the legend entry for
+            # that number; a scatter created from some labels only has them out
+            # of position. Lines number their traces in order, so it's the same.
+            if names and all(
+                isinstance(n, str) and n.isdecimal() and int(n) >= 1 for n in names
+            ):
+                slots = [int(n) - 1 for n in names]
+            else:
+                slots = list(range(len(pdata)))
+            if any(slot >= len(legend) for slot in slots):
                 logging.warning(
                     "update_window: legend has %d entries but pane has %d"
-                    " traces; leaving trailing traces' names unchanged",
+                    " traces; leaving the extra traces' names unchanged",
                     len(legend),
                     len(pdata),
                 )
-            for i, d in enumerate(pdata):
-                if i < len(legend):
-                    d["name"] = legend[i]
+            for slot, d in zip(slots, pdata):
+                if slot < len(legend):
+                    d["name"] = legend[slot]
     return p
 
 
