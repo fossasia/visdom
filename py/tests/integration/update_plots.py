@@ -291,6 +291,18 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
         self.append(win, ("1", 5), ("2", 50))
         self.assertEqual(self.xs(win), {"train": [1, 5], "val": [1, 50]})
 
+    def test_a_partly_renamed_line_keeps_positional_pairing(self):
+        """Only the second trace was renamed, so "1" still matches in place."""
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [1], "name": "1"},
+                {"type": "scatter", "x": [1], "y": [10], "name": "val"},
+            ],
+            layout={"title": "line"},
+        )
+        self.append(win, ("1", 5), ("2", 50))
+        self.assertEqual(self.xs(win), {"1": [1, 5], "val": [1, 50]})
+
     def test_a_new_numeric_label_becomes_its_own_trace(self):
         """Traces named "2" and "3" were never renamed, so "1" is new."""
         win = self.create_window(
@@ -330,6 +342,21 @@ class TestLegendOnAppend(PlotUpdateTestCase):
         win = self.create_numbered(2, 3)
         self.append(win, ["a", "b", "c"], 2, 3)
         self.assertEqual(self.xs(win), {"b": [20, 21], "c": [30, 31]})
+
+    def test_a_repeated_legend_keeps_the_names_it_gave(self):
+        win = self.create_numbered(2, 3)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        self.assertEqual(self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31]})
+
+    def test_a_label_added_later_keeps_its_own_trace(self):
+        win = self.create_numbered(2, 3)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        self.append(win, ["a", "b", "c"], 1, 3)
+        self.append(win, ["a", "b", "c"], 1, 2)
+        self.assertEqual(
+            self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31], "a": [11, 11]}
+        )
 
     def test_an_unseen_label_gets_its_own_trace(self):
         win = self.create_numbered(2)

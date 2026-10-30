@@ -43,6 +43,12 @@ def test_default_names_with_no_match_stay_positional():
     assert pairs == [(0, "1"), (1, "2")]
 
 
+def test_default_names_on_a_partly_renamed_line_stay_positional():
+    """Only "val" was renamed; "1" still sits at its own position."""
+    pairs = paired(traces("1", "val"), traces("1", "2"))
+    assert pairs == [(0, "1"), (1, "2")]
+
+
 def test_default_names_on_numbered_traces_are_new_labels():
     """Traces named only by numbers were never renamed, so the positional
     fallback for a legend-renamed line doesn't apply."""

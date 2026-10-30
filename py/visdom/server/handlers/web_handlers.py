@@ -54,6 +54,7 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     broadcast_tags,
     escape_eid,
+    legend_slots,
     compare_envs,
     load_env,
     broadcast,
@@ -92,7 +93,7 @@ def pair_traces(pdata, new_data):
     becomes a new trace. Two cases stay positional: entries without names,
     and entries named "1", "2", ... in order sent to a plot whose traces were
     renamed -- the client's default naming for a line whose legend renamed
-    its traces.
+    some or all of its traces.
     """
     by_name = {}
     for i, trace in enumerate(pdata):
@@ -103,8 +104,11 @@ def pair_traces(pdata, new_data):
     # Traces named only by numbers were never renamed, so a "1" sent to them
     # is a label the plot hasn't seen yet, not a line's default name.
     renamed = not all(str(n).isdigit() for n in by_name if n is not None)
+    # A default name that is still on the plot must sit at its own position.
     if unnamed or (
-        names == defaults and renamed and not any(n in by_name for n in names)
+        names == defaults
+        and renamed
+        and all(i in by_name.get(n, [i]) for i, n in enumerate(names))
     ):
         return list(zip(range(len(pdata)), new_data))
     pairs = []
@@ -242,8 +246,11 @@ class UpdateHandler(BaseHandler):
             return all(
                 d.get("name") == legend[0] for d in pdata if d.get("name") == name
             )
+        slots = legend_slots([d.get("name") for d in pdata], legend, p.get("legend"))
         return all(
-            d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
+            d.get("name") == legend[slot]
+            for slot, d in zip(slots, pdata)
+            if slot < len(legend)
         )
 
     @staticmethod
@@ -283,9 +290,15 @@ class UpdateHandler(BaseHandler):
             # Nothing matched, so ``update`` injects a new trace rather than
             # appending to an existing one.
             return False
-        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
-        # actually touched.
-        for i, new_trace in zip(idxs, new_data):
+        # Pair the entries exactly as ``update`` will, so only the traces it
+        # touches are checked. An entry that becomes a new trace has no index
+        # patch, so it takes the general path.
+        pairs = (
+            zip(idxs, new_data) if name is not None else pair_traces(pdata, new_data)
+        )
+        for i, new_trace in pairs:
+            if i is None:
+                return False
             target = pdata[i]
             if not isinstance(target, dict) or not isinstance(new_trace, dict):
                 return False

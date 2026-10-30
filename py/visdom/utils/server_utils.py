@@ -598,6 +598,27 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def legend_slots(names, legend, old_legend=None):
+    """Which entry of ``legend`` each trace, named ``names``, takes.
+
+    Traces named from the pane's previous legend keep their entry in it, so a
+    repeated legend leaves them as they are. Traces still named by their label
+    number take the entry for that number, since a scatter created from some
+    labels only has them out of position. Anything else is renamed by position.
+    """
+    slots = None
+    if isinstance(old_legend, (list, tuple)) and all(n in old_legend for n in names):
+        slots = [list(old_legend).index(n) for n in names]
+    elif all(
+        isinstance(n, str) and n.isdecimal() and 1 <= int(n) <= len(legend)
+        for n in names
+    ):
+        slots = [int(n) - 1 for n in names]
+    if slots is None or len(set(slots)) != len(slots):
+        slots = list(range(len(names)))
+    return slots
+
+
 def update_window(p, args):
     """Merge an update's ``layout``/``opts``/``legend`` into an existing window.
 
@@ -615,6 +636,7 @@ def update_window(p, args):
             if layout_val is not None:
                 content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
+    old_legend = p.get("legend")
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             if opt_name == "caption":
@@ -638,16 +660,7 @@ def update_window(p, args):
                     if d.get("name") == name:
                         d["name"] = legend[0]
         else:
-            names = [d.get("name") for d in pdata]
-            # Traces still named by their label number take the legend entry for
-            # that number; a scatter created from some labels only has them out
-            # of position. Lines number their traces in order, so it's the same.
-            if names and all(
-                isinstance(n, str) and n.isdecimal() and int(n) >= 1 for n in names
-            ):
-                slots = [int(n) - 1 for n in names]
-            else:
-                slots = list(range(len(pdata)))
+            slots = legend_slots([d.get("name") for d in pdata], legend, old_legend)
             if any(slot >= len(legend) for slot in slots):
                 logging.warning(
                     "update_window: legend has %d entries but pane has %d"
