@@ -860,9 +860,12 @@ See `example/system_monitor_example.py` for a full working example.
 ### Basics
 
 #### vis.image
-This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image.
-Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format.
-Passing images in that format will raise errors or lead to incorrect rendering.
+This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image,
+or a PIL image (e.g. `Image.open("photo.png")`), which is converted for you.
+Most other Python image libraries (e.g. OpenCV, matplotlib) return numpy arrays in `HxWxC` format.
+Passing arrays in that format will raise errors or lead to incorrect rendering.
+A 16 or 32-bit integer PIL image (mode `I;16` / `I`, e.g. a 16-bit PNG) keeps its values as floats;
+pass `opts.normalize=True` to scale it to the visible range.
 
 For example:
 
@@ -925,7 +928,7 @@ The following `opts` are supported:
 
 #### vis.images
 
-This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
+This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` (arrays or PIL images) all of the same size. It makes a grid of images of size (B / nrow, nrow).
 
 The following arguments and `opts` are supported:
 

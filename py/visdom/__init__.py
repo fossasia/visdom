@@ -688,8 +688,82 @@ def _resolve_torch_types():
     return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
+def _pil_to_chw(img, batch=False):
+    """A PIL image as a CxHxW (or HxW) array."""
+    if img.mode == "F" or img.mode == "I" or img.mode.startswith("I;"):
+        # Keep float and 16/32-bit values so image() can scale them.
+        arr = np.asarray(img, dtype=np.float64)
+        return arr[None] if batch else arr
+    if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
+        # Read alpha from the mode, not band names: LAB has an "A" colour band.
+        alpha = (
+            img.mode in ("RGBA", "LA", "PA", "RGBa", "La")
+            or "transparency" in img.info
+            or (img.mode == "P" and getattr(img.palette, "mode", "") == "RGBA")
+        )
+        if img.mode == "La":
+            img = img.convert("LA")  # Pillow can't convert La to RGBA directly
+        img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
+    arr = np.asarray(img)
+    if arr.ndim == 2:
+        return arr[None] if batch else arr
+    return arr.transpose(2, 0, 1)
+
+
+def _tile_to_bytes(x):
+    """A tile in 0..255, scaled rather than clipped when it doesn't fit."""
+    if x.dtype == np.uint8:
+        return x
+    if x.dtype == bool:
+        return x.astype(np.uint8) * 255
+    is_float = np.issubdtype(x.dtype, np.floating)
+    finite = x[np.isfinite(x)] if is_float else x
+    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
+    x = x.astype(np.float64)
+    if is_float and lo >= -1e-5 and hi <= 1 + 1e-5:
+        x = x * 255.0
+    elif is_float and lo >= -1 - 1e-5 and hi <= 1 + 1e-5:
+        x = (x + 1.0) / 2.0 * 255.0
+    elif lo < 0 or hi > 255:
+        x = (x - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(x)
+    x = np.nan_to_num(x, nan=0.0, posinf=255.0, neginf=0.0)
+    return np.uint8(np.clip(x, 0, 255))
+
+
+def _match_channels(tile, channels):
+    """Pad a byte tile to ``channels``: gray to RGB, then an opaque alpha."""
+    if tile.shape[0] == 1 and channels > 1:
+        tile = np.repeat(tile, 3, axis=0)
+    if tile.shape[0] == 3 and channels == 4:
+        tile = np.concatenate([tile, np.full_like(tile[:1], 255)])
+    return tile
+
+
+def _list_image_to_chw(x):
+    """One item of an image list as CxHxW (a grayscale one as 1xHxW)."""
+    if isinstance(x, Image.Image):
+        return _pil_to_chw(x, batch=True)
+    x = np.asarray(_to_numpy(x))
+    return x[None] if x.ndim == 2 else x
+
+
+def _stack_image_list(items):
+    """Stack a list holding PIL images, giving mixed tiles one range and shape."""
+    tiles = [_list_image_to_chw(x) for x in items]
+    floats = [np.issubdtype(t.dtype, np.floating) for t in tiles]
+    channels = max(t.shape[0] for t in tiles)
+    if all(floats) and all(t.shape[0] == channels for t in tiles):
+        return np.stack(tiles)  # one scale, so opts.normalize spans the grid
+    return np.stack([_match_channels(_tile_to_bytes(t), channels) for t in tiles])
+
+
 def _to_numpy(a):
+    if isinstance(a, Image.Image):
+        return _pil_to_chw(a)
     if isinstance(a, list):
+        if any(isinstance(x, Image.Image) for x in a):
+            # Each item on its own, so PIL images can sit next to arrays.
+            return _stack_image_list(a)
         return np.array(a)
     # one isinstance against the whole tuple rather than a Python loop: this
     # runs per argument of every plot call, and with no torch imported and
@@ -2483,7 +2557,9 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        or `HxW` tensor `img` that contains the image, or a PIL image. A 16 or
+        32-bit integer PIL image (mode `I;16` / `I`) keeps its values as floats;
+        use `opts.normalize=True` to scale it to the visible range. The array values can be uint8 in
         [0, 255] or float. Float arrays are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
