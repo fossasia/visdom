@@ -795,6 +795,62 @@ def test_audio_accepts_a_stereo_tensor(capture_send):
     assert "<audio controls>" in content(sent)
 
 
+def _wav(sent):
+    """Decode the WAV visdom embedded in the pane."""
+    import base64
+    import io
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[1]
+
+
+def _expected_wav(samples):
+    """What audio() writes for (N,) or (N, 2) samples: scaled to int16."""
+    return np.int16(samples / np.max(np.abs(samples)) * 32767)
+
+
+@pytest.mark.parametrize("shape", [(1, 64), (64, 1)], ids=["1xN", "Nx1"])
+def test_audio_plays_a_single_row_or_column_as_mono(capture_send, shape):
+    wave = np.sin(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=wave.reshape(shape)))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(wave))
+
+
+def test_audio_accepts_channels_first_stereo(capture_send):
+    """torchaudio and librosa return (2, N); each row stays its own channel."""
+    left = np.sin(np.linspace(0, 6, 64))
+    right = 0.5 * np.cos(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=np.stack([left, right])))
+    np.testing.assert_array_equal(
+        _wav(sent), _expected_wav(np.stack([left, right], axis=1))
+    )
+
+
+def test_audio_channels_first_matches_channels_last(capture_send):
+    stereo = np.random.RandomState(0).rand(64, 2) - 0.5
+    first = capture_send(lambda v: v.audio(tensor=stereo.T.copy()))
+    last = capture_send(lambda v: v.audio(tensor=stereo))
+    assert content(first) == content(last)
+
+
+@pytest.mark.parametrize(
+    "tensor, frames",
+    [
+        (np.array([[0.5, -0.25], [0.25, 0.75]]), [[0.5, -0.25], [0.25, 0.75]]),
+        (np.array([[0.5, -0.25]]), [[0.5, -0.25]]),
+        (np.array([[0.5], [-0.25]]), [[0.5, -0.25]]),
+    ],
+    ids=["2x2", "1x2", "2x1"],
+)
+def test_audio_keeps_short_stereo_as_stereo(capture_send, tensor, frames):
+    """(2, 2) and (1, 2) stay (N, 2) frames as before; (2, 1) is one frame."""
+    sent = capture_send(lambda v: v.audio(tensor=tensor))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(np.array(frames)))
+
+
 @pytest.mark.parametrize("extension", ["wav", "mp3", "ogg", "flac"])
 def test_audio_maps_the_file_extension_to_a_mime_type(
     capture_send, tmp_path, extension
@@ -827,6 +883,7 @@ def test_audio_rejects_an_unknown_file_type(offline_client, tmp_path):
     [
         ({}, "should specify audio tensor or file"),
         (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((6, 100))), "tensor should be 1D vector or 2D matrix"),
     ],
 )
 def test_audio_rejects_malformed_input(offline_client, kwargs, message):
