@@ -4853,19 +4853,23 @@ class Visdom(object):
         assert X.ndim == 1, "values of X should be one-dimensional"
 
         is_categorical = False
-        if any(isinstance(val, str) for val in X) or (
-            hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character)
-        ):
+        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
+            X = X.astype(float).tolist()
+        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character):
+            X = X.astype(str).tolist()
+            is_categorical = True
+        elif any(isinstance(val, str) for val in X):
             X = [str(value) for value in X]
             is_categorical = True
         else:
             try:
-                X = [float(value) for value in X]
+                X = X.astype(float).tolist()
             except (ValueError, TypeError):
                 X = [str(value) for value in X]
                 is_categorical = True
-        Y1 = [float(value) for value in Y1]
-        Y2 = [float(value) for value in Y2]
+
+        Y1 = Y1.astype(float).tolist()
+        Y2 = Y2.astype(float).tolist()
         trace1 = {
             "x": X,
             "y": Y1,
