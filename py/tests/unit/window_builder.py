@@ -395,6 +395,32 @@ def test_traces_from_the_previous_legend_keep_their_entry_beside_others(
     assert trace_names(pane) == expected
 
 
+def test_the_creation_legend_is_stored_on_the_pane():
+    pane = window(window_args(data=[plot_data(name="b")], opts={"legend": ["a", "b"]}))
+    assert pane["legend"] == ["a", "b"]
+
+
+def test_a_new_legend_renames_traces_from_the_creation_legend():
+    legend = ["a", "b", "c"]
+    traces = [plot_data(name=n) for n in ("b", "c")]
+    pane = window(window_args(data=traces, opts={"legend": legend}))
+    update_window(pane, {"opts": {"legend": ["x", "y", "z"]}})
+    assert trace_names(pane) == ["y", "z"]
+
+
+def test_an_append_to_a_pane_saved_without_its_legend_keeps_its_names():
+    pane = numbered_pane("b", "c")
+    args = {"data": [plot_data(name="c")], "opts": {"legend": ["a", "b", "c"]}}
+    update_window(pane, args)
+    assert trace_names(pane) == ["b", "c"]
+
+
+def test_a_legend_alone_still_renames_a_pane_saved_without_it_by_position():
+    pane = numbered_pane("val", "train")
+    update_window(pane, {"opts": {"legend": ["train", "val"]}})
+    assert trace_names(pane) == ["train", "val"]
+
+
 def test_a_new_legend_still_renames_a_legended_line_by_position():
     pane = numbered_pane("train", "val")
     pane["legend"] = ["train", "val"]

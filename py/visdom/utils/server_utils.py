@@ -611,10 +611,10 @@ def legend_slots(names, legend, old_legend=None):
     None leaves that trace's name as it is. Traces named from the pane's
     previous legend keep their entry in it, so a repeated legend leaves them
     as they are; any other trace takes the entry for its label number or its
-    position, whichever is still free. Without a previous legend, traces all
-    named by label number take the entry for that number, since a scatter
-    created from some labels only has them out of position, and anything
-    else is renamed by position.
+    position, whichever is still free. If no trace matches, traces all named
+    by label number take the entry for that number, since a scatter created
+    from some labels only has them out of position, and anything else is
+    renamed by position.
     """
     if isinstance(old_legend, (list, tuple)):
         old = list(old_legend)
@@ -677,6 +677,10 @@ def update_window(p, args):
                     if d.get("name") == name:
                         d["name"] = legend[0]
         else:
+            # A pane saved without its legend: data sent with this legend is
+            # named from it, so traces already carrying its names keep them.
+            if old_legend is None and args.get("data"):
+                old_legend = legend
             slots = legend_slots([d.get("name") for d in pdata], legend, old_legend)
             if any(slot is not None and slot >= len(legend) for slot in slots):
                 logging.warning(
@@ -783,6 +787,9 @@ def window(args):
             "caption": opts.get("caption"),
         }
         p["type"] = "plot"
+        # Kept so a later legend knows which entry each trace was named from.
+        if isinstance(opts.get("legend"), (list, tuple)):
+            p["legend"] = list(opts["legend"])
 
     return p
 

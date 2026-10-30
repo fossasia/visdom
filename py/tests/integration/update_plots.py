@@ -360,6 +360,19 @@ class TestLegendOnAppend(PlotUpdateTestCase):
         self.append(win, ["a", "b", "c"], 2, 3)
         self.assertEqual(self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31]})
 
+    def test_a_plot_created_with_a_legend_keeps_it_on_the_first_append(self):
+        legend = ["a", "b", "c"]
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [10 * n], "y": [n], "name": legend[n - 1]}
+                for n in (2, 3)
+            ],
+            opts={"legend": legend},
+            layout={"title": "legended"},
+        )
+        self.append(win, legend, 2, 3)
+        self.assertEqual(self.xs(win), {"b": [20, 21], "c": [30, 31]})
+
     def test_a_trace_outside_the_legend_leaves_the_others_in_place(self):
         win = self.create_numbered(2, 3)
         self.append(win, ["a", "b", "c"], 2, 3)
