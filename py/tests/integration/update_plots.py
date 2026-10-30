@@ -303,6 +303,17 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
         self.append(win, ("1", 5), ("2", 50))
         self.assertEqual(self.xs(win), {"1": [1, 5], "val": [1, 50]})
 
+    def test_a_numeric_label_on_a_marker_scatter_becomes_its_own_trace(self):
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [1], "name": n, "mode": "markers"}
+                for n in ("cat", "dog")
+            ],
+            layout={"title": "classes"},
+        )
+        self.append(win, ("1", 9))
+        self.assertEqual(self.xs(win), {"cat": [1], "dog": [1], "1": [9]})
+
     def test_a_new_numeric_label_becomes_its_own_trace(self):
         """Traces named "2" and "3" were never renamed, so "1" is new."""
         win = self.create_window(
@@ -348,6 +359,16 @@ class TestLegendOnAppend(PlotUpdateTestCase):
         self.append(win, ["a", "b", "c"], 2, 3)
         self.append(win, ["a", "b", "c"], 2, 3)
         self.assertEqual(self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31]})
+
+    def test_a_trace_outside_the_legend_leaves_the_others_in_place(self):
+        win = self.create_numbered(2, 3)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        bird = [{"type": "scatter", "x": [40], "y": [4], "name": "bird"}]
+        self.update(win, bird, append=True)
+        self.append(win, ["a", "b", "c"], 2, 3)
+        self.assertEqual(
+            self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31], "bird": [40]}
+        )
 
     def test_a_label_added_later_keeps_its_own_trace(self):
         win = self.create_numbered(2, 3)

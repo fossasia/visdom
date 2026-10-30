@@ -91,7 +91,7 @@ def pair_traces(pdata, new_data):
     so pairing by position put a batch holding only "dog" into the "cat"
     trace. Entries are matched by name, and one naming no existing trace
     becomes a new trace. Two cases stay positional: entries without names,
-    and entries named "1", "2", ... in order sent to a plot whose traces were
+    and entries named "1", "2", ... in order sent to a line whose traces were
     renamed -- the client's default naming for a line whose legend renamed
     some or all of its traces.
     """
@@ -104,11 +104,16 @@ def pair_traces(pdata, new_data):
     # Traces named only by numbers were never renamed, so a "1" sent to them
     # is a label the plot hasn't seen yet, not a line's default name.
     renamed = not all(str(n).isdigit() for n in by_name if n is not None)
-    # A default name that is still on the plot must sit at its own position.
+    # A default name that is still on the plot must sit at its own position,
+    # and a marker-only scatter trace means "1" is a new label, not a line.
     if unnamed or (
         names == defaults
         and renamed
         and all(i in by_name.get(n, [i]) for i, n in enumerate(names))
+        and all(
+            "lines" in str(trace.get("mode") or "lines")
+            for trace in pdata[: len(names)]
+        )
     ):
         return list(zip(range(len(pdata)), new_data))
     pairs = []
@@ -250,7 +255,7 @@ class UpdateHandler(BaseHandler):
         return all(
             d.get("name") == legend[slot]
             for slot, d in zip(slots, pdata)
-            if slot < len(legend)
+            if slot is not None and slot < len(legend)
         )
 
     @staticmethod

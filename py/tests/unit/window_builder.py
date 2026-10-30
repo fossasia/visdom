@@ -378,6 +378,23 @@ def test_traces_named_from_the_previous_legend_keep_their_entry():
     assert trace_names(pane) == ["y", "x"]
 
 
+@pytest.mark.parametrize(
+    "names,expected",
+    [
+        (["b", "c", "bird"], ["b", "c", "bird"]),
+        (["b", "c", "1"], ["b", "c", "a"]),
+        (["a", "stale"], ["a", "b"]),
+    ],
+)
+def test_traces_from_the_previous_legend_keep_their_entry_beside_others(
+    names, expected
+):
+    pane = numbered_pane(*names)
+    pane["legend"] = ["a", "b", "c"]
+    update_window(pane, {"opts": {"legend": ["a", "b", "c"]}})
+    assert trace_names(pane) == expected
+
+
 def test_a_new_legend_still_renames_a_legended_line_by_position():
     pane = numbered_pane("train", "val")
     pane["legend"] = ["train", "val"]

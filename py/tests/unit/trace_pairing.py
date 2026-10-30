@@ -49,6 +49,16 @@ def test_default_names_on_a_partly_renamed_line_stay_positional():
     assert pairs == [(0, "1"), (1, "2")]
 
 
+def test_default_names_on_a_marker_scatter_are_new_labels():
+    pdata = [{"name": n, "mode": "markers"} for n in ("cat", "dog")]
+    assert paired(pdata, traces("1")) == [(None, "1")]
+
+
+def test_default_names_on_a_line_with_markers_stay_positional():
+    pdata = [{"name": n, "mode": "lines+markers"} for n in ("train", "val")]
+    assert paired(pdata, traces("1", "2")) == [(0, "1"), (1, "2")]
+
+
 def test_default_names_on_numbered_traces_are_new_labels():
     """Traces named only by numbers were never renamed, so the positional
     fallback for a legend-renamed line doesn't apply."""

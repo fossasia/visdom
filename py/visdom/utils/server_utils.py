@@ -598,23 +598,40 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def _label_slot(name, legend):
+    """The legend entry a trace still named by its label number takes."""
+    if isinstance(name, str) and name.isdecimal() and 1 <= int(name) <= len(legend):
+        return int(name) - 1
+    return None
+
+
 def legend_slots(names, legend, old_legend=None):
     """Which entry of ``legend`` each trace, named ``names``, takes.
 
-    Traces named from the pane's previous legend keep their entry in it, so a
-    repeated legend leaves them as they are. Traces still named by their label
-    number take the entry for that number, since a scatter created from some
-    labels only has them out of position. Anything else is renamed by position.
+    None leaves that trace's name as it is. Traces named from the pane's
+    previous legend keep their entry in it, so a repeated legend leaves them
+    as they are; any other trace takes the entry for its label number or its
+    position, whichever is still free. Without a previous legend, traces all
+    named by label number take the entry for that number, since a scatter
+    created from some labels only has them out of position, and anything
+    else is renamed by position.
     """
-    slots = None
-    if isinstance(old_legend, (list, tuple)) and all(n in old_legend for n in names):
-        slots = [list(old_legend).index(n) for n in names]
-    elif all(
-        isinstance(n, str) and n.isdecimal() and 1 <= int(n) <= len(legend)
-        for n in names
-    ):
-        slots = [int(n) - 1 for n in names]
-    if slots is None or len(set(slots)) != len(slots):
+    if isinstance(old_legend, (list, tuple)):
+        old = list(old_legend)
+        slots = [None] * len(names)
+        for i, n in enumerate(names):
+            if n in old and old.index(n) not in slots:
+                slots[i] = old.index(n)
+        if any(slot is not None for slot in slots):
+            for i, n in enumerate(names):
+                if slots[i] is None:
+                    for slot in (_label_slot(n, legend), i):
+                        if slot is not None and slot not in slots:
+                            slots[i] = slot
+                            break
+            return slots
+    slots = [_label_slot(n, legend) for n in names]
+    if None in slots or len(set(slots)) != len(slots):
         slots = list(range(len(names)))
     return slots
 
@@ -661,7 +678,7 @@ def update_window(p, args):
                         d["name"] = legend[0]
         else:
             slots = legend_slots([d.get("name") for d in pdata], legend, old_legend)
-            if any(slot >= len(legend) for slot in slots):
+            if any(slot is not None and slot >= len(legend) for slot in slots):
                 logging.warning(
                     "update_window: legend has %d entries but pane has %d"
                     " traces; leaving the extra traces' names unchanged",
@@ -669,7 +686,7 @@ def update_window(p, args):
                     len(pdata),
                 )
             for slot, d in zip(slots, pdata):
-                if slot < len(legend):
+                if slot is not None and slot < len(legend):
                     d["name"] = legend[slot]
     return p
 
