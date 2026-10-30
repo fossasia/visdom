@@ -254,6 +254,120 @@ def test_stem_is_sent_as_a_line_mode_scatter(capture_send):
     assert sent["payload"]["opts"]["mode"] == "lines"
 
 
+def test_stem_handles_single_timestamp_multi_series_matrix(capture_send):
+    """A (1, M) matrix specifies 1 timestamp across M series and must not collapse to (M, 1)."""
+    sent = capture_send(
+        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([100.0]))
+    )
+    assert len(sent["payload"]["data"]) == 2
+    traces = sent["payload"]["data"]
+    assert traces[0]["name"] == "1"
+    assert traces[1]["name"] == "2"
+    assert segments(traces[0]["x"]) == [[100.0, 100.0]]
+    assert segments(traces[1]["x"]) == [[100.0, 100.0]]
+    assert segments(traces[0]["y"]) == [[0.0, 10.0]]
+    assert segments(traces[1]["y"]) == [[0.0, 20.0]]
+
+
+def test_stem_does_not_mutate_caller_opts(capture_send):
+    opts = {"title": "Custom Stem Plot"}
+    capture_send(lambda v: v.stem(X=np.array([1.0, 2.0]), opts=opts))
+    assert "mode" not in opts
+
+
+def test_stem_handles_single_row_2d_y_input(capture_send):
+    """Single-row 2D Y input (1, 1) and (1, M) correctly supply timestamps without shape errors."""
+    # (1, 1) single-row 2D timestamp array shared across all series
+    sent1 = capture_send(
+        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([[100.0]]))
+    )
+    assert len(sent1["payload"]["data"]) == 2
+    assert segments(sent1["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent1["payload"]["data"][1]["x"]) == [[100.0, 100.0]]
+    assert segments(sent1["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent1["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+    # (1, M) single-row 2D timestamp array matching M series without legend
+    sent2 = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([[100.0, 200.0]]),
+        )
+    )
+    assert len(sent2["payload"]["data"]) == 2
+    assert sent2["payload"]["data"][0]["name"] == "1"
+    assert sent2["payload"]["data"][1]["name"] == "2"
+    assert segments(sent2["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent2["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
+    assert segments(sent2["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent2["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+    # (1, M) single-row 2D timestamp array matching M series with legend
+    sent3 = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([[100.0, 200.0]]),
+            opts={"legend": ["Series A", "Series B"]},
+        )
+    )
+    assert len(sent3["payload"]["data"]) == 2
+    assert sent3["payload"]["data"][0]["name"] == "Series A"
+    assert sent3["payload"]["data"][1]["name"] == "Series B"
+    assert segments(sent3["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent3["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
+    assert segments(sent3["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent3["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+
+def test_stem_handles_row_vector_x_inputs(capture_send):
+    """Row-vector X inputs (1, N) preserve existing behavior as 1D series of N points."""
+    # Row-vector X without Y defaults to 1..N timestamps in 1 series
+    sent = capture_send(lambda v: v.stem(X=np.array([[10.0, 20.0, 30.0]])))
+    assert len(sent["payload"]["data"]) == 1
+    t = trace(sent)
+    assert segments(t["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(t["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
+
+    # Row-vector X with 1D sequential Y (N,)
+    sent_with_y = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0, 30.0]]),
+            Y=np.array([1.0, 2.0, 3.0]),
+        )
+    )
+    assert len(sent_with_y["payload"]["data"]) == 1
+    t_y = trace(sent_with_y)
+    assert segments(t_y["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(t_y["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
+
+
+def test_stem_handles_1d_x_with_row_vector_y(capture_send):
+    """1D X inputs with row-vector Y (1, N) preserve timestamps and produce stems to baseline."""
+    # 1D X with (1, N) row-vector Y
+    sent = capture_send(
+        lambda v: v.stem(
+            X=np.array([10.0, 20.0, 30.0]),
+            Y=np.array([[1.0, 2.0, 3.0]]),
+        )
+    )
+    assert len(sent["payload"]["data"]) == 1
+    assert segments(trace(sent)["x"]) == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+    assert segments(trace(sent)["y"]) == [[0.0, 10.0], [0.0, 20.0], [0.0, 30.0]]
+
+    # 2D X (N, M) with (1, N) row-vector Y
+    sent_multi = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0], [30.0, 40.0]]),
+            Y=np.array([[1.0, 2.0]]),
+        )
+    )
+    assert len(sent_multi["payload"]["data"]) == 2
+    assert segments(sent_multi["payload"]["data"][0]["x"]) == [[1.0, 1.0], [2.0, 2.0]]
+    assert segments(sent_multi["payload"]["data"][1]["x"]) == [[1.0, 1.0], [2.0, 2.0]]
+    assert segments(sent_multi["payload"]["data"][0]["y"]) == [[0.0, 10.0], [0.0, 30.0]]
+    assert segments(sent_multi["payload"]["data"][1]["y"]) == [[0.0, 20.0], [0.0, 40.0]]
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",

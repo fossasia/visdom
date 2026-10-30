@@ -4464,16 +4464,53 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.atleast_1d(np.squeeze(np.asarray(X)))
-        assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
-        if X.ndim == 1:
-            X = X[:, None]
+        opts = {} if opts is None else opts.copy()
+        opts["mode"] = "lines"
+        _title2str(opts)
+        _assert_opts(opts)
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert (
+            X.ndim == 0 or X.ndim == 1 or X.ndim == 2
+        ), "X should be one or two-dimensional"
+
+        # Preserve existing behavior for row-vector X inputs (e.g. shape (1, N)):
+        # Treat as 1D sequence of points when Y is absent or 1D sequential points,
+        # unless explicitly a multi-series input (e.g. multi-series legend, single timestamp Y,
+        # or matching 2D (1, M) X and Y matrices).
+        if X.ndim == 2 and X.shape[0] == 1 and X.shape[1] > 1:
+            y_arr = None if Y is None else np.asarray(Y)
+            has_multi_legend = "legend" in opts and len(opts["legend"]) == X.shape[1]
+            y_matches_2d = (
+                y_arr is not None and y_arr.ndim == 2 and y_arr.shape == X.shape
+            )
+            y_is_single_timestamp = y_arr is not None and y_arr.size == 1
+            if not (has_multi_legend or y_matches_2d or y_is_single_timestamp):
+                X = np.squeeze(X)
+
+        is_1d_x = X.ndim <= 1
+        if is_1d_x:
+            X = np.atleast_1d(X)[:, None]
 
         if Y is None:
-            Y = np.arange(1, X.shape[0] + 1)
-        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
-        if Y.ndim == 1:
-            Y = Y[:, None]
+            Y = np.arange(1, X.shape[0] + 1)[:, None]
+        else:
+            Y = np.asarray(Y)
+            if Y.ndim > 2:
+                Y = np.squeeze(Y)
+            assert (
+                Y.ndim == 0 or Y.ndim == 1 or Y.ndim == 2
+            ), "Y should be one or two-dimensional"
+            if (
+                Y.ndim == 2
+                and Y.shape[0] == 1
+                and (is_1d_x or (X.shape[0] > 1 and Y.shape[1] == X.shape[0]))
+            ):
+                Y = np.squeeze(Y)
+            if Y.ndim <= 1:
+                Y = np.atleast_1d(Y)[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
         assert (
             Y.shape[1] == 1 or Y.shape[1] == X.shape[1]
@@ -4491,11 +4528,6 @@ class Visdom(object):
         data = np.column_stack((Y.flatten(), X.flatten()))
         labels = np.arange(1, X.shape[1] + 1)[None, :]
         labels = np.tile(labels, (X.shape[0], 1)).flatten()
-
-        opts = {} if opts is None else opts
-        opts["mode"] = "lines"
-        _title2str(opts)
-        _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
 
