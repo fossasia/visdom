@@ -19,22 +19,33 @@ pytestmark = [pytest.mark.unit, pytest.mark.filterwarnings("error::RuntimeWarnin
 @pytest.mark.parametrize("method", ["image", "image_heatmap"])
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
 @pytest.mark.parametrize("channels", [None, 1, 3, 4])
-def test_normalize_extreme_finite_range(capture_send, method, dtype, channels):
+@pytest.mark.parametrize("nonfinite", [False, True])
+def test_normalize_extreme_finite_range(
+    capture_send, method, dtype, channels, nonfinite
+):
     limit = np.finfo(dtype).max
-    pixels = np.array([[-limit, 0, limit]], dtype=dtype)
-    img = pixels if channels is None else np.broadcast_to(pixels, (channels, 1, 3))
+    pixels = np.array(
+        [[-limit, 0, limit, np.inf] if nonfinite else [-limit, 0, limit]], dtype=dtype
+    )
+    img = (
+        pixels
+        if channels is None
+        else np.broadcast_to(pixels, (channels, *pixels.shape))
+    )
     original = img.copy()
 
     def plot(viz):
         if method == "image":
             return viz.image(img, opts={"normalize": True})
-        return viz.image_heatmap(img, np.zeros((1, 3)), opts={"normalize": True})
+        return viz.image_heatmap(img, np.zeros(pixels.shape), opts={"normalize": True})
 
     sent = capture_send(plot)
     src = sent["payload"]["data"][0]["content"]["src"]
     with Image.open(BytesIO(base64.b64decode(src.split(",", 1)[1]))) as image:
         actual = np.asarray(image)
-    expected = np.array([[0, 127, 255]], dtype=np.uint8)
+    expected = np.array(
+        [[0, 127, 255, 255] if nonfinite else [0, 127, 255]], dtype=np.uint8
+    )
     if method == "image_heatmap" or channels in (3, 4):
         count = 3 if method == "image_heatmap" else channels
         expected = np.repeat(expected[..., None], count, axis=-1)

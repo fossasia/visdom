@@ -23,6 +23,7 @@ from enum import Enum
 import tornado.ioloop
 import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
+from visdom.server.workspace_manager import WorkspaceAuthError
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
@@ -44,6 +45,10 @@ from visdom.utils.server_utils import (
 )
 from visdom.experiments import retarget_experiment
 
+# RFC 6455 close codes, so a denied client can tell refusal from a dropped link.
+WS_POLICY_VIOLATION = 1008
+WS_TRY_AGAIN_LATER = 1013
+WS_REASON_BYTES = 123
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -67,6 +72,10 @@ from visdom.experiments import retarget_experiment
 #   Write access is limited to data and view organization (i.e. layout settings, env removal and env saving)
 
 
+def close_reason(message):
+    return message.encode("utf-8")[:WS_REASON_BYTES].decode("utf-8", "ignore")
+
+
 class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
@@ -74,10 +83,23 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
+        # Scope this socket to its workspace before it registers, so its env list
+        # and every broadcast it sends/receives stay within that workspace.
+        try:
+            resolved = self.resolve_workspace()
+        except WorkspaceAuthError as exc:
+            code = WS_TRY_AGAIN_LATER if exc.status_code >= 500 else WS_POLICY_VIOLATION
+            self.refusal = exc.message
+            self.close(code, close_reason(exc.message))
+            return False
+        if resolved is not None:
+            workspace_id, self.workspace_role = resolved
+            self.bind_workspace(workspace_id)
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
             self.eid = "main"
             register_list[self.sid] = self
+        return True
 
     def broadcast_layouts(self, target_subs=None):
         """Push the saved layouts to subscribers.
@@ -90,16 +112,24 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         """
         if target_subs is None:
             target_subs = self.subs.values()
+        # Materialized before the emptiness check: a generator is truthy even
+        # when it yields nothing, so checking it as handed over would let an
+        # empty broadcast pay for the encode below and only then discover it
+        # has no recipients.
+        target_subs = list(target_subs)
+        if not target_subs:
+            return
+        # Built once rather than once per subscriber. ``initialize`` calls this
+        # with no argument, so every new connection sends the layouts to every
+        # subscriber already registered: encoding per recipient made opening the
+        # Nth tab re-encode the layouts for the N-1 tabs whose layouts had not
+        # changed. (``open`` sends to ``[self]`` and was never the problem.)
+        message = json.dumps(
+            {"command": "layout_update", "data": self.server_state.get_layouts()},
+            cls=NanSafeEncoder,
+        )
         for sub in target_subs:
-            sub.write_message(
-                json.dumps(
-                    {
-                        "command": "layout_update",
-                        "data": self.server_state.get_layouts(),
-                    },
-                    cls=NanSafeEncoder,
-                )
-            )
+            sub.write_message(message)
 
     async def on_message(self, message):
         """Dispatch one socket command, keeping its disk work off the loop.
@@ -114,6 +144,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         cmd = msg.get("cmd")
         if self.readonly:
+            return
+        refusal = self.storage_refusal() if cmd in ("save", "save_layouts") else None
+        if refusal:
+            notify(self, refusal, type="error", target_subs=[self])
             return
 
         elif cmd == "close":
@@ -676,7 +710,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         """Compatibility entry point for the ServerState polling reaper."""
         return self.server_state.reap_stale_connections()
 
-    def close(self):
+    def close(self, code=None, reason=None):
         self.on_close()
 
     def write_message(self, msg):
@@ -702,7 +736,8 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if self.login_enabled and not self.current_user:
             self.close()
             return
-        super().open("sources")
+        if not super().open("sources"):
+            return
         self.write_message(
             json.dumps({"command": "alive", "data": "vis_alive"}, cls=NanSafeEncoder)
         )
@@ -717,8 +752,15 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
-            for sub in self.sources.values():
-                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
+            target_sources = list(self.sources.values())
+            if not target_sources:
+                return
+            # Every source gets the same payload, so encode it once here
+            # instead of once per source: an echo fanned out to N connected
+            # clients used to run N identical encodes of the same message.
+            echo_message = json.dumps(msg, cls=NanSafeEncoder)
+            for sub in target_sources:
+                sub.write_message(echo_message)
             return
 
         await super().on_message(message)
@@ -749,7 +791,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             self.close()
             return
 
-        super().open("subs")
+        if not super().open("subs"):
+            return
 
         self.write_message(
             json.dumps(
@@ -827,6 +870,13 @@ def _spawn_socket(cls, server_state, request):
     return wrapper
 
 
+def _spawned(wrapper):
+    refusal = getattr(wrapper, "refusal", None)
+    if refusal is not None:
+        return SocketFailureReason.CONNECTION_CLOSED.to_failure_response(refusal)
+    return {"success": True, "sid": wrapper.sid}
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         @check_auth
@@ -851,7 +901,7 @@ def WrapSocketWrapper(BaseWrapper):
                 new_sub = _spawn_socket(
                     VisSocketWrapper, self.server_state, self.request
                 )
-                self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+                self.write(json.dumps(_spawned(new_sub)))
                 return
 
             socket_wrap = (
@@ -897,7 +947,7 @@ def WrapSocketWrapper(BaseWrapper):
         def _get(self):
             """Create a new socket wrapper for this requester, return the id"""
             new_sub = _spawn_socket(SocketWrapper, self.server_state, self.request)
-            self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+            self.write(json.dumps(_spawned(new_sub)))
 
         WrappedSocketWrap.get = _get
 

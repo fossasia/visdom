@@ -15,10 +15,14 @@ loop needed.
 """
 
 import unittest
+from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
+if not any(find_spec(name) for name in ("tensorflow", "keras")):
+    pytest.skip("tensorflow or keras is not installed", allow_module_level=True)
 
 from visdom.loggers.keras import VisdomKerasLogger
 
