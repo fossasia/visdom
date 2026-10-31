@@ -2054,7 +2054,8 @@ class Visdom(object):
             "opts": opts,
         }
 
-        label_groups = [point["group"] for point in points]
+        labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2089,7 +2090,7 @@ class Visdom(object):
                 Y = do_tsne(sub_features)
                 points = [
                     {
-                        "group": label_groups[i],
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
