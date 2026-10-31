@@ -966,3 +966,11 @@ def test_svg_passes_opts_through(capture_send):
 def test_svg_rejects_malformed_input(offline_client, kwargs, message):
     with pytest.raises(AssertionError, match=message):
         offline_client.svg(**kwargs)
+
+
+def test_histogram_boolean_range_keeps_float_endpoints(capture_send):
+    with pytest.warns(RuntimeWarning, match="Converting input from bool"):
+        sent = capture_send(
+            lambda viz: viz.histogram(np.array([False, True]), opts={"numbins": 3})
+        )
+    assert sent["payload"]["data"][0]["y"] == [1, 0, 1]

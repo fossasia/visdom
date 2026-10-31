@@ -245,7 +245,7 @@ def loadfile(filename):
     return str
 
 
-def _finite_range(ar):
+def _finite_range(ar, *, as_float=True):
     """Smallest and largest finite value in `ar`, or `None` if it has none.
 
     This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
@@ -253,7 +253,8 @@ def _finite_range(ar):
     element just to read two numbers off it, which on an image-sized array is
     a second full array per call. `fmin`/`fmax` skip NaN the same way and
     reduce in place, so only an infinity -- which they propagate rather than
-    skip -- needs the mask at all.
+    skip -- needs the mask at all. Set `as_float=False` to retain extended
+    floating-point extrema for image normalization.
     """
     if ar.size == 0:
         return None
@@ -265,8 +266,10 @@ def _finite_range(ar):
         finite = ar[np.isfinite(ar)]
         if finite.size == 0:
             return None
-        return float(finite.min()), float(finite.max())
-    return float(ar_min), float(ar_max)
+        ar_min, ar_max = finite.min(), finite.max()
+    if as_float:
+        return float(ar_min), float(ar_max)
+    return ar_min.item(), ar_max.item()
 
 
 def _title2str(opts):
@@ -2503,14 +2506,21 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -2642,14 +2652,21 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
