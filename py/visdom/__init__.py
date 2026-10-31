@@ -2687,13 +2687,15 @@ class Visdom(object):
                     heatmap.shape, H, W
                 )
             )
-        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        h_min, h_max = float(heatmap.min()), float(heatmap.max())
-        if h_min < 0.0 or h_max > 1.0:
+        finite = np.isfinite(heatmap)
+        h_min = float(np.min(heatmap, where=finite, initial=np.inf))
+        h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
+        if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.zeros_like(heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
         try:
