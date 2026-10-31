@@ -36,7 +36,27 @@ def test_missing_scores_rank_after_known_scores(capture_send, scores, cap, expec
     np.testing.assert_array_equal(x[:, 0], np.arange(4))
 
 
-@pytest.mark.parametrize("cap", [0, -1, True, 1.5, "2"])
+@pytest.mark.parametrize("cap", [2.0, np.float32(2), np.float64(2), 10.0])
+def test_integral_float_caps_keep_feature_and_score_alignment(capture_send, cap):
+    x = np.column_stack([np.arange(4), np.arange(4) + 10])
+    scores = np.array([np.nan, 0.9, 0.8, 0.1])
+    sent = capture_send(
+        lambda client: client.parallel_coordinates(
+            x, Y=scores, opts={"max_experiments": cap}
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    expected = [1, 2] if cap == 2 else list(range(4))
+    assert trace["dimensions"][0]["values"] == expected
+    assert trace["dimensions"][1]["values"] == [i + 10 for i in expected]
+    np.testing.assert_array_equal(trace["line"]["color"], scores[expected])
+    np.testing.assert_array_equal(x[:, 0], np.arange(4))
+    np.testing.assert_array_equal(scores, [np.nan, 0.9, 0.8, 0.1])
+
+
+@pytest.mark.parametrize(
+    "cap", [0, -1, True, np.bool_(True), 1.5, np.nan, np.inf, -np.inf, "2"]
+)
 def test_invalid_experiment_cap_is_rejected_before_sending(offline_client, cap):
     with pytest.raises(ValueError, match="max_experiments must be a positive integer"):
         offline_client.parallel_coordinates(
@@ -59,7 +79,7 @@ from visdom import Visdom
 
 client = Visdom.__new__(Visdom)
 client._send = Mock()
-for cap in (0, -1, True, 1.5, "2"):
+for cap in (0, -1, True, np.bool_(True), 1.5, np.nan, np.inf, -np.inf, "2"):
     try:
         client.parallel_coordinates(
             np.array([[1., 2.], [3., 4.]]),

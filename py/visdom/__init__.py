@@ -4691,12 +4691,16 @@ class Visdom(object):
 
         max_exp = opts.get("max_experiments")
         if max_exp is not None:
-            if (
-                not isinstance(max_exp, (int, np.integer))
-                or isinstance(max_exp, bool)
-                or max_exp <= 0
-            ):
-                raise ValueError("opts.max_experiments must be a positive integer")
+            error = "opts.max_experiments must be a positive integer"
+            if not isinstance(max_exp, numbers.Real) or isinstance(max_exp, bool):
+                raise ValueError(error)
+            try:
+                integral_max_exp = int(max_exp)
+            except (ValueError, OverflowError):
+                raise ValueError(error) from None
+            if integral_max_exp != max_exp or integral_max_exp <= 0:
+                raise ValueError(error)
+            max_exp = integral_max_exp
             if Y is None:
                 raise ValueError("opts.max_experiments requires Y to be provided")
             if N > max_exp:
