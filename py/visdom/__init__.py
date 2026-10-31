@@ -979,11 +979,13 @@ def _is_log_scalar(value):
     return value is None or isinstance(value, (bool, int, float, str))
 
 
-def _unverified(eid):
-    return RuntimeError(
-        "could not read the stored experiment for {!r}; replay stopped before "
-        "sending anything so no metric is recorded twice".format(eid)
-    )
+def _query_string(text):
+    """``text`` quoted so the experiment query parser reads it back exactly.
+
+    ``json.dumps`` is not that: it writes control characters as ``\\u0001``,
+    which the query language leaves as six literal characters.
+    """
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _replay_key(key, value, step):
@@ -2122,19 +2124,30 @@ class Visdom(object):
         leaves the metric history as it was. Metrics are matched by key, value
         and step, so a stored observation identical to a logged one is taken
         to be that logged write.
+
+        If the stored experiment for an env cannot be read, for example on a
+        server without the experiments endpoints, that env's experiment calls
+        are skipped with a warning and everything else is still replayed.
         """
         from visdom.utils.server_utils import extract_eid
 
         with open(log_filename) as f:
             entries = [json.loads(line) for line in f]
-        # Check every experiment before sending anything, so a lookup that
-        # fails stops the replay with nothing half sent.
+        # Read every stored experiment first, so later sends can't change what
+        # is compared against.
         stored = {}
         for endpoint, msg in entries:
             if endpoint == "experiments/log":
                 eid = extract_eid(msg)
                 if eid not in stored:
                     stored[eid] = self._stored_experiment(eid)
+                    if stored[eid] is None:
+                        logger.warning(
+                            "replay_log: could not read the stored experiment for"
+                            " %r; skipping its experiment calls so no metric is"
+                            " recorded twice",
+                            eid,
+                        )
         for endpoint, msg in entries:
             if endpoint == "experiments/log":
                 msg = self._unreplayed(msg, stored)
@@ -2153,6 +2166,8 @@ class Visdom(object):
         from visdom.utils.server_utils import extract_eid
 
         eid = extract_eid(msg)
+        if stored[eid] is None:
+            return None
         metrics, finished = stored[eid]
         if finished:
             # The server refuses any further log, metric or finish for it.
@@ -2183,18 +2198,32 @@ class Visdom(object):
     def _stored_experiment(self, eid):
         """``(Counter of (key, value, step), finished)`` for ``eid`` on the server.
 
-        ``eid`` is already the id the server stores.
+        ``eid`` is already the id the server stores. Returns None when there is
+        no clear answer: guessing "nothing stored" would resend, and so
+        duplicate, every metric.
         """
+        from visdom.experiments.query import MAX_QUERY_LENGTH
+
         if self.offline:
             return Counter(), False
-        reply = self.search_experiments(
-            query="env_id = " + json.dumps(eid, ensure_ascii=False)
-        )
-        # Anything short of a clear answer is refused: guessing "nothing
-        # stored" would resend, and so duplicate, every metric.
+        query = "env_id = " + _query_string(eid)
+        exact = len(query) <= MAX_QUERY_LENGTH
+        if not exact:
+            # Too long to name in full; narrow by a prefix and match below.
+            query = "env_id contains " + _query_string(eid[: MAX_QUERY_LENGTH // 3])
+        try:
+            reply = self.search_experiments(query=query, limit=None)
+        except ConnectionError:
+            return None
         found = reply.get("experiments") if isinstance(reply, dict) else None
-        if not isinstance(found, list) or len(found) > 1:
-            raise _unverified(eid)
+        if not isinstance(found, list) or reply.get("total", len(found)) != len(found):
+            return None
+        matches = [
+            e for e in found if not isinstance(e, dict) or e.get("env_id", eid) == eid
+        ]
+        if len(matches) > 1 or (exact and len(matches) != len(found)):
+            return None
+        found = matches
         if not found:
             return Counter(), False
         experiment = found[0]
@@ -2202,13 +2231,12 @@ class Visdom(object):
         if (
             not isinstance(stored, list)
             or not isinstance(experiment.get("status"), str)
-            or experiment.get("env_id", eid) != eid
             or not all(
                 isinstance(m, dict) and {"key", "value", "step"} <= m.keys()
                 for m in stored
             )
         ):
-            raise _unverified(eid)
+            return None
         metrics = Counter(
             _replay_key(m["key"], m["value"], m["step"])
             for m in stored

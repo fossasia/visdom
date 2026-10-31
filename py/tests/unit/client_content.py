@@ -33,11 +33,15 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import random
 from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
 import pytest
+
+import visdom
+from visdom.experiments.query import MAX_QUERY_LENGTH, parse_query
 
 pytestmark = pytest.mark.unit
 
@@ -934,16 +938,30 @@ def test_replay_log_counts_env_id_aliases_together(logging_client):
     assert search.call_count == 1
 
 
-@pytest.mark.parametrize("reply", [False, "<html>error</html>", {"error": "x"}])
-def test_replay_log_stops_when_the_lookup_fails(logging_client, reply):
-    """Treating a failed lookup as "nothing stored" would resend metrics."""
+def _replayed_endpoints(client, search):
+    client.offline = False
+    with patch.object(client, "search_experiments", side_effect=search):
+        with echoes(client) as send, patch("visdom.logger.warning") as warning:
+            client.replay_log(client.log_to_filename)
+    return [(c.args[1], c.args[0].get("eid")) for c in send.call_args_list], warning
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [False, "<html>404: Not Found</html>", {"error": "x"}, ConnectionError("down")],
+    ids=["no-reply", "no-endpoint", "error", "unreachable"],
+)
+def test_replay_log_keeps_replaying_windows_when_the_lookup_fails(
+    logging_client, reply
+):
+    """Treating a failed lookup as "nothing stored" would resend metrics, so
+    only that env's experiment calls are skipped."""
+    logging_client.text("hello", win="w1")
     logging_client.log_metrics({"acc": 0.9}, step=1)
-    logging_client.offline = False
-    with patch.object(logging_client, "search_experiments", return_value=reply):
-        with echoes(logging_client) as send:
-            with pytest.raises(RuntimeError, match="replay stopped"):
-                logging_client.replay_log(logging_client.log_to_filename)
-    assert send.call_args_list == []
+    logging_client.text("bye", win="w2")
+    sent, warning = _replayed_endpoints(logging_client, [reply])
+    assert sent == [("events", "main"), ("events", "main")]
+    assert "could not read" in warning.call_args.args[0]
 
 
 def test_offline_replay_does_not_look_anything_up(logging_client):
@@ -1062,40 +1080,93 @@ def test_replay_log_keeps_a_bool_metric_apart_from_one(logging_client):
     ],
     ids=["not-a-list", "two", "no-metrics", "no-status", "bad-metric", "other-env"],
 )
-def test_replay_log_stops_when_the_reply_cannot_be_trusted(logging_client, reply):
+def test_replay_log_skips_an_experiment_whose_reply_cannot_be_trusted(
+    logging_client, reply
+):
+    logging_client.text("hello", win="w1")
     logging_client.log_metrics({"acc": 0.9}, step=1)
-    logging_client.offline = False
-    with patch.object(logging_client, "search_experiments", return_value=reply):
-        with echoes(logging_client) as send:
-            with pytest.raises(RuntimeError, match="replay stopped"):
-                logging_client.replay_log(logging_client.log_to_filename)
-    assert send.call_args_list == []
+    sent, warning = _replayed_endpoints(logging_client, [reply])
+    assert sent == [("events", "main")]
+    assert warning.called
 
 
-def test_replay_log_checks_every_env_before_sending_anything(logging_client):
-    """A failed lookup for a later env must not leave earlier lines sent."""
+def test_a_failed_lookup_skips_only_that_envs_experiment_calls(logging_client):
     logging_client.text("hello", win="w1")
     logging_client.log_metrics({"acc": 0.9}, step=1, env="first")
     logging_client.log_metrics({"acc": 0.8}, step=1, env="second")
-    logging_client.offline = False
+    logging_client.set_tags({"k": "v"}, env="second")
 
-    def search(query):
+    def search(query, limit=100):
         return {"experiments": []} if '"first"' in query else "<html>error</html>"
 
-    with patch.object(logging_client, "search_experiments", side_effect=search):
-        with echoes(logging_client) as send:
-            with pytest.raises(RuntimeError, match="'second'"):
-                logging_client.replay_log(logging_client.log_to_filename)
-    assert send.call_args_list == []
+    sent, _ = _replayed_endpoints(logging_client, search)
+    assert sent == [
+        ("events", "main"),
+        ("experiments/log", "first"),
+        ("experiments/tags", "second"),
+    ]
 
 
-def test_replay_log_stops_when_the_server_cannot_be_reached(logging_client):
-    logging_client.log_metrics({"acc": 0.9}, step=1)
+def _search_like_the_server(records):
+    """A search that runs the query through the server's own parser."""
+
+    def search(query, limit=100):
+        node = parse_query(query)
+        found = [r for r in records if node.matches(r)]
+        return {"experiments": found, "total": len(found)}
+
+    return search
+
+
+def _tricky_ids():
+    rng = random.Random(0)
+    ids = [
+        "ünïcödé",
+        "日本語",
+        "😀 run",
+        "á",
+        "​zero-width",
+        " sep",
+        'quo"te',
+        "back\\slash",
+        "back\\nslash",
+        "tab\tbed",
+        "ctl\x01x",
+        "\x07\x08\x0b\x0c\x1b\x7f",
+        "\x00nul",
+        "'single'",
+        "x" * 5000,
+    ]
+    for _ in range(1000):
+        ids.append("".join(chr(rng.randint(1, 0x2FFF)) for _ in range(12)))
+    return ids
+
+
+def test_the_lookup_query_finds_any_env_id():
+    """``json.dumps`` writes "\\x01" as "\\u0001", which the query language
+    reads as six characters, so the lookup missed the run and every metric
+    was sent again."""
+    for eid in _tricky_ids():
+        query = "env_id = " + visdom._query_string(eid)
+        if len(query) <= MAX_QUERY_LENGTH:
+            assert parse_query(query).matches({"env_id": eid}), ascii(eid)
+
+
+@pytest.mark.parametrize(
+    "eid",
+    ["ctl\x01x", "form\x0cfeed", "😀 run", "x" * 5000],
+    ids=["control-char", "form-feed", "emoji", "too-long-to-query"],
+)
+def test_replay_log_skips_a_stored_metric_for_any_env_id(logging_client, eid):
+    logging_client.log_metrics({"acc": 0.9}, step=1, env=eid)
+    stored = dict(_stored([("acc", 0.9, 1)])["experiments"][0], env_id=eid)
+    neighbour = dict(stored, env_id=eid + "-2", metrics=[])
     logging_client.offline = False
     with patch.object(
-        logging_client, "search_experiments", side_effect=ConnectionError("down")
+        logging_client,
+        "search_experiments",
+        side_effect=_search_like_the_server([stored, neighbour]),
     ):
         with echoes(logging_client) as send:
-            with pytest.raises(ConnectionError):
-                logging_client.replay_log(logging_client.log_to_filename)
+            logging_client.replay_log(logging_client.log_to_filename)
     assert send.call_args_list == []
