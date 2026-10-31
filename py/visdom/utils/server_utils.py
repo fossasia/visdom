@@ -598,6 +598,44 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def _label_slot(name, legend):
+    """The legend entry a trace still named by its label number takes."""
+    if isinstance(name, str) and name.isdecimal() and 1 <= int(name) <= len(legend):
+        return int(name) - 1
+    return None
+
+
+def legend_slots(names, legend, old_legend=None):
+    """Which entry of ``legend`` each trace, named ``names``, takes.
+
+    None leaves that trace's name as it is. Traces named from the pane's
+    previous legend keep their entry in it, so a repeated legend leaves them
+    as they are; any other trace takes the entry for its label number or its
+    position, whichever is still free. If no trace matches, traces all named
+    by label number take the entry for that number, since a scatter created
+    from some labels only has them out of position, and anything else is
+    renamed by position.
+    """
+    if isinstance(old_legend, (list, tuple)):
+        old = list(old_legend)
+        slots = [None] * len(names)
+        for i, n in enumerate(names):
+            if n in old and old.index(n) not in slots:
+                slots[i] = old.index(n)
+        if any(slot is not None for slot in slots):
+            for i, n in enumerate(names):
+                if slots[i] is None:
+                    for slot in (_label_slot(n, legend), i):
+                        if slot is not None and slot not in slots:
+                            slots[i] = slot
+                            break
+            return slots
+    slots = [_label_slot(n, legend) for n in names]
+    if None in slots or len(set(slots)) != len(slots):
+        slots = list(range(len(names)))
+    return slots
+
+
 def update_window(p, args):
     """Merge an update's ``layout``/``opts``/``legend`` into an existing window.
 
@@ -615,6 +653,7 @@ def update_window(p, args):
             if layout_val is not None:
                 content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
+    old_legend = p.get("legend")
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             if opt_name == "caption":
@@ -638,16 +677,21 @@ def update_window(p, args):
                     if d.get("name") == name:
                         d["name"] = legend[0]
         else:
-            if len(legend) < len(pdata):
+            # A pane saved without its legend: data sent with this legend is
+            # named from it, so traces already carrying its names keep them.
+            if old_legend is None and args.get("data"):
+                old_legend = legend
+            slots = legend_slots([d.get("name") for d in pdata], legend, old_legend)
+            if any(slot is not None and slot >= len(legend) for slot in slots):
                 logging.warning(
                     "update_window: legend has %d entries but pane has %d"
-                    " traces; leaving trailing traces' names unchanged",
+                    " traces; leaving the extra traces' names unchanged",
                     len(legend),
                     len(pdata),
                 )
-            for i, d in enumerate(pdata):
-                if i < len(legend):
-                    d["name"] = legend[i]
+            for slot, d in zip(slots, pdata):
+                if slot is not None and slot < len(legend):
+                    d["name"] = legend[slot]
     return p
 
 
@@ -743,6 +787,9 @@ def window(args):
             "caption": opts.get("caption"),
         }
         p["type"] = "plot"
+        # Kept so a later legend knows which entry each trace was named from.
+        if isinstance(opts.get("legend"), (list, tuple)):
+            p["legend"] = list(opts["legend"])
 
     return p
 
