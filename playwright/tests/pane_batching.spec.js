@@ -78,6 +78,32 @@ for i in range(start, start + count):
     )
 `;
 
+const uncaptionedScript = `
+import sys, visdom
+env, win = sys.argv[1], sys.argv[2]
+viz = visdom.Visdom(port=8098, env=env, raise_exceptions=True)
+src = (
+    'data:image/gif;base64,'
+    'R0lGODlhQABAAIAAAP///wAAACH5BAEAAAAALAAAAABAAEAAAAIxhI+py+0Po5y02ouz3rz7'
+    'D4biSJbmiabqyrbuC8fyTNf2jef6zvf+DwwKh8Si8VgoAAA7'
+)
+viz._send(
+    {
+        'data': [{'content': {'src': src}, 'type': 'image'}],
+        'win': win,
+        'eid': env,
+        'opts': {'title': 'uncaptioned'},
+    }
+)
+`;
+
+const captionOptsScript = `
+import sys, visdom
+env, win, caption = sys.argv[1], sys.argv[2], sys.argv[3]
+viz = visdom.Visdom(port=8098, env=env, raise_exceptions=True)
+viz.update_window_opts(win, opts={'caption': caption})
+`;
+
 const gridItem = '.layout .react-grid-item';
 
 function newEnv() {
@@ -171,6 +197,33 @@ test('repeated updates to a captioned pane do not grow it', async ({
 
   expect(await paneHeight(page, 'captioned')).toBe(before);
   expect(await page.evaluate(() => window.__layoutWrites)).toBe(0);
+});
+
+test('adding a caption to an existing pane makes room for it', async ({
+  page,
+}) => {
+  const env = newEnv();
+  await openThreePanes(page, env);
+  runPython(uncaptionedScript, [env, 'caption1']);
+  await expect(page.locator(gridItem)).toHaveCount(4);
+  await page.waitForTimeout(1000);
+
+  const before = await paneHeight(page, 'uncaptioned');
+
+  runPython(captionOptsScript, [env, 'caption1', 'first caption']);
+  await expect(paneByTitle(page, 'uncaptioned')).toContainText('first caption');
+  await expect
+    .poll(() => paneHeight(page, 'uncaptioned'))
+    .toBeGreaterThan(before);
+  const grown = await paneHeight(page, 'uncaptioned');
+
+  runPython(captionOptsScript, [env, 'caption1', 'second caption']);
+  await expect(paneByTitle(page, 'uncaptioned')).toContainText(
+    'second caption'
+  );
+  await page.waitForTimeout(1200);
+
+  expect(await paneHeight(page, 'uncaptioned')).toBe(grown);
 });
 
 test('an update that changes a pane height still rewrites the layout', async ({

@@ -321,6 +321,12 @@ const App = () => {
 
   // process single pane
   const processPane = (newPane, newPanes, newLayout) => {
+    let prevPane =
+      newPanes[newPane.command == 'window_update' ? newPane.win : newPane.id];
+    let hadCaption = Boolean(
+      prevPane && prevPane.content && prevPane.content.caption
+    );
+
     if (newPane.command == 'window_update') {
       let mutated = jsonpatch.applyPatch(
         newPanes[newPane.win],
@@ -392,11 +398,14 @@ const App = () => {
     let currLayout = getLayoutItem(newLayout, newPane.id);
     if (!currLayout) return false;
 
+    let hasCaption = Boolean(newPane.content && newPane.content.caption);
     let w = newPane.width ? p2w(newPane.width) : currLayout.w;
-    let h = currLayout.h;
+    let h;
     if (newPane.height) {
       h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
-      if (newPane.content && newPane.content.caption) h += 1;
+      if (hasCaption) h += 1;
+    } else {
+      h = currLayout.h + (hasCaption ? 1 : 0) - (hadCaption ? 1 : 0);
     }
     if (w === currLayout.w && h === currLayout.h) return false;
 
