@@ -77,6 +77,12 @@ class VisdomXGBLogger(TrainingCallback):
         )
         self._wins = {}
         self._depth = 0
+        self._next_round = 0  # round after the last one plotted
+        self._fresh = None  # whether this run starts a new curve
+        self._new_windows = False  # set by autolog for a new top-level run
+        self._run_start = None  # rounds the model had when this run began
+        self._run_pending = False  # a run began but hasn't logged a round yet
+        self._silent_end = None  # rounds after an unevaluated continuation
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -167,7 +173,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             callbacks = list(kwargs.get("callbacks") or [])
             if logger not in callbacks:
                 callbacks.append(logger)
@@ -196,7 +202,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             original_callbacks = self_est.callbacks
             callbacks = list(original_callbacks or [])
             if logger not in callbacks:
@@ -230,7 +236,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(self_est, *args, **kwargs)
@@ -256,7 +262,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(*args, **kwargs)
@@ -266,7 +272,40 @@ class VisdomXGBLogger(TrainingCallback):
         patched._visdom_patched = True
         setattr(module, name, patched)
 
+    @staticmethod
+    def _rounds(model):
+        """Rounds already in ``model``, or None if it can't say (xgboost < 1.4)."""
+        rounds = getattr(model, "num_boosted_rounds", None)
+        return rounds() if callable(rounds) else None
+
+    def before_training(self, model):
+        # Decided on the first logged round, so a run without evals changes nothing.
+        self._run_start = self._rounds(model)
+        self._run_pending = True
+        return model
+
+    def _continues(self, start):
+        return bool(start) and start in (self._next_round, self._silent_end)
+
+    def _start_run(self):
+        # Matched by round count only, so an unrelated model of that size appends.
+        start, self._run_pending = self._run_start, False
+        continues = self._continues(start)
+        self._silent_end = None
+        self._fresh = not continues
+        if self._new_windows and not continues:
+            self._wins = {}
+        self._new_windows = False
+
     def after_iteration(self, model, epoch, evals_log):
+        if not evals_log:
+            return False
+        if self._run_pending:
+            self._start_run()
+        # xgboost restarts epoch at 0 on xgb_model=, so read the round from the model.
+        rounds = self._rounds(model)
+        step = rounds - 1 if rounds is not None else epoch
+        fresh = self._fresh if self._fresh is not None else step == 0
         try:
             for data_name, metrics in evals_log.items():
                 for metric_name, log in metrics.items():
@@ -277,7 +316,7 @@ class VisdomXGBLogger(TrainingCallback):
                     trace_name = data_name
                     if win_name not in self._wins:
                         self._wins[win_name] = self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             env=self.env,
                             name=trace_name,
@@ -288,11 +327,11 @@ class VisdomXGBLogger(TrainingCallback):
                                 "showlegend": True,
                             },
                         )
-                    elif epoch == 0:
+                    elif fresh:
                         # New run reusing an old window (nested fit, or a
                         # manually reused callback) — replace, don't append.
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
@@ -301,7 +340,7 @@ class VisdomXGBLogger(TrainingCallback):
                         )
                     else:
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
@@ -309,10 +348,18 @@ class VisdomXGBLogger(TrainingCallback):
                             update="append",
                         )
         except Exception as e:
-            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(epoch, e))
+            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(step, e))
+        if self._fresh is not None:
+            self._fresh = False
+        self._next_round = step + 1
         return False
 
     def after_training(self, model):
+        if self._run_pending:
+            # Nothing was plotted; remember where a continuation left the model.
+            self._run_pending = False
+            if self._continues(self._run_start):
+                self._silent_end = self._rounds(model)
         try:
             best_iteration = model.best_iteration
             best_score = model.best_score
