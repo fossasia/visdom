@@ -295,6 +295,33 @@ test('focus still follows a click after an update', async ({ page }) => {
   await expect(page.locator(gridItem)).toHaveCount(3);
 });
 
+test('closing a pane with a queued update keeps the rest of the batch', async ({
+  page,
+}) => {
+  const env = newEnv();
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await openThreePanes(page, env);
+
+  const before = await plottedPoints(page, 'batching 1');
+  streamPython(appendScript, [env, 'pane0', '160', '0.025']);
+  streamPython(appendScript, [env, 'pane1', '160', '0.025']);
+  await expect
+    .poll(() => plottedPoints(page, 'batching 1'))
+    .toBeGreaterThan(before);
+
+  await paneByTitle(page, 'batching 0')
+    .locator('.pane-close')
+    .click({ force: true });
+  await expect(page.locator(gridItem)).toHaveCount(2);
+
+  const duringClose = await plottedPoints(page, 'batching 1');
+  await expect
+    .poll(() => plottedPoints(page, 'batching 1'))
+    .toBeGreaterThan(duringClose);
+  expect(pageErrors).toEqual([]);
+});
+
 test('a pane closed while updates stream stays closed', async ({ page }) => {
   const env = newEnv();
   await openThreePanes(page, env);

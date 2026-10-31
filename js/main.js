@@ -328,6 +328,8 @@ const App = () => {
     );
 
     if (newPane.command == 'window_update') {
+      if (prevPane === undefined) return false;
+
       let mutated = jsonpatch.applyPatch(
         newPanes[newPane.win],
         newPane.content,
