@@ -209,7 +209,13 @@ const App = () => {
   const savedStateRecoveryToastShown = useRef(false);
   const serverLayoutErrorToastShown = useRef(false);
   const latestRef = useRef({});
-  latestRef.current = { selection, sessionInfo, filterString, focusedPaneID };
+  latestRef.current = {
+    selection,
+    sessionInfo,
+    filterString,
+    focusedPaneID,
+    storeData,
+  };
 
   // --------------------- //
   // grid helper functions //
@@ -290,27 +296,40 @@ const App = () => {
       _timeoutID.current = setTimeout(processBatchedPanes, 100);
       return;
     }
-    let newPanes = Object.assign({}, storeData.panes);
-    let newLayout = storeData.layout.slice();
+    let base = latestRef.current.storeData;
+    let newPanes = Object.assign({}, base.panes);
+    let newLayout = base.layout.slice();
 
     let pendingPanes = _pendingPanes.current;
     _pendingPanesVersions.current = {};
     _pendingPanes.current = [];
-    pendingPanes.forEach((pane) => {
-      processPane(pane, newPanes, newLayout);
-    });
     _timeoutID.current = null;
 
-    setStoreData((prev) => ({
-      ...prev,
+    let layoutChanged = false;
+    pendingPanes.forEach((pane) => {
+      if (processPane(pane, newPanes, newLayout)) layoutChanged = true;
+    });
+
+    let nextStoreData = {
+      ...base,
       panes: newPanes,
-      layout: newLayout,
-    }));
+      layout: layoutChanged ? newLayout : base.layout,
+    };
+    latestRef.current.storeData = nextStoreData;
+    setStoreData(nextStoreData);
   };
 
   // process single pane
   const processPane = (newPane, newPanes, newLayout) => {
+    let prevPane =
+      newPanes[newPane.command == 'window_update' ? newPane.win : newPane.id];
+    let hadCaption = Boolean(
+      prevPane && prevPane.content && prevPane.content.caption
+    );
+
     if (newPane.command == 'window_update') {
+      if (prevPane === undefined) return false;
+
       let mutated = jsonpatch.applyPatch(
         newPanes[newPane.win],
         newPane.content,
@@ -375,21 +394,34 @@ const App = () => {
       }
 
       newLayout.push(paneLayout);
-    } else {
-      let currLayout = getLayoutItem(newLayout, newPane.id);
-      if (newPane.width) currLayout.w = p2w(newPane.width);
-      if (newPane.height)
-        currLayout.h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
-      if (newPane.content && newPane.content.caption) currLayout.h += 1;
+      return true;
     }
+
+    let currLayout = getLayoutItem(newLayout, newPane.id);
+    if (!currLayout) return false;
+
+    let hasCaption = Boolean(newPane.content && newPane.content.caption);
+    let w = newPane.width ? p2w(newPane.width) : currLayout.w;
+    let h;
+    if (newPane.height) {
+      h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
+      if (hasCaption) h += 1;
+    } else {
+      h = currLayout.h + (hasCaption ? 1 : 0) - (hadCaption ? 1 : 0);
+    }
+    if (w === currLayout.w && h === currLayout.h) return false;
+
+    newLayout[newLayout.indexOf(currLayout)] = { ...currLayout, w: w, h: h };
+    return true;
   };
 
   // Apply patch or queries window depending on if we know of the window
   // to be processed soon and matching the expected version.
   const updateWindow = (cmd) => {
+    let knownPanes = latestRef.current.storeData.panes;
     if (
-      (cmd.win in storeData.panes &&
-        cmd.version == storeData.panes[cmd.win].version + 1) ||
+      (cmd.win in knownPanes &&
+        cmd.version == knownPanes[cmd.win].version + 1) ||
       (cmd.win in _pendingPanesVersions.current &&
         cmd.version == _pendingPanesVersions.current[cmd.win] + 1)
     ) {
