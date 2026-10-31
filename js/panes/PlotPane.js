@@ -7,7 +7,13 @@
  *
  */
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
@@ -26,6 +32,17 @@ import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
+const smoothingCopy = (trace) => {
+  const copy = Object.assign({}, trace);
+  if (copy.marker) {
+    copy.marker = Object.assign({}, copy.marker);
+    if (copy.marker.line) {
+      copy.marker.line = Object.assign({}, copy.marker.line);
+    }
+  }
+  return copy;
+};
+
 var PlotPane = (props) => {
   const { contentID, type, selected } = props;
   const isHistory = type === 'plot_history';
@@ -36,12 +53,14 @@ var PlotPane = (props) => {
   const captionRef = useRef();
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
+  const [propertyEdits, setPropertyEdits] = useState(0);
   const [smoothvalue, setSmoothValue] = useState(1);
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
   const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
   const layoutUpdateTimeout = useRef(null);
+  const redrawn = useRef(Promise.resolve(true));
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -176,6 +195,11 @@ var PlotPane = (props) => {
       });
   };
 
+  const handlePropertyUpdate = useCallback(
+    () => setPropertyEdits((edits) => edits + 1),
+    []
+  );
+
   const updateHistorySlider = (ev) => {
     setActualSelected(parseInt(ev.target.value));
   };
@@ -189,9 +213,15 @@ var PlotPane = (props) => {
     if (!plotElement) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      if (plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
-      }
+      redrawn.current.then((redrawSucceeded) => {
+        if (
+          redrawSucceeded &&
+          plotElement._fullLayout &&
+          isDisplayed(plotElement)
+        ) {
+          Plotly.Plots.resize(plotElement);
+        }
+      });
     });
 
     resizeObserver.observe(plotElement);
@@ -229,7 +259,16 @@ var PlotPane = (props) => {
     }
 
     newPlot();
-  });
+  }, [
+    content,
+    props.version,
+    actualSelected,
+    smoothWidgetActive,
+    smoothvalue,
+    propertyEdits,
+    annotations.modebarButton,
+    sessionInfo?.readonly,
+  ]);
 
   useEffect(() => {
     const plotElement = plotlyRef.current;
@@ -290,7 +329,7 @@ var PlotPane = (props) => {
       smooth_data = data
         .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
         .map((d) => {
-          var smooth_d = JSON.parse(JSON.stringify(d));
+          var smooth_d = smoothingCopy(d);
           var windowSize = 2 * smoothvalue + 1;
 
           // remove legend of smoothed plot
@@ -361,22 +400,28 @@ var PlotPane = (props) => {
     }
 
     // draw / redraw plot with layout-options
-    Plotly.react(plotlyRef.current, data.concat(smooth_data), content.layout, {
-      displaylogo: false,
-      doubleClick: 'reset',
-      doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
-        annotations.modebarButton ? [annotations.modebarButton] : []
-      ),
-      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
-      // dragging a note box leaves its arrow on the data point
-      edits: { annotationTail: !sessionInfo?.readonly },
-    }).then(() => {
-      const plotElement = plotlyRef.current;
-      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
+    redrawn.current = Plotly.react(
+      plotlyRef.current,
+      data.concat(smooth_data),
+      content.layout,
+      {
+        displaylogo: false,
+        doubleClick: 'reset',
+        doubleClickDelay: 500,
+        modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+          annotations.modebarButton ? [annotations.modebarButton] : []
+        ),
+        modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+        // dragging a note box leaves its arrow on the data point
+        edits: { annotationTail: !sessionInfo?.readonly },
       }
-    });
+    ).then(
+      () => true,
+      (err) => {
+        console.error('Plotly failed to redraw pane ' + props.id, err);
+        return false;
+      }
+    );
   };
 
   // check if data can be smoothed
@@ -457,6 +502,7 @@ var PlotPane = (props) => {
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       handleLatexExport={handleLatexExport}
+      onPropertyUpdate={handlePropertyUpdate}
       barwidgets={[smooth_widget_button]}
       widgets={[
         history_widget,
