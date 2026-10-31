@@ -1072,6 +1072,10 @@ class Visdom(object):
                 )
 
         self.win_data = {}
+        # Trace names learning_curve created, keyed by (env, win). Creation names
+        # traces after the legend it was given, which an update cannot recover
+        # from its own arguments once the metrics come in another order.
+        self._learning_curve_names = {}
         if self.offline:
             self.use_socket = False
             assert (
@@ -1955,17 +1959,35 @@ class Visdom(object):
             create=False,
         )
 
+    def _forget_learning_curve_names(self, win=None, env=None):
+        """
+        This function drops the trace names `learning_curve` created for a
+        window, or for every window of an env when `win=None`.
+        """
+
+        env_key = self.env if env is None else env
+        if win is None:
+            for key in [k for k in self._learning_curve_names if k[0] == env_key]:
+                del self._learning_curve_names[key]
+        else:
+            self._learning_curve_names.pop((env_key, win), None)
+
     def close(self, win=None, env=None):
         """
         This function closes a specific window.
         Use `win=None` to close all windows in an env.
         """
 
-        return self._send(
+        result = self._send(
             msg={"win": win, "eid": env},
             endpoint="close",
             create=False,
         )
+        if result is not False:
+            # The window is gone from here on, so a name kept for it would only
+            # send an update to a window that no longer exists.
+            self._forget_learning_curve_names(win=win, env=env)
+        return result
 
     def delete_envs(self, env_list):
         """This function deletes a list of environments."""
@@ -1980,7 +2002,16 @@ class Visdom(object):
 
     def delete_env(self, env):
         """This function deletes a specific environment."""
-        return self._send(msg={"eid": env}, endpoint="delete_env")
+        assert isstr(env), "env should be a string"
+
+        result = self._send(msg={"eid": env}, endpoint="delete_env")
+        # The server refuses to drop `main`, and a missing env is not dropped
+        # either, so its windows are still there and their names are still the
+        # ones an update has to address. A failed post answers False: nothing
+        # was deleted then, and the answer carries no env to compare against.
+        if result is not False and env != "main":
+            self._forget_learning_curve_names(env=env)
+        return result
 
     def _win_exists_wrap(self, win, env=None):
         """
@@ -3057,6 +3088,15 @@ class Visdom(object):
         `step` can be a scalar or a 1D series matching the metric length. When
         `update='append'`, `step` must be specified to avoid repeatedly appending
         points at the same x-coordinate.
+
+        With a custom `opts['legend']` the traces are created named after the
+        legend entries, which is what an update addresses: the label belonging
+        to a metric being updated is looked up by that metric, so an update may
+        carry the whole legend, only the labels of the metrics it updates, or
+        no legend at all. A metric this client has no record of -- the window
+        was made by another process -- takes one label per metric in the order
+        the metrics came in when the legend has exactly that many entries, and
+        its own key otherwise.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3102,7 +3142,8 @@ class Visdom(object):
         opts.setdefault("title", "Learning Curve")
         opts.setdefault("xlabel", "step")
         opts.setdefault("ylabel", "metric")
-        if opts.get("legend") is None:
+        legend_given = opts.get("legend") is not None
+        if not legend_given:
             legend = names
             opts["legend"] = legend
         else:
@@ -3112,14 +3153,42 @@ class Visdom(object):
                 names
             ), "legend should have at least as many entries as metrics"
 
+        # Creation names every trace after the matching legend entry, so the
+        # updates have to address those names. Using the metric keys added
+        # traces instead of updating the ones on the screen.
+        env_key = self.env if env is None else env
+        created = self._learning_curve_names.get((env_key, win))
+
         if update is not None:
+            # The trace to address is the one the creation call named, so a
+            # label is looked up by the metric it was created for rather than
+            # by its position. That is what lets an update carry the whole
+            # legend, only the labels of the metrics it updates, or none.
+            stored = None if created is None else dict(created)
+            known = None if stored is None else [stored.get(name) for name in names]
+            # A metric this client created keeps the name it was created under,
+            # whatever the legend of this call says: a legend entry cannot
+            # rename a trace the update did not create. One this client has no
+            # record of is named by this call, one label per metric in the
+            # order the metrics came in. A legend that does not line up with
+            # the metrics one for one names nothing that can be told apart, so
+            # the metric's own key is used: another metric's label would put
+            # these values on that metric's trace, and refusing the call would
+            # strand a client that did not create the window.
+            ordered = legend if legend_given and len(legend) == len(names) else names
+            trace_names = [
+                ordered[index] if label is None else label
+                for index, label in enumerate(known or [None] * len(names))
+            ]
+            opts["legend"] = trace_names
             result = None
+            failed = False
             # Send one named update per metric so mapping order cannot swap traces.
-            for name, values in zip(names, series):
+            for trace_name, values in zip(trace_names, series):
                 metric_opts = None
                 if update != "remove":
                     metric_opts = dict(opts)
-                    metric_opts["legend"] = [name]
+                    metric_opts["legend"] = [trace_name]
                 result = self.line(
                     X=X,
                     Y=values,
@@ -3127,13 +3196,31 @@ class Visdom(object):
                     env=env,
                     opts=metric_opts,
                     update=update,
-                    name=name,
+                    name=trace_name,
                 )
+                # A metric whose update was refused makes the whole call a
+                # failure. Answering with the last call's result would tell the
+                # caller everything went through when part of it did not.
+                failed = failed or result is False
+            if failed:
+                return False
+            # The window now carries the names just sent -- this update is what
+            # created it, another process made it and this client is only now
+            # learning what its traces are called, or it is an append that added
+            # a metric to a window this client already knows. All three have to
+            # be recorded: the next update of a metric with no record falls back
+            # to its key and adds a second trace instead of extending the one on
+            # the screen. The metrics already on record keep the names they were
+            # created under.
+            if update != "remove" and win is not None:
+                merged = dict(created or {})
+                merged.update(zip(names, trace_names))
+                self._learning_curve_names[(env_key, win)] = list(merged.items())
             return result
 
         Y = np.column_stack(series)
 
-        return self.line(
+        result = self.line(
             X=X,
             Y=Y,
             win=win,
@@ -3141,6 +3228,13 @@ class Visdom(object):
             opts=opts,
             update=update,
         )
+        # A post that failed answers False and created no window, so there is no
+        # id to keep the names against.
+        if result not in (None, False):
+            self._learning_curve_names[(env_key, result)] = list(
+                zip(names, legend[: len(names)])
+            )
+        return result
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
