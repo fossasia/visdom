@@ -564,7 +564,14 @@ def test_register_embeddings_entity_selected_without_a_getter(offline_client):
 def test_register_embeddings_region_selected_reruns_tsne_on_the_subset(offline_client):
     offline_client.use_socket = True
     offline_client._register_embeddings(
-        FEATURES, LABELS, [], None, None, "w1", None, {}
+        FEATURES,
+        LABELS,
+        [{"group": group} for group in [0, 1, 0]],
+        None,
+        None,
+        "w1",
+        None,
+        {},
     )
     handler = offline_client.event_handlers[(None, "w1")][0]
 
@@ -815,3 +822,88 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+@pytest.mark.parametrize(
+    "labels, groups",
+    [
+        ([1, 3, 1], [0, 1, 0]),
+        ([10**9, 1, 10**9], [1, 0, 1]),
+        ([2.5, -1.5, 2.5], [1, 0, 1]),
+        (["zebra", "ant", "zebra"], [1, 0, 1]),
+        ([1, 2, 1], [0, 1, 0]),
+        ([0, 0, 0], [0, 0, 0]),
+    ],
+)
+def test_embedding_lasso_preserves_original_groups(offline_client, labels, groups):
+    offline_client.use_socket = True
+    calls = []
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client,
+        "_send",
+        side_effect=lambda message, **kwargs: calls.append(message) or "w",
+    ):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    original = calls[1]["data"][0]["content"]["data"]
+    assert [point["group"] for point in original] == groups
+    assert offline_client.win_data["w"]["points"] == original
+    handler = offline_client.event_handlers[("e", "w")][0]
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            original[i]["group"] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+        np.testing.assert_array_equal(
+            [point["position"] for point in selected], TSNE_XY[:2]
+        )
+
+
+@pytest.mark.parametrize(
+    "points", [[], None, [{"group": 9}], [{"group": 2}, {"group": 1}, {"group": 0}]]
+)
+def test_register_embeddings_lasso_groups_do_not_depend_on_points(
+    offline_client, points
+):
+    offline_client.use_socket = True
+    labels = ["zebra", "ant", "zebra"]
+    offline_client._register_embeddings(
+        FEATURES, labels, points, None, None, "w1", "e1", {}
+    )
+    assert offline_client.win_data["w1"]["points"] is points
+    handler = offline_client.event_handlers[("e1", "w1")][0]
+
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w1",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            [1, 0, 1][i] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection

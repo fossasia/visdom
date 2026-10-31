@@ -2341,6 +2341,9 @@ class Visdom(object):
             "opts": opts,
         }
 
+        labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
+
         def embedding_event_handler(event):
             window = event["target"]
             if event["event_type"] == "EntitySelected":
@@ -2372,10 +2375,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2446,9 +2448,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
