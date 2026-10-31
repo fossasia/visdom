@@ -2403,7 +2403,7 @@ class Visdom(object):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.where(np.isfinite(heatmap), 0.0, heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
         heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
