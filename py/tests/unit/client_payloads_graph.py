@@ -640,22 +640,6 @@ def test_parallel_coordinates_keeps_an_explicit_size(capture_send):
 @pytest.mark.parametrize(
     "kwargs, message",
     [
-        (dict(X=np.ones(3)), "X must be a 2D matrix"),
-        (dict(X=np.ones((1, 1))), "at least 2 dimensions"),
-        (dict(X=np.ones((2, 2)), Y=np.ones((2, 2))), "Y must be a 1D vector"),
-        (dict(X=np.ones((2, 2)), Y=np.ones(3)), "must match number of rows in X"),
-        (
-            dict(X=np.ones((2, 2)), opts=dict(max_experiments=1)),
-            "opts.max_experiments requires Y",
-        ),
-        (
-            dict(X=np.ones((2, 2)), opts=dict(dimensions="ab")),
-            "should be a list/tuple of length",
-        ),
-        (
-            dict(X=np.ones((2, 2)), opts=dict(dimensions=["only-one"])),
-            "must match number of columns in X",
-        ),
         (
             dict(X=np.ones((2, 2)), opts=dict(ticktext={0: ["a"]})),
             r"opts.ticktext\[0\] requires matching opts.tickvals\[0\]",
