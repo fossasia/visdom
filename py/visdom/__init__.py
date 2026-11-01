@@ -963,6 +963,10 @@ class Visdom(object):
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
         self._last_post_time = time.time()
+        # The status the server last answered with. A request it turns down
+        # comes back with a body rather than a failure, so this is the only
+        # way a caller can tell the two apart.
+        self._last_post_status = None
         self.session_idle_timeout = session_idle_timeout
         self.session_idle_check_interval = session_idle_check_interval
         self.proxies = proxies
@@ -1348,7 +1352,12 @@ class Visdom(object):
                     )
 
     def _note_refusal(self, status, body):
-        """Say so when the server turns a request down.
+        """Say so when the server turns a request down, and record the answer.
+
+        Every answer reaches here -- both transports report each one -- so
+        the status of the last one is kept for the callers that have to tell
+        a request the server carried out from one it turned down, which look
+        the same from the body alone.
 
         A hosted server answers 401, 402 or 403 for a key that is wrong,
         revoked or read-only, for a workspace this key may not reach, and for a
@@ -1362,6 +1371,7 @@ class Visdom(object):
         does not raise on a 4xx. Each distinct reason is logged once, so a
         training loop is not flooded.
         """
+        self._last_post_status = status
         if status not in REFUSED_STATUSES:
             return
         message = "The visdom server refused this request ({0}): {1}".format(
@@ -1375,6 +1385,21 @@ class Visdom(object):
         if len(seen) > REFUSALS_REMEMBERED:
             seen.popitem(last=False)
         logger.warning(message)
+
+    def _send_failed(self, result):
+        """Whether a request did not reach a server that carried it out.
+
+        ``_send`` answers with the response body whatever the status was, so
+        a request the server turned down comes back as a non-empty string and
+        reads as a success. Only the status of the last answer separates the
+        two; ``False`` is what ``_send`` itself answers when it could not post
+        at all.
+        """
+
+        if result is False:
+            return True
+        status = getattr(self, "_last_post_status", None)
+        return status is not None and status >= 400
 
     def _handle_post(self, url, data=None):
         """
@@ -1911,9 +1936,10 @@ class Visdom(object):
             endpoint="close",
             create=False,
         )
-        if result is not False:
+        if not self._send_failed(result):
             # The window is gone from here on, so a name kept for it would only
-            # send an update to a window that no longer exists.
+            # send an update to a window that no longer exists. A request the
+            # server turned down left the window where it was, names and all.
             self._forget_learning_curve_names(win=win, env=env)
         return result
 
@@ -1935,9 +1961,9 @@ class Visdom(object):
         result = self._send(msg={"eid": env}, endpoint="delete_env")
         # The server refuses to drop `main`, and a missing env is not dropped
         # either, so its windows are still there and their names are still the
-        # ones an update has to address. A failed post answers False: nothing
-        # was deleted then, and the answer carries no env to compare against.
-        if result is not False and env != "main":
+        # ones an update has to address. A request that did not go through
+        # deleted nothing either, whatever the body of its answer says.
+        if not self._send_failed(result) and env != "main":
             self._forget_learning_curve_names(env=env)
         return result
 
@@ -3097,7 +3123,7 @@ class Visdom(object):
                 # A metric whose update was refused makes the whole call a
                 # failure. Answering with the last call's result would tell the
                 # caller everything went through when part of it did not.
-                failed = failed or result is False
+                failed = failed or self._send_failed(result)
             if failed:
                 return False
             # The window now carries the names just sent -- this update is what
@@ -3124,9 +3150,10 @@ class Visdom(object):
             opts=opts,
             update=update,
         )
-        # A post that failed answers False and created no window, so there is no
-        # id to keep the names against.
-        if result not in (None, False):
+        # A request that did not go through created no window, so there is no
+        # id to keep the names against -- and a body it was refused with is no
+        # window id.
+        if result is not None and not self._send_failed(result):
             self._learning_curve_names[(env_key, result)] = list(
                 zip(names, legend[: len(names)])
             )

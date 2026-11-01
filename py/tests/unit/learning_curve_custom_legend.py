@@ -418,3 +418,102 @@ def test_deleting_an_env_forgets_its_window_names(offline_client):
 
     assert deleted.call_args[1]["endpoint"] == "delete_env"
     assert list(offline_client._learning_curve_names) == [("main", "w1")]
+
+
+REFUSAL = '{"detail": "Invalid or expired API key"}'
+
+
+class _AnsweringServer:
+    """A server that answers every POST with one status and body."""
+
+    def __init__(self, status, body):
+        self.status_code = status
+        self.text = body
+
+    def post(self, url, data=None, timeout=None):
+        return self
+
+    def close(self):
+        pass
+
+
+def _answered_by(offline_client, status, body):
+    """Point the client at a server that answers every POST with ``status``.
+
+    The fixture's own ``_handle_post`` is a guard that raises, so it is dropped
+    to let the real one reach this session and record what came back.
+    """
+    del offline_client._handle_post
+    offline_client._session = _AnsweringServer(status, body)
+    return offline_client
+
+
+def test_closing_a_window_keeps_its_names_when_the_server_refuses(offline_client):
+    """A refusal answers with a body, not False, and closes nothing."""
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+
+    _answered_by(offline_client, 403, REFUSAL)
+
+    assert offline_client.close(win="w1") == REFUSAL
+    assert list(offline_client._learning_curve_names) == [("main", "w1")]
+
+
+def test_deleting_an_env_keeps_its_names_when_the_server_refuses(offline_client):
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+    with patch.object(offline_client, "_send", return_value="w2"):
+        offline_client.learning_curve(
+            {"train": [1.0]}, step=[0], win="w2", env="other", opts=opts
+        )
+
+    _answered_by(offline_client, 401, REFUSAL)
+
+    assert offline_client.delete_env("other") == REFUSAL
+    assert list(offline_client._learning_curve_names) == [
+        ("main", "w1"),
+        ("other", "w2"),
+    ]
+
+
+def test_a_carried_out_close_forgets_the_names_whatever_the_body_says(offline_client):
+    """The status decides, not the body: a 200 is a close even with a body."""
+    opts = {"legend": ["Training loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve({"train": [1.0]}, step=[0], win="w1", opts=opts)
+
+    _answered_by(offline_client, 200, "w1")
+
+    assert offline_client.close(win="w1") == "w1"
+    assert offline_client._learning_curve_names == {}
+
+
+def test_learning_curve_remembers_no_names_when_the_creation_is_refused(offline_client):
+    _answered_by(offline_client, 401, REFUSAL)
+
+    offline_client.learning_curve(
+        {"train": [1.0], "val": [1.2]},
+        step=[0],
+        win="w1",
+        opts={"legend": ["Training loss", "Validation loss"]},
+    )
+
+    assert offline_client._learning_curve_names == {}
+
+
+def test_learning_curve_reports_an_update_the_server_refused(offline_client):
+    opts = {"legend": ["Training loss", "Validation loss"]}
+    with patch.object(offline_client, "_send", return_value="w1"):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="w1", opts=opts
+        )
+
+    _answered_by(offline_client, 403, REFUSAL)
+
+    result = offline_client.learning_curve(
+        {"train": [0.7], "val": [0.9]}, step=[1], win="w1", opts=opts, update="append"
+    )
+
+    assert result is False
