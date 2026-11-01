@@ -877,7 +877,49 @@ def test_check_connection_is_false_rather_than_raising(offline_client, status):
     _answering(offline_client, (status, "Bad Gateway", "<html>"))
     with patch.object(visdom.logger, "warning"):
         assert offline_client.check_connection() is False
-        assert offline_client.win_exists("") is None
+
+
+@pytest.mark.parametrize("status", [400, 404, 500, 502])
+def test_win_exists_raises_for_an_error_status(offline_client, status):
+    """Only check_connection() turns a server error into an answer."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (status, "why", "<html>"))
+    with pytest.raises(visdom.ServerError):
+        offline_client.win_exists("w")
+
+
+@pytest.mark.parametrize(
+    "raise_exceptions, status", [(False, 500), (None, 500), (True, 401), (True, 403)]
+)
+def test_win_exists_is_none_for_an_error_page_otherwise(
+    offline_client, raise_exceptions, status
+):
+    offline_client.raise_exceptions = raise_exceptions
+    _answering(offline_client, (status, "why", "<html>"))
+    with patch.object(visdom.logger, "warning"):
+        assert offline_client.win_exists("w") is None
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.image(np.zeros((3, 4, 4)), win="w", opts={"store_history": True}),
+        lambda v: v.scatter(np.ones((3, 2)), win="w", opts={"store_history": True}),
+        lambda v: v.scatter(np.ones((3, 2)), win="w", update="append"),
+    ],
+    ids=["image_history", "scatter_history", "scatter_append"],
+)
+def test_a_failed_preflight_raises_instead_of_replacing_the_window(
+    offline_client, call
+):
+    """A 500 on win_exists must not turn an append into a new window."""
+    offline_client.raise_exceptions = True
+    offline_client.use_preflight_checks = True
+    _answering(offline_client, (500, "Internal Server Error", "<html>"))
+    with pytest.raises(visdom.ServerError):
+        call(offline_client)
+    urls = [c.args[0] for c in offline_client._session.post.call_args_list]
+    assert [u.rsplit("/", 1)[1] for u in urls] == ["win_exists"]
 
 
 def test_check_connection_waits_out_error_statuses(offline_client):

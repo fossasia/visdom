@@ -220,7 +220,7 @@ class ServerError(Exception):
     Raised by a client created with ``raise_exceptions=True``. ``status`` and
     ``reason`` are the server's own, and ``body`` is the error page a client
     without ``raise_exceptions`` returns instead. A refusal (401, 402, 403)
-    never raises; it is only warned about.
+    never raises it; it is only warned about.
     """
 
     def __init__(self, status, reason="", body=""):
@@ -2095,15 +2095,13 @@ class Visdom(object):
         """
         This function returns a bool indicating whether
         or not a window exists on the server already.
-        Returns None if something went wrong
+        Returns None if something went wrong; with raise_exceptions, an
+        error status from the server raises ServerError instead.
         """
         try:
             e = self._win_exists_wrap(win, env)
         except ConnectionError:
             print("Error connecting to Visdom server!")
-            return None
-        except ServerError:
-            # keeps check_connection() a plain False under raise_exceptions
             return None
 
         if e == "true":
@@ -2118,9 +2116,12 @@ class Visdom(object):
         This function returns a bool indicating whether or
         not the server is connected.
         """
-        return (self.win_exists("") is not None) and (
-            self.socket_alive or not self.use_socket
-        )
+        try:
+            exists = self.win_exists("")
+        except ServerError:
+            # check_connection() answers False rather than raising
+            return False
+        return (exists is not None) and (self.socket_alive or not self.use_socket)
 
     def check_connection(self, timeout_seconds=0):
         """
