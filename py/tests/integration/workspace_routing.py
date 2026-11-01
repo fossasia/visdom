@@ -234,6 +234,22 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
         self.assertEqual(json.loads(response.body), {"error": "out of storage"})
         self.assertEqual(windows(self.space("ws-a")), {})
 
+    def test_a_viewer_cannot_restore_a_run(self):
+        response = self.post_as("key-v", "/restore_run", {"path": "whatever.json"})
+
+        self.assertEqual(response.code, 403)
+
+    def test_a_full_workspace_refuses_restore_run(self):
+        """/restore_run must honor the same per-workspace storage
+        limit every other write does (FILL_ENDPOINTS), since replaying a
+        run creates new panes/events just like a live client would."""
+        self.gateway.full["ws-a"] = "out of storage"
+
+        response = self.post_as("key-a", "/restore_run", {"path": "whatever.json"})
+
+        self.assertEqual(response.code, 402)
+        self.assertEqual(json.loads(response.body), {"error": "out of storage"})
+
     def test_a_full_workspace_refuses_experiment_logs(self):
         self.gateway.full["ws-a"] = "out of storage"
 
