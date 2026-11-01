@@ -2471,6 +2471,12 @@ class Visdom(object):
         changes an integer image. Pass `opts.normalize=True` to min-max scale
         the image to fill [0, 255] instead.
 
+        In float images, NaN and -inf become 0 and +inf becomes 255. This is
+        true with or without `opts.normalize`. The ranges above ignore NaN and
+        infinite values. With `opts.normalize`, if all finite values are the
+        same (or there are none), the finite pixels become 0, and NaN and
+        infinite pixels still follow the rule above.
+
         The following `opts` are supported:
 
         - `opts.normalize`: min-max scale a non-uint8 image to [0, 255] (`boolean`; default = `False`)
@@ -2582,7 +2588,9 @@ class Visdom(object):
         Overlay a heatmap on an image.
 
         `img` is a `CxHxW` or `HxW` tensor (uint8, any other integer type, bool
-        or float, same rules as `image()`). `heatmap` is an `HxW` float array.
+        or float, same rules as `image()`). As in `image()`, NaN and -inf in
+        `img` become 0 and +inf becomes 255, even with `opts.normalize`.
+        `heatmap` is an `HxW` float array.
         Values are expected in [0, 1] but any finite range is accepted —
         values outside [0, 1] are rescaled via min-max normalization before
         blending. NaN maps to 0; infinite values are clamped to the [0, 1]
