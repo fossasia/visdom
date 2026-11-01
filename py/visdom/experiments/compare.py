@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable, Protocol, Sequence
 
-from visdom.experiments.query import ExperimentLike
+from visdom.experiments.query import ExperimentLike, latest_metric_values
 
 
 class ComparableExperiment(ExperimentLike, Protocol):
@@ -49,12 +49,11 @@ def _metric_values(experiment: ComparableExperiment) -> dict:
     Metrics are a time series, but a comparison wants one number per run, so the
     most recent observation wins — the same value
     :func:`~visdom.experiments.query.build_record` compares on, so a run found by
-    ``acc > 0.9`` shows that same ``acc`` here.
+    ``acc > 0.9`` shows that same ``acc`` here. Read through the query layer's
+    helper so both answer identically for an experiment that cannot shortcut
+    the series.
     """
-    latest: dict[str, Any] = {}
-    for metric in reversed(experiment.metrics):
-        latest.setdefault(metric.key, metric.value)
-    return latest
+    return latest_metric_values(experiment)
 
 
 def _tag_values(experiment: ComparableExperiment) -> dict:

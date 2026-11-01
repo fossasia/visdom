@@ -18,6 +18,8 @@ const {
 
 const envmodal = 'div[aria-label="Environment Management Modal"] ';
 const envbutton = 'button[title="Manage Environments"] ';
+const envselecttrigger = envmodal + 'button.env-select-trigger';
+const envselectpanel = envmodal + '#env-select-panel';
 const viewmodal = 'div[aria-label="Layout Views Management Modal"] ';
 const viewbutton = 'button[title="Manage Views"] ';
 const viewselect = 'div[aria-label="View:"] ';
@@ -28,6 +30,23 @@ async function dragMouse(page, locator, clientX, clientY) {
   await page.mouse.down();
   await page.mouse.move(clientX, clientY);
   await page.mouse.up();
+}
+
+async function openEnvSelect(page) {
+  const panel = page.locator(envselectpanel);
+  if (!(await panel.isVisible())) {
+    await page.locator(envselecttrigger).click();
+    await panel.waitFor({ state: 'visible' });
+  }
+  return panel;
+}
+
+async function closeEnvSelect(page) {
+  const panel = page.locator(envselectpanel);
+  if (await panel.isVisible()) {
+    await page.locator(envselecttrigger).click();
+    await panel.waitFor({ state: 'detached' });
+  }
 }
 
 function paneByTitle(page, title) {
@@ -99,9 +118,72 @@ test.describe.serial('Test Env Modal', () => {
     ).toContainText('Changed text.');
   });
 
+  test('Env delete selector opens as a dropdown and keeps hidden picks', async ({
+    page,
+  }) => {
+    await page.locator(envbutton).click();
+
+    // the list stays collapsed until the trigger is clicked
+    await expect(page.locator(envselectpanel)).toHaveCount(0);
+    await expect(page.locator(envselecttrigger)).toContainText(
+      'Select environments to delete'
+    );
+
+    await openEnvSelect(page);
+    const filterInput = page.getByLabel('Filter environments');
+    await expect(filterInput).toBeFocused();
+
+    // a pick made under one filter survives a different filter
+    await filterInput.fill(env + '_fork2');
+    await page
+      .locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
+      .check();
+    await filterInput.fill(env + '_fork3');
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
+    ).toHaveCount(0);
+    await page
+      .locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+      .check();
+    await expect(page.locator(envselectpanel)).toContainText('2 selected');
+    await expect(page.locator(envselectpanel)).toContainText(
+      '1 hidden by the filter'
+    );
+    await expect(page.locator(envselecttrigger)).toContainText(env + '_fork2');
+    await expect(page.locator(envselecttrigger)).toContainText(env + '_fork3');
+
+    // arrow keys step through Select All as well as the options
+    await filterInput.press('ArrowDown');
+    await expect(page.getByLabel('Select All')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByLabel('Select All')).toBeFocused();
+
+    // shift+tab hands focus to the trigger; escape still closes the dropdown
+    await filterInput.press('Shift+Tab');
+    await expect(page.locator(envselecttrigger)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(envselectpanel)).toHaveCount(0);
+    await expect(page.locator(envmodal)).toBeVisible();
+    await openEnvSelect(page);
+
+    // escape closes the dropdown only; the modal stays open
+    await filterInput.press('Escape');
+    await expect(page.locator(envselectpanel)).toHaveCount(0);
+    await expect(page.locator(envmodal)).toBeVisible();
+    await expect(page.locator(envselecttrigger)).toBeFocused();
+
+    await page.locator(envmodal).press('Escape');
+    await expect(page.locator(envmodal)).toHaveCount(0);
+  });
+
   test('Remove Env', async ({ page }) => {
     // filter to one environment and delete it individually
     await page.locator(envbutton).click();
+    await openEnvSelect(page);
     const filterInput = page.getByLabel('Filter environments');
     await filterInput.fill(env + '_fork2');
     await expect(
@@ -113,6 +195,7 @@ test.describe.serial('Test Env Modal', () => {
     await page
       .locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
       .check();
+    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(
@@ -122,7 +205,9 @@ test.describe.serial('Test Env Modal', () => {
     ).toBeVisible();
 
     // Select env before filtering to verify it remains checked across filter
-    // operations
+    // operations. The filter and the checkboxes live inside the dropdown, so
+    // it has to be open before either can be reached.
+    await openEnvSelect(page);
     await filterInput.fill('');
     await page
       .locator(envmodal + `input[type="checkbox"][value="${env}"]`)
@@ -179,6 +264,7 @@ test.describe.serial('Test Env Modal', () => {
       page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
     ).not.toBeChecked();
 
+    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(
@@ -188,12 +274,14 @@ test.describe.serial('Test Env Modal', () => {
     ).toBeVisible();
 
     // deleting the active environment falls back to main without closing
+    await openEnvSelect(page);
     await filterInput.fill(env);
     const activeEnvCheckbox = page.locator(
       envmodal + `input[type="checkbox"][value="${env}"]`
     );
     await expect(activeEnvCheckbox).toBeVisible();
     await activeEnvCheckbox.check();
+    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(page.getByLabel('Environment name')).toHaveValue('main');

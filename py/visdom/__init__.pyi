@@ -84,6 +84,8 @@ class Visdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         proxies: Optional[Mapping[Text, Text]] = ...,
         offline: bool = ...,
         use_polling: bool = ...,
@@ -177,6 +179,9 @@ class Visdom:
     def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
     def check_connection(self, timeout_seconds: Union[int, float] = ...) -> bool: ...
     def replay_log(self, log_filename: Text) -> None: ...
+    def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
     def text(
         self,
         text: Text,
@@ -235,7 +240,7 @@ class Visdom:
     ) -> _SendReturn: ...
     def audio(
         self,
-        tensor: Tensor,
+        tensor: Tensor = ...,
         audiofile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,

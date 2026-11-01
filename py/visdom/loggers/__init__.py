@@ -7,8 +7,9 @@
 
 from visdom.pytorch import VisdomLogger
 from visdom.loggers.sklearn import VisdomSklearnLogger
+from visdom.loggers.system_monitor import VisdomSystemMonitor
 
-__all__ = ["VisdomLogger", "VisdomSklearnLogger"]
+__all__ = ["VisdomLogger", "VisdomSklearnLogger", "VisdomSystemMonitor"]
 
 try:
     from visdom.loggers.xgboost import VisdomXGBLogger

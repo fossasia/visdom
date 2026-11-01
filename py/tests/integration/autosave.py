@@ -23,16 +23,18 @@ keeps the assertions from racing a thread pool.
 
 import asyncio
 import json
+import os
 import tempfile
 import types
 import unittest
+from collections import Counter
 from concurrent.futures import Future
 from unittest import mock
 
 import pytest
 import tornado.ioloop
 
-from visdom.server.app import Application
+from visdom.server.app import Application, _combine_written
 from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
@@ -499,7 +501,9 @@ class TestHandlersMarkTheirWrites(unittest.TestCase):
         register_window(self.handler, window(window_args(win="win_0")), "main")
         self.handler.dirtied.clear()
 
-        CloseHandler.wrap_func(self.handler, {"eid": "main", "win": "win_0"})
+        asyncio.run(
+            CloseHandler.wrap_func(self.handler, {"eid": "main", "win": "win_0"})
+        )
 
         self.assertEqual(self.handler.dirtied, ["main"])
 
@@ -639,6 +643,165 @@ class TestSocketCommandsMarkTheirWrites(unittest.TestCase):
 
         self.assertIn("win_0", self.handler.state["main"]["jsons"])
         self.assertEqual(self.handler.dirtied, [])
+
+
+class TestWorkspaceAutosaveIsolation(AutosaveTestCase):
+    """Dirty tracking follows the workspace, not the server.
+
+    An eid like ``main`` exists in every workspace, so a single shared counter
+    would confuse one workspace's unsaved work with another's, and the timer
+    would save the wrong file or none at all.
+    """
+
+    save_threshold = 0
+
+    def space(self, workspace_id):
+        return self.app.workspace_env_manager.space(workspace_id)
+
+    def test_marking_one_workspace_leaves_the_others_clean(self):
+        self.space("ws-a").mark_dirty("main")
+
+        self.assertEqual(self.space("ws-a").dirty_envs["main"], 1)
+        self.assertEqual(self.space("ws-b").dirty_envs.get("main", 0), 0)
+        self.assertEqual(self.app.dirty_envs.get("main", 0), 0)
+
+    def test_a_workspace_saves_into_its_own_directory(self):
+        space = self.space("ws-a")
+        space.state["expt"] = {"jsons": {}, "reload": {}}
+        space.mark_dirty("expt")
+
+        self.assertEqual(self._written(space.flush_dirty()), ["expt"])
+
+        expected = os.path.join(self._tmp.name, "workspaces", "ws-a", "expt.json")
+        self.assertTrue(os.path.isfile(expected))
+        self.assertNotIn("expt", self.app.storage.list_envs())
+
+    def test_the_timer_flushes_every_workspace_not_just_the_servers_own(self):
+        for workspace in ("ws-a", "ws-b"):
+            space = self.space(workspace)
+            space.state["expt"] = {"jsons": {}, "reload": {}}
+            space.mark_dirty("expt")
+        self.app.state["solo"] = {"jsons": {}, "reload": {}}
+        self.app.mark_dirty("solo")
+
+        self.flush_dirty()
+
+        for workspace in ("ws-a", "ws-b"):
+            self.assertEqual(self.space(workspace).dirty_envs, Counter())
+            self.assertIn("expt", self.space(workspace).storage.list_envs())
+        self.assertIn("solo", self.app.storage.list_envs())
+
+    def test_a_handler_marks_the_workspace_it_is_bound_to(self):
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.server_state = self.app.server_state
+
+        handler.bind_workspace("ws-a")
+        handler.mark_dirty("main")
+
+        self.assertEqual(self.space("ws-a").dirty_envs["main"], 1)
+        self.assertEqual(self.app.dirty_envs.get("main", 0), 0)
+
+    def test_a_memory_only_workspace_does_not_hoard_marks(self):
+        app = Application(port=8097, env_path=None)
+        space = app.workspace_env_manager.space("ws-a")
+        space.mark_dirty("main")
+
+        self.assertIsNone(space.flush_dirty())
+        self.assertEqual(space.dirty_envs, Counter())
+
+
+class TestFlushAcrossWorkspacesOnTheRealWorker(unittest.TestCase):
+    """The combined flush resolves against a real loop and a real worker.
+
+    Every other test here runs storage inline and gets a settled future back,
+    which cannot show what happens while a write is still in flight. A write
+    belongs to the IO loop and resolves on it, so anything that reads those
+    results from another thread sees them pending and fails. Only a real loop
+    puts that ordering under test.
+    """
+
+    def test_the_combined_future_waits_for_every_workspace(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        app = Application(port=8097, env_path=tmp.name)
+        workspaces = ("ws-a", "ws-b", "ws-c")
+        for workspace in workspaces:
+            space = app.workspace_env_manager.space(workspace)
+            space.state["expt"] = {"jsons": {}, "reload": {}}
+            space.mark_dirty("expt")
+
+        async def flush():
+            return await app.flush_dirty()
+
+        loop = tornado.ioloop.IOLoop(make_current=True)
+        try:
+            written = loop.run_sync(flush)
+        finally:
+            loop.close()
+
+        self.assertEqual(written, ["expt"] * len(workspaces))
+        for workspace in workspaces:
+            space = app.workspace_env_manager.space(workspace)
+            self.assertEqual(space.dirty_envs, Counter())
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(tmp.name, "workspaces", workspace, "expt.json")
+                )
+            )
+
+    def test_the_server_state_alone_gives_back_its_own_write(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        app = Application(port=8097, env_path=tmp.name)
+        app.state["expt"] = {"jsons": {}, "reload": {}}
+        app.mark_dirty("expt")
+
+        async def flush():
+            pending = app.flush_dirty()
+            self.assertIsInstance(pending, asyncio.Future)
+            return await pending
+
+        loop = tornado.ioloop.IOLoop(make_current=True)
+        try:
+            written = loop.run_sync(flush)
+        finally:
+            loop.close()
+
+        self.assertEqual(written, ["expt"])
+
+
+class TestCombinedWrites(unittest.TestCase):
+    def test_a_cancelled_write_still_settles_the_combined_future(self):
+        written = Future()
+        cancelled = Future()
+        combined = _combine_written([written, cancelled])
+
+        written.set_result(["a"])
+        cancelled.cancel()
+
+        self.assertTrue(combined.done())
+        self.assertTrue(combined.cancelled())
+
+    def test_a_failure_wins_over_a_cancelled_write(self):
+        failed = Future()
+        cancelled = Future()
+        combined = _combine_written([failed, cancelled])
+
+        cancelled.cancel()
+        failed.set_exception(OSError("disk full"))
+
+        self.assertIsInstance(combined.exception(), OSError)
+
+    def test_every_write_is_gathered(self):
+        first = Future()
+        second = Future()
+        combined = _combine_written([first, second])
+
+        first.set_result(["a"])
+        self.assertFalse(combined.done())
+        second.set_result(["b"])
+
+        self.assertEqual(combined.result(), ["a", "b"])
 
 
 if __name__ == "__main__":
