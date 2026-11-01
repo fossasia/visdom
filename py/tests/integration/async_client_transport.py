@@ -103,6 +103,25 @@ class TestAsyncVisdomAgainstServer(AsyncClientTestCase):
         assert pane["content"]["data"][0]["y"] == [1.0, 2.0, 3.0]
 
     @gen_test
+    async def test_an_error_status_raises_server_error(self):
+        """The server was reached and said no, so it is a ``ServerError`` and
+        not a ``ConnectionError``."""
+        client = await self.connect(env="run")
+        await client.log_metrics({"acc": 0.5}, step=1)
+        await client.finish_experiment()
+        with pytest.raises(ServerError) as caught:
+            await client.log_metrics({"acc": 0.6}, step=2)
+        assert caught.value.status == 409
+        assert "finished" in caught.value.reason
+
+    @gen_test
+    async def test_error_statuses_with_documented_answers_still_answer(self):
+        client = await self.connect()
+        assert await client.get_env_state("never_made") is None
+        reply = await client.suggest_experiment()
+        assert reply["status"] == "not_implemented"
+
+    @gen_test
     async def test_win_exists_reads_the_response_body(self):
         client = await self.connect()
         await client.text("hello", win="w1")
@@ -243,20 +262,10 @@ class TestAsyncVisdomAgainstReadonlyServer(AsyncClientTestCase):
     app_kwargs = {"readonly": True}
 
     @gen_test
-    async def test_error_status_returns_the_body_without_raise_exceptions(self):
-        """Without ``raise_exceptions`` the refusal is handed back as text, as
-        the synchronous client has always done."""
-        client = await self.connect(raise_exceptions=False)
+    async def test_error_status_returns_the_body_instead_of_raising(self):
+        """``requests`` does not raise on 4xx, so neither may the transport:
+        ``_send`` is written to hand the response text back to the caller."""
+        client = await self.connect()
         result = await client.text("hello", win="w1")
         assert "read" in result.lower()
-        assert "w1" not in self._app.state.get("main", {}).get("jsons", {})
-
-    @gen_test
-    async def test_error_status_raises_with_raise_exceptions(self):
-        """The server was reached and said no, so it is a ``ServerError`` and
-        not a ``ConnectionError``."""
-        client = await self.connect()
-        with pytest.raises(ServerError) as caught:
-            await client.text("hello", win="w1")
-        assert caught.value.status == 403
         assert "w1" not in self._app.state.get("main", {}).get("jsons", {})

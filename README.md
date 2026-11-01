@@ -295,7 +295,7 @@ The python visdom client takes a few options:
 - `port`: the port for your visdom server (default: `8097`)
 - `base_url`: the base visdom server url (default: `/`)
 - `env`: Default environment to plot to when no `env` is provided (default: `main`)
-- `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon)). When it is `True`, a request the server refuses with a 4xx/5xx status raises `visdom.ServerError`, which carries the `status`, the server's `reason` and the error page as `body`. Otherwise the error page is returned as text, as before, so callers that read that text keep working:
+- `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon)). When it is `True`, an error status from the server (4xx/5xx) raises `visdom.ServerError`, which carries the `status`, the server's `reason` and the error page as `body`. Otherwise the error page is returned as text, as before, so callers that read that text keep working. A refusal (401, 402 or 403, e.g. a wrong or read-only API key) never raises, whatever `raise_exceptions` says: it is logged as a warning and the body is returned. `check_connection()` still returns `False` rather than raising:
   ```python
   try:
       vis.log_metrics({"acc": 0.9}, step=2)
