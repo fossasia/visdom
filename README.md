@@ -861,9 +861,13 @@ See `example/system_monitor_example.py` for a full working example.
 ### Basics
 
 #### vis.image
-This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image.
-Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format.
-Passing images in that format will raise errors or lead to incorrect rendering.
+This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image,
+or a PIL image (e.g. `Image.open("photo.png")`), which is drawn like the array it holds.
+Most other Python image libraries (e.g. OpenCV, matplotlib) return numpy arrays in `HxWxC` format.
+Passing arrays in that format will raise errors or lead to incorrect rendering.
+A uint16 image, such as a 16-bit PNG (mode `I;16`), is shown at its full scale (65535 is white).
+Floats and other integers are read by value: `[0, 1]` and `[-1, 1]` are scaled up and other values are clipped to `[0, 255]`;
+pass `opts.normalize=True` to min-max scale the image instead.
 
 For example:
 
@@ -926,7 +930,8 @@ The following `opts` are supported:
 
 #### vis.images
 
-This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
+This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` (arrays or PIL images) all of the same size. It makes a grid of images of size (B / nrow, nrow).
+Images in a list that are all of one kind (all uint8, all uint16, or all other numbers) share one scale, as in a tensor; a list that mixes kinds converts each image on its own, as `vis.image` would show it, so `opts.normalize` applies to each image.
 
 The following arguments and `opts` are supported:
 
