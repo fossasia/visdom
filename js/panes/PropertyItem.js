@@ -43,7 +43,8 @@ function EditablePropertyText(props) {
   };
   const onBlur = (event) => {
     setIsEdited(false);
-    if (submitHandler) submitHandler(actualValue);
+    if (submitHandler && submitHandler(actualValue) === false)
+      setActualValue(value);
 
     // prevents the pane to drop focus
     // otherwise the sendPaneMessage-API does not work

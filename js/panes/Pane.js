@@ -137,6 +137,7 @@ var Pane = forwardRef((props, ref) => {
               keylist={'data[' + dataId + ']'}
               content={data}
               title={'Data[' + dataId + ']'}
+              onUpdate={props.onPropertyUpdate}
             />
             <hr />
           </span>,
@@ -153,6 +154,7 @@ var Pane = forwardRef((props, ref) => {
             keylist="layout"
             content={content.layout}
             title="Layout"
+            onUpdate={props.onPropertyUpdate}
           />
         </span>
       );
@@ -292,7 +294,15 @@ function PropertyList(props) {
   // note: props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
   const updateValue = (key, value) => {
-    content[key] = value;
+    if (typeof content[key] === 'number') {
+      const parsed = Number(value);
+      if (value === '' || !Number.isFinite(parsed)) return false;
+      content[key] = parsed;
+    } else {
+      content[key] = value;
+    }
+    if (props.onUpdate) props.onUpdate();
+    return true;
   };
 
   // rendering
@@ -317,7 +327,12 @@ function PropertyList(props) {
     else if (Array.isArray(value)) return [];
     else if (value && typeof value === 'object')
       return (
-        <PropertyList key={key_string} content={value} keylist={keylist} />
+        <PropertyList
+          key={key_string}
+          content={value}
+          keylist={keylist}
+          onUpdate={props.onUpdate}
+        />
       );
     else return [];
 
