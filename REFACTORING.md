@@ -360,6 +360,7 @@ This phase is the profile Phase 4's follow-ups 4f and 4h were both gated on.
 | [#2048](https://github.com/fossasia/visdom/pull/2048) | Build uint8 image grids without widening to float64; let callers set the PNG level |
 | [#2056](https://github.com/fossasia/visdom/pull/2056) | Redraw a plot pane only when its figure changed |
 | [#2066](https://github.com/fossasia/visdom/pull/2066) | Stop a batched pane update from rewriting state it did not change — *in review as this was written* |
+| [#2067](https://github.com/fossasia/visdom/pull/2067) | This record: the phase's closeout |
 
 ### 7a. The server — what was repeated, and per what
 
@@ -410,12 +411,28 @@ is in one of those three.
 
 ### Invariants a later change can break silently
 
-They are here because breaking one costs performance or correctness without
-turning anything red, and because **nothing in the test suite checks them**. A
-performance regression is silent by construction: put the deep copy back on the
-append path and every test still passes, the patch is still correct, and the
-only symptom is #1805 returning months later. So a change that touches one of
-these paths has to be read against this list -- it will not be caught for you.
+They are here because breaking one costs performance without breaking
+behaviour: put the deep copy back on the append path and the patch it produces
+is still correct, every behavioural test still passes, and the only symptom is
+#1805 returning months later. So each invariant has a guard that asserts what
+the code *reaches* rather than what it returns -- a forbidden call, a call
+count, a subprocess's `sys.modules` -- and none of them asserts wall-clock,
+which would be flaky on a shared runner. They are named here so that a change
+to one of these paths can be read against the test that will catch it:
+
+| # | What guards it |
+|---|---|
+| 1 | `py/tests/unit/update_broadcast.py::test_append_calls_neither_a_deep_copy_nor_make_patch` |
+| 2 | `py/tests/unit/shared_utils.py::test_encoder_sanitises_at_most_once` |
+| 3 | `py/tests/unit/server_utils.py::test_broadcast_envs_encodes_once_for_every_subscriber`, `…_with_no_subscribers_does_not_encode`, `…_with_an_empty_generator_does_not_encode` |
+| 4 | `py/tests/unit/experiment_store.py::test_appending_rebinds_the_series_the_server_is_holding` |
+| 5 | `py/tests/unit/data_model.py::test_the_cache_evicts_once_it_is_over_budget`, `test_a_record_larger_than_the_whole_budget_is_still_cached`, `test_recreated_env_is_not_served_from_the_cache`, `test_corrupt_env_is_retried_rather_than_remembered` |
+| 6 | `py/tests/unit/tsne.py::test_importing_visdom_does_not_pull_in_a_backend` |
+| 7 | `playwright/tests/plot_redraw.spec.js`, "typing a note does not redraw the plot" |
+
+What none of them covers is the *reasoning* below drifting from the code: a
+guard says the call does not happen, not why it must not, and nothing checks
+that this record still describes what is there.
 
 1. **An append neither copies the pane nor diffs it.** `update_packet`'s
    `appendable` fast path must not reach `copy_json_data`, `copy.deepcopy` or
@@ -466,8 +483,12 @@ these paths has to be read against this list -- it will not be caught for you.
    failure needs nothing in the key to move, so caching one would outlive its
    cause and keep the env out of `list_envs` and every `/experiments` answer
    until the file was rewritten. The stat is taken *before* the parse, so the
-   cache can file newer content under an older key (the next read re-parses)
-   but never older content under a newer key. The byte cap is not optional
+   cache can file newer content under an older key -- the next read stats
+   again, sees the stored key no longer match, and re-parses -- but never
+   older content under a newer key. The re-parse is driven by the key moving:
+   a rewrite that left all six fields identical would still be served from the
+   cache, which is why the key is the whole stat identity rather than a
+   timestamp. The byte cap is not optional
    either: a record is flat ~18 KB however many points the window holds, but a
    metric series is not, so 100 environments of 20,000 observations cached
    595 MB before `meta_cache_bytes` existed. The cap is a budget rather than a
@@ -546,11 +567,13 @@ what a run waits for.
 
 Every client payload in that table is **byte-identical** between the two
 commits; the sizes are reported alongside the timings for exactly that reason.
-Media encodes are **1.0x** on the benchmark's float64 noise fixture and are
-meant to be: #2048's grid change needs uint8 input, and its PNG lever needs
-compressible content. An incompressible image costs the same bytes in the same
-time at every level, which is why the fixture in `media_encode.py` is a smooth
-picture and not noise.
+Media encodes are **1.0x** in `payload_build.py` and are meant to be: both of
+its media workloads are random integers widened to `float64`, so neither of
+#2048's levers can apply there -- the grid change needs uint8 input, and the
+PNG level needs compressible content, where an incompressible image costs the
+same bytes in the same time at every level. `media_encode.py` is the benchmark
+that can see them, and its fixture is a smooth, correlated uint8 picture for
+exactly that reason.
 
 ### What is left, and the one number that disappoints
 
@@ -558,7 +581,9 @@ picture and not noise.
 default is `DEFAULT_META_CACHE_BYTES`, currently 8 MB.** A search touches every
 environment exactly once, in order, which is the worst access pattern LRU has:
 if the working set does not fit, every entry is evicted before its next use and
-the cache returns almost nothing. There is no middle. Measured at 20
+the cache returns almost nothing. There is no middle. (8 MB is a budget rather
+than a hard ceiling: eviction stops at the last entry standing, so a single
+record heavier than the whole budget is held anyway.) Measured at 20
 environments holding a 20,000-point window each:
 
 | observations per env | warm scan |

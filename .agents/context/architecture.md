@@ -159,9 +159,11 @@ Full history and the follow-ups that were left: `REFACTORING.md`, Phase 4.
 Phase 7 took the repeated work out of six paths. Each had the same shape: a
 cost paid per point already plotted, per connected client, or per observation
 already logged, rather than per unit of new data. The rules below are what keep
-them that way, and no test checks them -- each one can be undone without
-turning anything red, which is why they are written down. `REFACTORING.md`
-Phase 7 has the measurements and the reasoning behind each.
+them that way. Each has a focused guard in the suite -- they assert a forbidden
+call or a call count, never wall-clock -- but a guard says only that the call
+does not happen, so read the reasoning before changing one of these paths.
+`REFACTORING.md` Phase 7 names the test for each invariant and has the
+measurements behind it.
 
 1. **An append does not copy the pane or diff it.** `UpdateHandler.update`
    records its own JSON Patch ops and `update_packet` returns them, so the
