@@ -688,12 +688,16 @@ def _resolve_torch_types():
     return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
-def _pil_to_chw(img, batch=False):
-    """A PIL image as a CxHxW (or HxW) array."""
-    if img.mode == "F" or img.mode == "I" or img.mode.startswith("I;"):
-        # Keep float and 16/32-bit values so image() can scale them.
-        arr = np.asarray(img, dtype=np.float64)
-        return arr[None] if batch else arr
+def _pil_to_chw(img):
+    """A PIL image as the CxHxW (or HxW) array it holds.
+
+    The values stay as they are, so a PIL image draws exactly like the array
+    ``np.asarray(img)``; only the layout and the less common modes change.
+    """
+    if img.mode in ("I", "F") or img.mode.startswith("I;"):
+        # 32-bit int, float and 16-bit modes, in native byte order
+        arr = np.asarray(img)
+        return arr.astype(arr.dtype.newbyteorder("="), copy=False)
     if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
         # Read alpha from the mode, not band names: LAB has an "A" colour band.
         alpha = (
@@ -705,29 +709,43 @@ def _pil_to_chw(img, batch=False):
             img = img.convert("LA")  # Pillow can't convert La to RGBA directly
         img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
     arr = np.asarray(img)
-    if arr.ndim == 2:
-        return arr[None] if batch else arr
-    return arr.transpose(2, 0, 1)
+    return arr if arr.ndim == 2 else arr.transpose(2, 0, 1)
 
 
-def _tile_to_bytes(x):
-    """A tile in 0..255, scaled rather than clipped when it doesn't fit."""
-    if x.dtype == np.uint8:
-        return x
-    if x.dtype == bool:
-        return x.astype(np.uint8) * 255
-    is_float = np.issubdtype(x.dtype, np.floating)
-    finite = x[np.isfinite(x)] if is_float else x
-    lo, hi = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
-    x = x.astype(np.float64)
-    if is_float and lo >= -1e-5 and hi <= 1 + 1e-5:
-        x = x * 255.0
-    elif is_float and lo >= -1 - 1e-5 and hi <= 1 + 1e-5:
-        x = (x + 1.0) / 2.0 * 255.0
-    elif lo < 0 or hi > 255:
-        x = (x - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(x)
-    x = np.nan_to_num(x, nan=0.0, posinf=255.0, neginf=0.0)
-    return np.uint8(np.clip(x, 0, 255))
+def _is_16_bit(dtype):
+    """Whether ``dtype`` is uint16, in either byte order."""
+    return dtype.kind == "u" and dtype.itemsize == 2
+
+
+def _image_to_bytes(img, normalize=False):
+    """``img`` as uint8, by the rules ``image()`` documents.
+
+    uint16 is a 16-bit image, shown at its full scale (65535 is white) as an
+    image viewer shows a 16-bit PNG. Other integers and bools are read by
+    value, like floats.
+    """
+    if img.dtype == np.uint8:
+        return img
+    if _is_16_bit(img.dtype):
+        img = img / 65535.0
+    elif not np.issubdtype(img.dtype, np.floating):
+        img = img.astype(np.float64)
+    finite_range = _finite_range(img)
+    if finite_range is not None:
+        img_min, img_max = finite_range
+    else:
+        img_min, img_max = 0.0, 0.0
+    if normalize:
+        if img_max > img_min:
+            img = (img - img_min) / (img_max - img_min) * 255.0
+        else:
+            img = np.zeros_like(img)
+    elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+        img = img * 255.0
+    elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+        img = (img + 1.0) / 2.0 * 255.0
+    img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+    return np.uint8(np.clip(img, 0, 255))
 
 
 def _match_channels(tile, channels):
@@ -739,32 +757,48 @@ def _match_channels(tile, channels):
     return tile
 
 
-def _list_image_to_chw(x):
-    """One item of an image list as CxHxW (a grayscale one as 1xHxW)."""
-    if isinstance(x, Image.Image):
-        return _pil_to_chw(x, batch=True)
-    x = np.asarray(_to_numpy(x))
-    return x[None] if x.ndim == 2 else x
+def _stack_images(items, normalize=False):
+    """A list of images as a BxCxHxW batch, and whether it is already bytes.
 
-
-def _stack_image_list(items):
-    """Stack a list holding PIL images, giving mixed tiles one range and shape."""
-    tiles = [_list_image_to_chw(x) for x in items]
-    floats = [np.issubdtype(t.dtype, np.floating) for t in tiles]
-    channels = max(t.shape[0] for t in tiles)
-    if all(floats) and all(t.shape[0] == channels for t in tiles):
-        return np.stack(tiles)  # one scale, so opts.normalize spans the grid
-    return np.stack([_match_channels(_tile_to_bytes(t), channels) for t in tiles])
+    Images of one kind (all uint8, all uint16, or all other numbers) and one
+    channel count are stacked as they are, so they share a scale, as a batch
+    array does. Mixed kinds have no common scale, so each is turned into
+    bytes on its own, as ``image()`` would show it.
+    """
+    tiles = [np.asarray(_to_numpy(x)) for x in items]
+    if not tiles or any(t.ndim not in (2, 3) for t in tiles):
+        return np.array(tiles), False  # not a list of images, e.g. nested rows
+    tiles = [t[None] if t.ndim == 2 else t for t in tiles]
+    sizes = {t.shape[1:] for t in tiles}
+    if len(sizes) > 1:
+        raise ValueError(
+            "images() needs images of one size, got {}".format(
+                " and ".join("{}x{}".format(*size) for size in sorted(sizes))
+            )
+        )
+    channels = {t.shape[0] for t in tiles}
+    kinds = {
+        "8" if t.dtype == np.uint8 else "16" if _is_16_bit(t.dtype) else ""
+        for t in tiles
+    }
+    if len(kinds) == 1 and len(channels) == 1:
+        return np.stack(tiles), False
+    if not channels <= {1, 3, 4}:
+        raise ValueError(
+            "Unsupported number of image channels: {}. Only 1 (grayscale), 3 "
+            "(RGB), or 4 (RGBA) channels are supported.".format(
+                sorted(channels - {1, 3, 4})[0]
+            )
+        )
+    tiles = [_image_to_bytes(t, normalize) for t in tiles]
+    return np.stack([_match_channels(t, max(channels)) for t in tiles]), True
 
 
 def _to_numpy(a):
+    if isinstance(a, list):
+        return np.array(a)
     if isinstance(a, Image.Image):
         return _pil_to_chw(a)
-    if isinstance(a, list):
-        if any(isinstance(x, Image.Image) for x in a):
-            # Each item on its own, so PIL images can sit next to arrays.
-            return _stack_image_list(a)
-        return np.array(a)
     # one isinstance against the whole tuple rather than a Python loop: this
     # runs per argument of every plot call, and with no torch imported and
     # nothing registered in torch_types it is a single dict lookup.
@@ -2578,19 +2612,20 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image, or a PIL image. A 16 or
-        32-bit integer PIL image (mode `I;16` / `I`) keeps its values as floats;
-        use `opts.normalize=True` to scale it to the visible range. The array values can be uint8 in
-        [0, 255] or float. Float arrays are converted as follows: images whose
+        or `HxW` tensor `img` that contains the image, or a PIL image, which is
+        drawn like the array it holds. The array values can be uint8 in
+        [0, 255], uint16 (a 16-bit image such as a 16-bit PNG, shown at its
+        full scale: 65535 is white), or other numbers. Other numbers (floats,
+        other integers, bools) are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
-        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
+        [-1, 1] to [0, 255]; all other values are clipped to [0, 255].
         Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
         instead.
 
         The following `opts` are supported:
 
-        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
+        - `opts.normalize`: min-max scale a non-uint8 image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
         - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
@@ -2599,23 +2634,7 @@ class Visdom(object):
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
-        if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+        img = _image_to_bytes(img, opts.get("normalize", False))
 
         # extract dimensions and process formats
         if img.ndim == 2:
@@ -2714,7 +2733,7 @@ class Visdom(object):
         """
         Overlay a heatmap on an image.
 
-        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
+        `img` is a `CxHxW` or `HxW` tensor or a PIL image (same rules as
         `image()`). `heatmap` is an `HxW` float array. Values are expected in
         [0, 1] but any finite range is accepted — values outside [0, 1] are
         rescaled via min-max normalization before blending. NaN maps to 0;
@@ -2735,26 +2754,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        img = np.asarray(img)
-        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
-            img = img.astype(np.float64)
-        if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+        img = _image_to_bytes(np.asarray(img), opts.get("normalize", False))
 
         if img.ndim == 2:
             H, W = img.shape
@@ -2872,21 +2872,31 @@ class Visdom(object):
             endpoint="update",
         )
 
-    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
-        or a list of images all of the same size,
-        makes a grid of images of size (B / nrow, nrow).
+        or a list of images all of the same size (arrays, tensors or PIL
+        images), makes a grid of images of size (B / nrow, nrow).
 
+        Images in a list that are all of one kind (all uint8, all uint16, or
+        all other numbers) share one scale, as in a 4D tensor. A list mixing
+        kinds converts each image on its own, as `image()` would show it, so
+        `opts.normalize` then applies to each image.
 
         This is a modified from `make_grid()`
         https://github.com/pytorch/vision/blob/master/torchvision/utils.py
         """
 
-        # If list of images, convert to a 4D tensor
+        # Not @pytorch_wrap, which would turn a list into one array before
+        # its images could be converted one by one.
+        normalize = opts is not None and opts.get("normalize", False)
+        is_bytes = False
         if isinstance(tensor, list):
-            tensor = np.stack(tensor, 0)
+            tensor, is_bytes = _stack_images(tensor, normalize)
+        else:
+            tensor = np.asarray(_to_numpy(tensor))
+        if _is_16_bit(tensor.dtype):
+            tensor = tensor / 65535.0  # full 16-bit scale, as image() reads it
 
         if tensor.ndim == 2:  # single image H x W
             tensor = np.expand_dims(tensor, 0)
@@ -2924,9 +2934,11 @@ class Visdom(object):
         # it, so the option would silently do nothing. Deciding this costs one
         # C-speed pass over the batch and saves a copy of it at eight times the
         # width.
-        normalize = opts is not None and opts.get("normalize", False)
+        # A mixed list is already bytes, scaled tile by tile: keep it as is.
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+        if is_bytes or (
+            tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize
+        ):
             grid = np.ones(grid_shape, dtype=np.uint8)
         else:
             grid = np.ones(grid_shape)
