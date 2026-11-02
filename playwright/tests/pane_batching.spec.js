@@ -199,6 +199,42 @@ test('an update that changes a pane height still rewrites the layout', async ({
     .toBeGreaterThan(before);
 });
 
+test('a manual resize survives a content-only update', async ({ page }) => {
+  const env = newEnv();
+  await openThreePanes(page, env);
+
+  const item = page.locator(gridItem).first();
+  const before = await item.boundingBox();
+  const handle = await item.locator('.react-resizable-handle').boundingBox();
+
+  await page.mouse.move(
+    handle.x + handle.width / 2,
+    handle.y + handle.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    handle.x + handle.width / 2 + 220,
+    handle.y + handle.height / 2 + 140,
+    { steps: 10 }
+  );
+  await page.mouse.up();
+
+  await expect
+    .poll(() => item.evaluate((el) => el.getBoundingClientRect().width))
+    .toBeGreaterThan(before.width);
+  await page.waitForTimeout(800);
+  const resized = await item.boundingBox();
+
+  const points = await plottedPoints(page, 'batching 0');
+  runPython(appendScript, [env, 'pane0', '3', '0.15']);
+  await expect.poll(() => plottedPoints(page, 'batching 0')).toBe(points + 3);
+  await page.waitForTimeout(1200);
+
+  const after = await item.boundingBox();
+  expect(Math.round(after.width)).toBe(Math.round(resized.width));
+  expect(Math.round(after.height)).toBe(Math.round(resized.height));
+});
+
 test('the title filter still hides panes after an update', async ({ page }) => {
   const env = newEnv();
   await openThreePanes(page, env);

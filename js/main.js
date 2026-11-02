@@ -339,6 +339,7 @@ const App = () => {
     }
 
     let exists = newPane.id in newPanes;
+    let prevPane = exists ? newPanes[newPane.id] : null;
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
@@ -392,11 +393,21 @@ const App = () => {
     let currLayout = getLayoutItem(newLayout, newPane.id);
     if (!currLayout) return false;
 
-    let w = newPane.width ? p2w(newPane.width) : currLayout.w;
+    let prev = prevPane || {};
+    let hadCaption = Boolean(prev.content && prev.content.caption);
+    let hasCaption = Boolean(newPane.content && newPane.content.caption);
+
+    let w =
+      newPane.width && newPane.width !== prev.width
+        ? p2w(newPane.width)
+        : currLayout.w;
     let h = currLayout.h;
-    if (newPane.height) {
+    if (
+      newPane.height &&
+      (newPane.height !== prev.height || hasCaption !== hadCaption)
+    ) {
       h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
-      if (newPane.content && newPane.content.caption) h += 1;
+      if (hasCaption) h += 1;
     }
     if (w === currLayout.w && h === currLayout.h) return false;
 
