@@ -1051,7 +1051,7 @@ audio). The function does not support any plot-specific `opts`.
 
 The following `opts` are supported:
 
-- `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+- `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
 
 Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
