@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from visdom.data_model.json_store import JSONStore
-from visdom.utils import server_utils
+from visdom.utils import server_utils, shared_utils
 from visdom.utils.server_utils import (
     LazyEnvData,
     broadcast_envs,
@@ -263,6 +263,44 @@ def test_snapshot_env_copies_a_primed_lazy_env(tmp_path):
 
     assert copied["jsons"]["win_0"]["id"] == "win_0"
     assert copied["jsons"] is not lazy["jsons"]
+
+
+def test_snapshot_env_does_not_walk_the_env_with_copy_deepcopy(monkeypatch):
+    """The shape of the saving: an env is JSON, so it is copied as JSON.
+
+    ``copy.deepcopy`` reaches a dispatch table and a memo write for every
+    element it visits, which for an env means for every plotted point, every
+    save interval. Asserting the call never happens pins that down where a
+    wall-clock assertion would only be flaky on CI.
+    """
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a JSON env must not need copy.deepcopy")
+
+    monkeypatch.setattr(shared_utils.copy, "deepcopy", forbidden)
+
+    copied = snapshot_env(env_dict())
+
+    assert copied == env_dict()
+
+
+def test_snapshot_env_shares_no_container_with_the_live_env():
+    """Anything shared could be rewritten by the loop mid-serialization."""
+    live = env_dict()
+    live["jsons"]["win_0"]["content"] = {"data": [{"x": [1.0], "y": [2.0]}]}
+
+    copied = snapshot_env(live)
+
+    def containers(value):
+        found = [value] if isinstance(value, (dict, list)) else []
+        items = value.values() if isinstance(value, dict) else value
+        if isinstance(value, (dict, list)):
+            for item in items:
+                found.extend(containers(item))
+        return found
+
+    live_ids = {id(c) for c in containers(live)}
+    assert not live_ids & {id(c) for c in containers(copied)}
 
 
 def test_snapshot_state_drops_cold_envs_and_copies_the_rest(tmp_path):
