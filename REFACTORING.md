@@ -385,9 +385,11 @@ is in one of those three.
 - **Per-point Python in the payload builders** (#2022). Five of the six were
   constant-factor; `_markerColorCheck` was the exception and was *quadratic* —
   `ret[Y[k]] = ret.get(Y[k], []) + [v]` rebuilds the accumulated list per
-  point, so it is Θ(N²/M) in the number of points over the number of distinct
-  labels, and therefore **worst at one label**, which is the common case. One
-  20,000-point scatter with per-point styling paid 817 ms of it.
+  point, so its cost is Θ(Σ nᵢ²) over the label groups — N²/M in the number of
+  points over the number of distinct labels only when the groups are roughly
+  balanced, and N² at a single label, which is both the worst case and the
+  common one. Skew keeps it near N² however large M is. One 20,000-point
+  scatter with per-point styling paid 817 ms of it.
 - **A layout helper walking a trace** (#1955). `_normalize_title_strings`
   descends into lists, so running it over a finished trace cost a Python call
   per plotted coordinate looking for a `title` key that cannot be in a list of
@@ -437,8 +439,11 @@ these paths has to be read against this list -- it will not be caught for you.
    encode belongs above the `for sub in …` loop, and the early return on an
    empty recipient list is required rather than a bonus: the loop body it
    replaces never ran for an empty room, so a bare hoist would make an
-   unattended server encode a full pane on every close. A generator must be
-   materialised before it is tested, because an empty one is still truthy.
+   unattended server encode a full pane on every close. A caller-supplied
+   recipient list must be materialised before it is tested, because an empty
+   generator is still truthy — which is what the `list(target_subs)` in
+   `broadcast_envs` is for. A `dict_values` view sizes itself and needs no
+   such copy.
 4. **A stored blob is never edited in place.** Two separate things now depend on
    it. `experiments_handler._resident_experiments` hands stored blobs to the
    storage worker **uncopied**, and `_read_meta` hands the *same* dict back to
@@ -465,7 +470,11 @@ these paths has to be read against this list -- it will not be caught for you.
    but never older content under a newer key. The byte cap is not optional
    either: a record is flat ~18 KB however many points the window holds, but a
    metric series is not, so 100 environments of 20,000 observations cached
-   595 MB before `meta_cache_bytes` existed.
+   595 MB before `meta_cache_bytes` existed. The cap is a budget rather than a
+   hard ceiling: `_evict_locked` stops at the last entry standing, so a single
+   record larger than the whole budget is still held — it was just read and
+   the caller holds that blob anyway. The real bound is the budget or the
+   biggest single experiment on disk, whichever is larger.
 6. **Nothing at module scope may import torch, scikit-learn or a t-SNE
    backend.** They cost more than the rest of `import visdom` put together.
    `_resolve_torch_types` reads `sys.modules` instead, which is a complete test
@@ -559,10 +568,13 @@ environments holding a 20,000-point window each:
 | 1,300 | 143.5 ms |
 | 2,000 | 155.4 ms |
 
-The cliff sits where the arithmetic puts it — `meta_weight` is
-`META_ENTRY_BYTES + observations x META_OBSERVATION_BYTES`, so 8 MB over 20
-environments buys about 1,300 observations each — and it is a cliff, not a
-slope. A deployment with long metric histories gets 1.7x where this table's top
+The cliff sits where the arithmetic puts it. `meta_weight` charges
+`META_ENTRY_BYTES + observations x META_OBSERVATION_BYTES` for the series and
+then walks everything else the record holds — the name, the params, the tags,
+the description and a slot per key — so the series term is a floor rather than
+the whole weight, and "about 1,300 observations each" is what 8 MB bought
+across 20 environments of *this* fixture. A run logging large parameter values
+hits the cliff earlier. It is a cliff either way, not a slope. A deployment with long metric histories gets 1.7x where this table's top
 rows get 282x. Raising `meta_cache_bytes` fixes it; nothing sizes it
 automatically, and LRU is the wrong policy for a full sweep. That is follow-up
 7a below and it is the largest remaining item in the phase.

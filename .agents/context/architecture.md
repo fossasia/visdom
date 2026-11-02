@@ -174,7 +174,8 @@ Phase 7 has the measurements and the reasoning behind each.
    nobody.** `broadcast_envs`, `broadcast_layouts` and `send_to_sources` encode
    above their loop and return early on an empty recipient list. The early
    return is required: the loop body it replaces never ran for an empty room.
-   Materialise a generator before testing it — an empty one is truthy.
+   Materialise a caller-supplied recipient list before testing it — an empty
+   generator is truthy, where a `dict_values` view sizes itself.
 3. **Copy environments as JSON, not as arbitrary objects.** `copy_json_data` in
    `utils/shared_utils.py`, not `copy.deepcopy`, at the five on-loop env
    copies. An env is JSON by construction, so scalars can be shared and leaf
@@ -200,7 +201,9 @@ The metadata cache has one sharp edge worth knowing before tuning anything: it
 is all-or-nothing against `meta_cache_bytes` (default 8 MB). A search touches
 every environment once in order, which is the worst case for LRU, so a working
 set that does not fit evicts every entry before its next use and the cache
-returns almost nothing. See `REFACTORING.md` follow-up 7a.
+returns almost nothing. The budget is also not a hard ceiling — eviction keeps
+the last entry standing, so a single record bigger than the budget is held
+anyway. See `REFACTORING.md` follow-up 7a.
 
 ## Data Storage
 
