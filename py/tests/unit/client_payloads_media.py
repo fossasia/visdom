@@ -944,42 +944,38 @@ def clip(tmp_path):
 
 @pytest.mark.parametrize(
     "rate",
-    [22050.5, 0, -16000, 2**31, 10**400, float("nan"), float("inf"), True, "16000"],
-    ids=[
-        "fraction",
-        "zero",
-        "negative",
-        "2**31",
-        "huge_int",
-        "nan",
-        "inf",
-        "bool",
-        "str",
-    ],
+    [16000, 48000.0, 22050.5, 0, -16000, "16000"],
+    ids=["int", "float", "fraction", "zero", "negative", "str"],
 )
-def test_audio_rejects_an_invalid_sample_rate_for_a_file(offline_client, clip, rate):
-    with pytest.raises(ValueError, match="positive whole number") as caught:
-        offline_client.audio(audiofile=clip, opts={"sample_frequency": rate})
-    # A file's channels aren't known, so the message doesn't guess them.
-    assert "channel" not in str(caught.value)
-
-
-@pytest.mark.parametrize(
-    "rate",
-    [16000, 16e3, np.int64(8000), np.array(22050), 2**31 - 1],
-    ids=["int", "float", "np_int64", "0d_array", "mono_limit"],
-)
-def test_audio_sends_a_file_sample_rate_as_an_int(capture_send, clip, rate):
+def test_audio_passes_a_file_sample_rate_through(capture_send, clip, rate):
+    """A file plays at its own rate, so the option is sent as it was given."""
     sent = capture_send(
         lambda v: v.audio(audiofile=clip, opts={"sample_frequency": rate})
     )
-    assert sent["payload"]["opts"]["sample_frequency"] == int(rate)
-    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+    assert sent["payload"]["opts"]["sample_frequency"] == rate
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is type(rate)
 
 
 def test_audio_keeps_the_default_sample_rate_for_a_file(capture_send, clip):
     sent = capture_send(lambda v: v.audio(audiofile=clip))
     assert sent["payload"]["opts"]["sample_frequency"] == 44100
+
+
+@pytest.mark.parametrize(
+    "opts",
+    [{}, {"sample_frequency": 16e3}, {"sample_frequency": 8000, "caption": "a"}],
+    ids=["empty", "float_rate", "rate_and_caption"],
+)
+@pytest.mark.parametrize("source", ["tensor", "file"])
+def test_audio_leaves_the_callers_opts_alone(capture_send, clip, opts, source):
+    """The rate, height and width are set on a copy, not on the caller's dict."""
+    opts, before = dict(opts), dict(opts)  # parametrize shares its dicts
+    if source == "tensor":
+        capture_send(lambda v: v.audio(tensor=np.sin(np.arange(64)), opts=opts))
+    else:
+        capture_send(lambda v: v.audio(audiofile=clip, opts=opts))
+    assert opts == before
+    assert all(type(opts[k]) is type(before[k]) for k in before)
 
 
 # ----------------------------------------------------------------- video ----
