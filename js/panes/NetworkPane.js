@@ -253,13 +253,43 @@ var NetworkPane = function (props) {
         .style('stroke', 'none');
     }
 
+    const nodeIndex = (node) => (typeof node === 'object' ? node.index : node);
+    const edgeKey = (source, target) =>
+      `${nodeIndex(source)}:${nodeIndex(target)}`;
+    const edgeKeys = new Set(
+      graph.edges.map((d) => edgeKey(d.source, d.target))
+    );
+    const reciprocalLinks = new Set(
+      graph.edges.filter(
+        (d) =>
+          directed &&
+          d.source !== d.target &&
+          edgeKeys.has(edgeKey(d.target, d.source))
+      )
+    );
+    const linkPath = (d) => {
+      const { source, target } = d;
+      if (reciprocalLinks.has(d)) {
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const cx = (source.x + target.x) / 2 - (dy / length) * 30;
+        const cy = (source.y + target.y) / 2 + (dx / length) * 30;
+        return (
+          `M ${source.x} ${source.y} Q ${cx} ${cy} ` + `${target.x} ${target.y}`
+        );
+      }
+      return `M ${source.x} ${source.y} L ${target.x} ${target.y}`;
+    };
+
     force.nodes(graph.nodes).links(graph.edges).start();
 
     var link = svg
       .selectAll('.link')
       .data(graph.edges)
       .enter()
-      .append('line')
+      .append('path')
+      .attr('fill', 'none')
       .attr('class', 'link')
       .attr('marker-end', 'url(#arrowhead)');
 
@@ -330,36 +360,13 @@ var NetworkPane = function (props) {
     }
 
     force.on('tick', function () {
-      link
-        .attr('x1', function (d) {
-          return d.source.x;
-        })
-        .attr('y1', function (d) {
-          return d.source.y;
-        })
-        .attr('x2', function (d) {
-          return d.target.x;
-        })
-        .attr('y2', function (d) {
-          return d.target.y;
-        });
+      link.attr('d', linkPath);
 
       node.attr('transform', function (d) {
         return 'translate(' + d.x + ',' + d.y + ')';
       });
 
-      edgepaths.attr('d', function (d) {
-        return (
-          'M ' +
-          d.source.x +
-          ' ' +
-          d.source.y +
-          ' L ' +
-          d.target.x +
-          ' ' +
-          d.target.y
-        );
-      });
+      edgepaths.attr('d', linkPath);
 
       edgelabels.attr('transform', function (d) {
         if (d.target.x < d.source.x) {
