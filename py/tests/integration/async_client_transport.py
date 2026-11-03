@@ -24,6 +24,7 @@ import time
 import pytest
 from tornado.testing import gen_test
 
+from visdom import ServerError
 from visdom.async_client import AsyncVisdom
 
 from testutils.http import VisdomHTTPTestCase
@@ -100,6 +101,25 @@ class TestAsyncVisdomAgainstServer(AsyncClientTestCase):
         pane = self.panes("main")[win]
         assert pane["type"] == "plot"
         assert pane["content"]["data"][0]["y"] == [1.0, 2.0, 3.0]
+
+    @gen_test
+    async def test_an_error_status_raises_server_error(self):
+        """The server was reached and said no, so it is a ``ServerError`` and
+        not a ``ConnectionError``."""
+        client = await self.connect(env="run")
+        await client.log_metrics({"acc": 0.5}, step=1)
+        await client.finish_experiment()
+        with pytest.raises(ServerError) as caught:
+            await client.log_metrics({"acc": 0.6}, step=2)
+        assert caught.value.status == 409
+        assert "finished" in caught.value.reason
+
+    @gen_test
+    async def test_error_statuses_with_documented_answers_still_answer(self):
+        client = await self.connect()
+        assert await client.get_env_state("never_made") is None
+        reply = await client.suggest_experiment()
+        assert reply["status"] == "not_implemented"
 
     @gen_test
     async def test_win_exists_reads_the_response_body(self):

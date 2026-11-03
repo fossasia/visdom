@@ -37,7 +37,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.testing import gen_test
 
-from visdom import async_client, Visdom
+from visdom import async_client, REFUSED_STATUSES, ServerError, Visdom
 from visdom.async_client import (
     AsyncVisdom,
     DEFAULT_MAX_CONCURRENCY,
@@ -271,9 +271,10 @@ def test_ssl_verify_false_disables_validation():
 
 
 class _FakeResponse(object):
-    def __init__(self, set_cookie=(), code=200, body=b""):
+    def __init__(self, set_cookie=(), code=200, body=b"", reason=""):
         self.code = code
         self.body = body
+        self.reason = reason
         self.headers = _FakeHeaders(list(set_cookie))
 
 
@@ -774,6 +775,81 @@ class TestAsyncVisdomErrors(tornado.testing.AsyncTestCase):
         client, _ = await make_client(SSLFailingTransport(), raise_exceptions=True)
         with pytest.raises(ConnectionError, match="ssl_verify=False"):
             await client.text("hello")
+
+    @staticmethod
+    def _answering_transport():
+        """A real transport whose server answers ``transport.answer``."""
+        transport = _AsyncTransport("http://localhost", 8097)
+        transport.answer = (200, b"")
+
+        async def _fetch(request):
+            code, body = transport.answer
+            return _FakeResponse(
+                code=code, body=body, reason="experiment 'a' is finished"
+            )
+
+        transport._fetch = _fetch
+        return transport
+
+    @gen_test
+    async def test_server_errors_raise_when_asked_to(self):
+        transport = self._answering_transport()
+        client, _ = await make_client(transport, raise_exceptions=True)
+        transport.answer = (409, b"<html>")
+        with pytest.raises(ServerError, match="409 experiment 'a' is finished"):
+            await client.log_metrics({"acc": 0.1}, step=2)
+
+    @gen_test
+    async def test_server_errors_keep_returning_the_page_otherwise(self):
+        transport = self._answering_transport()
+        client, _ = await make_client(transport, raise_exceptions=False)
+        transport.answer = (409, b"<html>")
+        assert await client.log_metrics({"acc": 0.1}, step=2) == "<html>"
+
+    @gen_test
+    async def test_a_refusal_never_raises_even_when_asked_to(self):
+        transport = self._answering_transport()
+        client, _ = await make_client(transport, raise_exceptions=True)
+        for status in REFUSED_STATUSES:
+            transport.answer = (status, b'{"detail": "read-only key"}')
+            assert await client.text("hi", win="w") == '{"detail": "read-only key"}'
+
+    @gen_test
+    async def test_check_connection_is_false_rather_than_raising(self):
+        transport = self._answering_transport()
+        client, _ = await make_client(
+            transport, raise_exceptions=True, use_incoming_socket=False
+        )
+        transport.answer = (200, b"false")
+        assert await client.check_connection() is True
+        transport.answer = (502, b"<html>")
+        assert await client.check_connection() is False
+
+    @gen_test
+    async def test_the_transport_raises_for_an_error_status(self):
+        transport = self._answering_transport()
+        transport.raise_exceptions = True
+        transport.answer = (409, b"<html>")
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/experiments/log", "{}")
+        assert caught.value.status == 409
+        assert caught.value.body == "<html>"
+
+    @gen_test
+    async def test_the_transport_returns_the_page_unless_asked_to_raise(self):
+        transport = self._answering_transport()
+        transport.answer = (409, b"<html>")
+        assert await transport.post("http://localhost:8097/x", "{}") == "<html>"
+
+    @gen_test
+    async def test_an_undecodable_error_page_still_raises_server_error(self):
+        """Decoded with replacement, as ``requests`` does for ``r.text``."""
+        transport = self._answering_transport()
+        transport.raise_exceptions = True
+        transport.answer = (409, b"<html>\xff</html>")
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/experiments/log", "{}")
+        assert caught.value.body == "<html>�</html>"
 
 
 class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):

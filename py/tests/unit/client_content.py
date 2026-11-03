@@ -33,11 +33,14 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import os
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+
+import visdom
 
 pytestmark = pytest.mark.unit
 
@@ -787,6 +790,175 @@ def test_finish_experiment_defaults_to_finished(offline_client):
     with echoes(offline_client):
         msg, _ = offline_client.finish_experiment()
     assert msg["status"] == "finished"
+
+
+def _answering(client, *answers):
+    """Let the real ``_handle_post`` reach a session that gives ``answers``.
+
+    Each answer is ``(status, reason, text)``; the last one repeats.
+    """
+    responses = [Mock(status_code=s, reason=r, text=t) for s, r, t in answers]
+
+    def post(*args, **kwargs):
+        return responses.pop(0) if len(responses) > 1 else responses[0]
+
+    client._session = Mock(post=Mock(side_effect=post))
+    client._pid = os.getpid()
+    client.__dict__.pop("_handle_post", None)
+
+
+NOT_FOUND = '{"error": "env \'gone\' not found"}'
+SUGGEST_STUB = '{"status": "not_implemented", "detail": "later", "suggestion": null}'
+
+
+def test_handle_post_raises_for_an_error_status(offline_client):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (409, "experiment 'a' is finished", "<html>"))
+    with pytest.raises(visdom.ServerError) as caught:
+        offline_client._handle_post("http://localhost:8097/x")
+    assert caught.value.status == 409
+    assert caught.value.reason == "experiment 'a' is finished"
+    assert caught.value.body == "<html>"
+
+
+def test_handle_post_returns_the_body_for_a_success_status(offline_client):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (200, "OK", '{"env_id": "a"}'))
+    body = offline_client._handle_post("http://localhost:8097/x")
+    assert body == '{"env_id": "a"}'
+
+
+def test_a_server_error_raises_with_raise_exceptions(offline_client):
+    """Not as a ConnectionError: the server was reached, it said no."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (409, "experiment 'a' is finished", "<html>"))
+    with pytest.raises(visdom.ServerError, match="409 experiment 'a' is finished"):
+        offline_client.log_metrics({"acc": 0.1}, step=2)
+
+
+@pytest.mark.parametrize("raise_exceptions", [False, None])
+def test_a_server_error_still_returns_the_page_without_raise_exceptions(
+    offline_client, raise_exceptions
+):
+    offline_client.raise_exceptions = raise_exceptions
+    _answering(offline_client, (409, "finished", "<html>"))
+    assert offline_client.log_metrics({"acc": 0.1}, step=2) == "<html>"
+
+
+@pytest.mark.parametrize("status", visdom.REFUSED_STATUSES)
+def test_a_refusal_warns_and_never_raises(offline_client, status):
+    """The refusal contract: a warning, whatever ``raise_exceptions`` says."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (status, "Forbidden", '{"detail": "read-only key"}'))
+    with patch.object(visdom.logger, "warning") as warning:
+        assert offline_client.text("hi", win="w") == '{"detail": "read-only key"}'
+    warning.assert_called_once()
+    assert "read-only key" in warning.call_args[0][0]
+
+
+@pytest.mark.parametrize("raise_exceptions", [True, False, None])
+def test_only_unrefused_error_statuses_raise(offline_client, raise_exceptions):
+    offline_client.raise_exceptions = raise_exceptions
+    for status in range(200, 600):
+        _answering(offline_client, (status, "why", "page"))
+        raises = bool(raise_exceptions) and status >= 400
+        raises = raises and status not in visdom.REFUSED_STATUSES
+        with patch.object(visdom.logger, "warning"):
+            if raises:
+                with pytest.raises(visdom.ServerError):
+                    offline_client.text("hi", win="w")
+            else:
+                assert offline_client.text("hi", win="w") == "page", status
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 500, 502, 503])
+def test_check_connection_is_false_rather_than_raising(offline_client, status):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (status, "Bad Gateway", "<html>"))
+    with patch.object(visdom.logger, "warning"):
+        assert offline_client.check_connection() is False
+
+
+@pytest.mark.parametrize("status", [400, 404, 500, 502])
+def test_win_exists_raises_for_an_error_status(offline_client, status):
+    """Only check_connection() turns a server error into an answer."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (status, "why", "<html>"))
+    with pytest.raises(visdom.ServerError):
+        offline_client.win_exists("w")
+
+
+@pytest.mark.parametrize(
+    "raise_exceptions, status", [(False, 500), (None, 500), (True, 401), (True, 403)]
+)
+def test_win_exists_is_none_for_an_error_page_otherwise(
+    offline_client, raise_exceptions, status
+):
+    offline_client.raise_exceptions = raise_exceptions
+    _answering(offline_client, (status, "why", "<html>"))
+    with patch.object(visdom.logger, "warning"):
+        assert offline_client.win_exists("w") is None
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.image(np.zeros((3, 4, 4)), win="w", opts={"store_history": True}),
+        lambda v: v.scatter(np.ones((3, 2)), win="w", opts={"store_history": True}),
+        lambda v: v.scatter(np.ones((3, 2)), win="w", update="append"),
+    ],
+    ids=["image_history", "scatter_history", "scatter_append"],
+)
+def test_a_failed_preflight_raises_instead_of_replacing_the_window(
+    offline_client, call
+):
+    """A 500 on win_exists must not turn an append into a new window."""
+    offline_client.raise_exceptions = True
+    offline_client.use_preflight_checks = True
+    _answering(offline_client, (500, "Internal Server Error", "<html>"))
+    with pytest.raises(visdom.ServerError):
+        call(offline_client)
+    urls = [c.args[0] for c in offline_client._session.post.call_args_list]
+    assert [u.rsplit("/", 1)[1] for u in urls] == ["win_exists"]
+
+
+def test_check_connection_waits_out_error_statuses(offline_client):
+    """A proxy answering 502 while the server starts is still waited for."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (502, "Bad Gateway", "<html>"), (200, "OK", "false"))
+    with patch("time.sleep"), patch("builtins.print"):
+        assert offline_client.check_connection(timeout_seconds=1) is True
+
+
+@pytest.mark.parametrize("raise_exceptions", [True, False, None])
+def test_get_env_state_of_a_missing_env_is_none(offline_client, raise_exceptions):
+    offline_client.raise_exceptions = raise_exceptions
+    _answering(offline_client, (404, "Not Found", NOT_FOUND))
+    assert offline_client.get_env_state("gone") is None
+
+
+@pytest.mark.parametrize(
+    "status, text", [(404, "<html>no such route</html>"), (500, NOT_FOUND)]
+)
+def test_get_env_state_raises_for_other_errors(offline_client, status, text):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (status, "why", text))
+    with pytest.raises(visdom.ServerError):
+        offline_client.get_env_state("gone")
+
+
+@pytest.mark.parametrize("raise_exceptions", [True, False, None])
+def test_suggest_experiment_still_returns_the_stub(offline_client, raise_exceptions):
+    offline_client.raise_exceptions = raise_exceptions
+    _answering(offline_client, (501, "Not Implemented", SUGGEST_STUB))
+    assert offline_client.suggest_experiment() == json.loads(SUGGEST_STUB)
+
+
+def test_suggest_experiment_raises_for_other_errors(offline_client):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (400, "params must be an object", "<html>"))
+    with pytest.raises(visdom.ServerError, match="400 params must be an object"):
+        offline_client.suggest_experiment()
 
 
 @pytest.mark.parametrize(
