@@ -85,6 +85,20 @@ def _reject_json_constant(value):
     raise ValueError("invalid JSON constant: {}".format(value))
 
 
+def _resolve_win_key(env_jsons, win):
+    """Return the key in env_jsons matching win (string or numeric), or win itself."""
+    if win in env_jsons:
+        return win
+    win_str = str(win)
+    if win_str in env_jsons:
+        return win_str
+    if isinstance(win, float) and win.is_integer():
+        win_int_str = str(int(win))
+        if win_int_str in env_jsons:
+            return win_int_str
+    return win
+
+
 def _decode_json_body(body):
     """Return a request body decoded into a dict of arguments.
 
@@ -151,10 +165,12 @@ class ExistsHandler(BaseHandler):
         ):
             raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
         eid = extract_eid(args)
-        if eid in handler.state and win in handler.state[eid]["jsons"]:
-            handler.write("true")
-        else:
-            handler.write("false")
+        if eid in handler.state:
+            env_jsons = handler.state[eid]["jsons"]
+            if _resolve_win_key(env_jsons, win) in env_jsons:
+                handler.write("true")
+                return
+        handler.write("false")
 
     @check_auth
     async def post(self):
@@ -841,7 +857,9 @@ class UpdateHandler(BaseHandler):
         if eid not in handler.state:
             handler.state[eid] = {"jsons": {}, "reload": {}}
 
-        if args["win"] not in handler.state[eid]["jsons"]:
+        win = args["win"]
+        win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
+        if win_key not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
             # that window
             append = args.get("append")
@@ -852,7 +870,7 @@ class UpdateHandler(BaseHandler):
                 handler.write("win does not exist")
             return
 
-        p = handler.state[eid]["jsons"][args["win"]]
+        p = handler.state[eid]["jsons"][win_key]
         data = args.get("data")
         is_image_slider_update = isinstance(data, list) and any(
             isinstance(entry, dict) and entry.get("type") == "image_update_selected"
@@ -995,7 +1013,11 @@ class CloseHandler(BaseHandler):
         win = args.get("win")
 
         env = handler.state[eid]
-        keys = list(env["jsons"].keys()) if win is None else [win]
+        if win is None:
+            keys = list(env["jsons"].keys())
+        else:
+            win_key = _resolve_win_key(env["jsons"], win)
+            keys = [win_key] if win_key in env["jsons"] else [win]
         closed = []
         for key in keys:
             p_data = env["jsons"].pop(key, None)
@@ -1085,7 +1107,7 @@ class DeleteEnvHandler(BaseHandler):
         if eid is None:
             return None
         eid = extract_eid(args)
-        if not eid or eid == "main":
+        if eid == "main":
             return None
         handler.state.pop(eid, None)
         removal = delete_env_off_loop(handler, eid)
@@ -1367,14 +1389,14 @@ class DataHandler(BaseHandler):
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                if args["win"] not in handler.state[eid]["jsons"]:
+                win = args["win"]
+                win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
+                if win_key not in handler.state[eid]["jsons"]:
                     raise tornado.web.HTTPError(
                         400, reason="window doesn't exist in this env"
                     )
                 handler.write(
-                    json.dumps(
-                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
-                    )
+                    json.dumps(handler.state[eid]["jsons"][win_key], cls=NanSafeEncoder)
                 )
 
     @check_auth
