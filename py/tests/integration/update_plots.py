@@ -10,9 +10,9 @@
 
 Once ``UpdateHandler.update`` is past the content panes it works on
 ``p["content"]["data"]``, and which branch runs depends on how many traces the
-``name`` argument selects: none injects a trace, exactly one heatmap takes the
-``updateDir`` path, and anything else falls through to the positional trace
-update. Every one of those branches is driven here over HTTP.
+``name`` argument selects: none injects a trace, heatmaps take the ``updateDir``
+path, and anything else falls through to the positional trace update. Every one
+of those branches is driven here over HTTP.
 """
 
 import unittest
@@ -230,20 +230,25 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
         self.assertEqual(data["x"], ["only"])
         self.assertEqual(background["z"], [[0]])
 
-    def test_an_update_without_nancolor_reaches_the_data_trace(self):
+    def test_an_update_with_too_few_traces_changes_no_trace(self):
         win = self.create_nan_heatmap()
-        self.update_nan_heatmap(win, [[5, 6]], "appendRow", y=["e"], nancolor=None)
-        background, data = self.traces(win)
-        self.assertEqual(data["z"], [[1, 2], [3, 4], [5, 6]])
-        self.assertEqual(data["y"], ["c", "d", "e"])
-        self.assertEqual(background["z"], [[0, 0], [0, 0]])
+        before = self.traces(win)
+        for update_dir, z in (("appendRow", [[5, 6]]), ("replace", [[9]])):
+            with self.subTest(update_dir=update_dir):
+                resp = self.update_nan_heatmap(
+                    win, z, update_dir, y=["e"], nancolor=None
+                )
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(self.traces(win), before)
 
-    def test_an_update_with_nancolor_appends_data_not_background(self):
+    def test_an_update_with_too_many_traces_changes_no_trace(self):
         win = self.create_nan_heatmap(nancolor=None)
-        self.update_nan_heatmap(win, [[5, 6]], "appendRow", y=["e"])
-        self.assertEqual(
-            [trace["z"] for trace in self.traces(win)], [[[1, 2], [3, 4], [5, 6]]]
-        )
+        before = self.traces(win)
+        for update_dir, z in (("appendRow", [[5, 6]]), ("replace", [[9]])):
+            with self.subTest(update_dir=update_dir):
+                resp = self.update_nan_heatmap(win, z, update_dir, y=["e"])
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(self.traces(win), before)
 
     def test_a_shape_mismatch_leaves_both_traces_untouched(self):
         win = self.create_nan_heatmap()
@@ -261,13 +266,17 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
         )
 
     def test_a_failed_check_on_one_trace_changes_no_trace(self):
-        win = self.create_nan_heatmap()
-        # grow only the data trace, so the two traces differ in shape
-        self.update_nan_heatmap(win, [[5, 6]], "appendRow", y=["e"], nancolor=None)
-        before = self.traces(win)
-        # three rows fit the data trace but not the two-row background
-        self.update_nan_heatmap(win, [[7], [8], [9]], "appendColumn", x=["f"])
-        self.assertEqual(self.traces(win), before)
+        # three rows fit one trace but not the other, whichever is checked first
+        for short_trace in (0, 1):
+            with self.subTest(short_trace=short_trace):
+                data = self.heatmap_traces(
+                    [[1, 2], [3, 4], [5, 6]], ["a", "b"], ["c", "d", "e"]
+                )
+                data[short_trace]["z"] = [[0, 0], [0, 0]]
+                win = self.create_window(data, layout={"title": "hm"})
+                before = self.traces(win)
+                self.update_nan_heatmap(win, [[7], [8], [9]], "appendColumn", x=["f"])
+                self.assertEqual(self.traces(win), before)
 
 
 class TestTraceUpdates(PlotUpdateTestCase):

@@ -564,10 +564,16 @@ class UpdateHandler(BaseHandler):
             return p
 
         # update heatmap. opts.nancolor adds a background trace ahead of the
-        # data, so pair the traces from the end, where the data trace is.
+        # data, so the update has to carry one trace for each trace in the plot.
         if len(idxs) > 0 and all(pdata[i]["type"] == "heatmap" for i in idxs):
             updateDir = args["updateDir"]
-            pairs = list(zip(reversed(idxs), reversed(new_data)))
+            if len(idxs) != len(new_data):
+                logging.error(
+                    "ERROR: There is a mismatch between the number of traces in existing plot ('%i') and new data ('%i')."
+                    % (len(idxs), len(new_data))
+                )
+                return p
+            pairs = list(zip(idxs, new_data))
 
             # check every trace before changing any, so a failed check does
             # not leave the pane partially updated
