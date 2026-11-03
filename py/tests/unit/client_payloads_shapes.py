@@ -512,6 +512,12 @@ def test_dual_axis_lines_resolves_the_environment_itself(capture_send, offline_c
             dict(X=np.zeros((3, 2, 2)), Y1=np.zeros((3, 2, 2)), Y2=np.zeros((3, 2, 2))),
             "values of X should be one-dimensional",
         ),
+        (
+            dict(
+                X=np.arange(2), Y1=np.arange(2), Y2=np.arange(2), opts=dict(xtype=123)
+            ),
+            "xtype should be a string",
+        ),
     ],
 )
 def test_dual_axis_lines_rejects_malformed_input(offline_client, kwargs, message):
