@@ -348,11 +348,17 @@ class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("'eid' must be a string or number", resp.reason)
 
-    def test_empty_string_or_whitespace_eid_is_noop(self):
-        """A delete_env request with empty or whitespace-only 'eid' is a safe no-op returning 200."""
-        for empty_eid in ("", "   "):
-            resp = self.post_json("/delete_env", {"eid": empty_eid})
-            self.assertEqual(resp.code, 200)
+    def test_empty_string_or_whitespace_eid_deletes_empty_env(self):
+        """A delete_env request with empty or whitespace-only 'eid' deletes an empty env."""
+        self.create_text_window(eid="", content="in empty eid")
+        self.assertIn("", self.get_envs())
+        resp = self.post_json("/delete_env", {"eid": ""})
+        self.assertEqual(resp.code, 200)
+        self.assertNotIn("", self.get_envs())
+
+        # Also when not present, whitespace eid is a safe no-op returning 200
+        resp2 = self.post_json("/delete_env", {"eid": "   "})
+        self.assertEqual(resp2.code, 200)
 
     def test_valid_eid_deletes_env(self):
         """A valid delete_env request deletes the environment."""
@@ -540,6 +546,21 @@ class TestWinExistsEndpoint(VisdomHTTPTestCase):
         resp2 = self.post_json("/win_exists", {"win": True, "eid": "main"})
         self.assertEqual(resp2.code, 400)
         self.assertIn("'win' must be a string or number", resp2.reason)
+
+    def test_numeric_win_matches_string_key(self):
+        """A win_exists request with numeric win matches window with string key."""
+        self.create_text_window(eid="main", content="numeric win test", win="42")
+        resp = self.post_json("/win_exists", {"win": 42, "eid": "main"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body.decode(), "true")
+
+        resp_float = self.post_json("/win_exists", {"win": 42.0, "eid": "main"})
+        self.assertEqual(resp_float.code, 200)
+        self.assertEqual(resp_float.body.decode(), "true")
+
+        resp_missing = self.post_json("/win_exists", {"win": 999, "eid": "main"})
+        self.assertEqual(resp_missing.code, 200)
+        self.assertEqual(resp_missing.body.decode(), "false")
 
 
 if __name__ == "__main__":
