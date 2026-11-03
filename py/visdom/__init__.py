@@ -613,6 +613,9 @@ def _assert_opts(opts):
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
+    if opts.get("xtype") is not None:
+        assert isstr(opts.get("xtype")), "xtype should be a string"
+
 
 def _assert_sunburst_opts(opts):
     """
@@ -4849,6 +4852,7 @@ class Visdom(object):
         - `opts.bottom` :  Set the bottom margin of the plot
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
+        - `opts.xtype` :  Type of the x-axis (e.g. `'linear'`, `'log'`, `'date'`, `'category'`)
         """
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
