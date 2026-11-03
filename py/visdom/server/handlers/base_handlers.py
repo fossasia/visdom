@@ -32,6 +32,7 @@ WRITE_ENDPOINTS = {
     "save",
     "fork_env",
     "upload_env",
+    "restore_run",
 }
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
