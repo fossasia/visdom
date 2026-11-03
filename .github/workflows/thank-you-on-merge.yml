@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Post thank-you comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           # Edit these two values
           SIGNUP_URL: "https://eventyay.com/fossasia/ots2026/redeem/?voucher=FOSSASIA-CONTRIBUTOR"
