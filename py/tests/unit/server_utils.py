@@ -156,6 +156,15 @@ def test_layout_create_only_fills_in_the_empty_layout_an_append_sends():
     assert create_args_for_append({"data": []})["layout"] == {}
 
 
+def test_append_takes_the_pane_title_from_layout_create_only_when_unset():
+    layout = {"title": {"text": "Loss"}}
+    unset = {"data": [], "opts": {}, "layout_create": layout}
+    assert create_args_for_append(unset)["opts"]["title"] == "Loss"
+
+    empty = {"data": [], "opts": {"title": ""}, "layout_create": layout}
+    assert create_args_for_append(empty)["opts"]["title"] == ""
+
+
 # --------------------------------------------------------------- stringify ----
 
 
