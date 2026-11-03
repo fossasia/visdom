@@ -263,5 +263,89 @@ class TestApplicationSettings(VisdomHTTPTestCase):
         self.assertEqual(built.settings["static_url_prefix"], "/sub/static/")
 
 
+class TestDeleteEnvValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /delete_env."""
+
+    def test_malformed_json_body_is_400(self):
+        """Malformed JSON request body returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        """Non-object JSON request body returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body='["env1"]',
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_non_string_eid_is_400(self):
+        """Non-string, empty, or whitespace eid returns HTTP 400."""
+        for invalid in (123, [], {"nested": "obj"}, "   "):
+            resp = self.post_json("/delete_env", {"eid": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
+
+    def test_empty_body_is_400(self):
+        """Empty request body returns HTTP 400."""
+        for empty in ("", "   "):
+            resp = self.fetch(
+                "/delete_env",
+                method="POST",
+                body=empty,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must not be empty", resp.reason)
+
+
+class TestEnvStateValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /env_state."""
+
+    def test_malformed_json_body_is_400(self):
+        """Malformed JSON request body returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        """Non-object JSON request body returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body='["main"]',
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_whitespace_only_eid_is_400(self):
+        """Whitespace-only eid returns HTTP 400."""
+        resp = self.post_json("/env_state", {"eid": "   "})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid 'eid'", resp.reason)
+
+    def test_structured_eid_is_400(self):
+        """List or dict eid returns HTTP 400."""
+        for invalid in ([], {"nested": "obj"}):
+            resp = self.post_json("/env_state", {"eid": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
