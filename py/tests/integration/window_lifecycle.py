@@ -91,6 +91,14 @@ class TestWindowRead(VisdomHTTPTestCase):
     def test_read_specific_window_nonexistent_env_returns_404(self):
         resp = self.post_json("/win_data", {"eid": "nonexistent_env", "win": "w1"})
         self.assertEqual(resp.code, 404)
+        self.assertEqual(resp.reason, "environment not found")
+
+    def test_read_nonexistent_env_unicode_eid_returns_404(self):
+        resp = self.post_json(
+            "/win_data", {"eid": "nonexistent_env_日本語_🚀", "win": "any_win"}
+        )
+        self.assertEqual(resp.code, 404)
+        self.assertEqual(resp.reason, "environment not found")
 
 
 class TestWindowWrite(VisdomHTTPTestCase):
@@ -129,6 +137,10 @@ class TestWindowClose(VisdomHTTPTestCase):
 
     def test_close_all_windows_nonexistent_env_is_noop(self):
         resp = self.close_window(win=None, eid="nonexistent_env")
+        self.assertEqual(resp.code, 200)
+
+    def test_close_window_in_nonexistent_unicode_env_is_noop(self):
+        resp = self.close_window(win="some_win", eid="nonexistent_env_日本語_🚀")
         self.assertEqual(resp.code, 200)
 
 

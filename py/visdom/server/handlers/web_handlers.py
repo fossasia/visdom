@@ -1340,10 +1340,12 @@ class DataHandler(BaseHandler):
                 if "win" in args and args["win"] is None:
                     handler.write(json.dumps({}, cls=NanSafeEncoder))
                     return
+                # Keep eid out of reason: status reason must be ASCII-safe,
+                # and eids are free-form unicode
                 raise tornado.web.HTTPError(
-                    404, reason=f"environment '{eid}' not found"
+                    404,
+                    reason="environment not found",
                 )
-
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
