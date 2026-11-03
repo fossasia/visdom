@@ -318,6 +318,22 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent3["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent3["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
+    # 1D Y timestamp array matching M series with legend
+    sent4 = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([100.0, 200.0]),
+            opts={"legend": ["Series A", "Series B"]},
+        )
+    )
+    assert len(sent4["payload"]["data"]) == 2
+    assert sent4["payload"]["data"][0]["name"] == "Series A"
+    assert sent4["payload"]["data"][1]["name"] == "Series B"
+    assert segments(sent4["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent4["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
+    assert segments(sent4["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent4["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
 
 def test_stem_handles_row_vector_x_inputs(capture_send):
     """Row-vector X inputs (1, N) preserve existing behavior as 1D series of N points."""
