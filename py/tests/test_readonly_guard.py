@@ -24,6 +24,8 @@ from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
 from visdom.server.app import Application
 
+from testutils.fakes import FakeSocket
+
 pytestmark = pytest.mark.integration
 
 
@@ -154,6 +156,31 @@ class TestReadonlyRefusesUpload(ReadonlyEndpointCase):
         self.assertIn("Uploads", json.loads(response.body)["error"])
 
 
+class TestReadonlyRefusesEnvCreation(ReadonlyEndpointCase):
+    """``POST /env/<id>`` reads an environment with a ``sid`` and creates one with
+    an ``eid``. Only the second is a write."""
+
+    def test_creating_an_environment_is_refused(self):
+        self.assertRefused(self.post_json("/env/anything", {"eid": "new-env"}))
+
+    def test_the_refusal_creates_no_environment(self):
+        self.post_json("/env/anything", {"eid": "new-env"})
+        self.assertNotIn("new-env", self._app.state)
+
+    def test_the_refusal_tells_no_one(self):
+        socket = FakeSocket(sid="sub_0", eid="main")
+        self._app.subs["sub_0"] = socket
+        self.post_json("/env/anything", {"eid": "new-env"})
+        self.assertNotIn("env_update", socket.commands())
+
+    def test_reading_an_environment_is_still_allowed(self):
+        socket = FakeSocket(sid="sub_0", eid="main")
+        self._app.subs["sub_0"] = socket
+        response = self.post_json("/env/main", {"sid": "sub_0"})
+        self.assertEqual(response.code, 200)
+        self.assertIn("layout", socket.commands())
+
+
 class TestReadonlyAllowsReads(ReadonlyEndpointCase):
     """Readonly disables writing, not reading: the query endpoints still answer."""
 
@@ -186,6 +213,11 @@ class TestWritableServerStillWrites(ReadonlyEndpointCase):
             "/experiments/hparams", {"eid": "main", "query": "lr = 0.1"}
         )
         self.assertEqual(response.code, 200)
+
+    def test_creating_an_environment_is_accepted(self):
+        response = self.post_json("/env/anything", {"eid": "new-env"})
+        self.assertEqual(response.code, 200)
+        self.assertIn("new-env", self._app.state)
 
 
 if __name__ == "__main__":
