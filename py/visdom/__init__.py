@@ -4530,7 +4530,16 @@ class Visdom(object):
                 and (is_1d_x or (X.shape[0] > 1 and Y.shape[1] == X.shape[0]))
             ):
                 Y = np.squeeze(Y)
-            if Y.ndim <= 1:
+            if (
+                Y.ndim == 1
+                and X.shape[0] == 1
+                and X.shape[1] > 1
+                and Y.shape[0] == X.shape[1]
+                and "legend" in opts
+                and len(opts["legend"]) == X.shape[1]
+            ):
+                Y = Y[None, :]
+            elif Y.ndim <= 1:
                 Y = np.atleast_1d(Y)[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
         assert (
