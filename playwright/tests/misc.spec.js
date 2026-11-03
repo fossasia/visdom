@@ -25,4 +25,14 @@ test.describe('Misc Tests', () => {
     await expect(chart.locator('svg text')).toHaveCount(12);
     await expect(chart.locator('svg g')).toHaveCount(6);
   });
+
+  test('an env whose name contains + opens on its own', async ({ page }) => {
+    // '+' joins envs only on a /compare/ page; on /env/ it is part of the name.
+    const env = `train+val_${Math.floor(Math.random() * 1e6)}`;
+    await runDemo(page, 'plot_line_basic', { env, open: false });
+
+    await page.goto(`/env/${encodeURIComponent(env)}`);
+
+    await expect(page.locator('.react-grid-item')).toHaveCount(1);
+  });
 });
