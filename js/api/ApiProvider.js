@@ -6,6 +6,8 @@ import ApiContext from './ApiContext';
 import Poller from './Legacy';
 import serverPath from './serverPath';
 
+const CONNECT_TIMEOUT_MS = 15000;
+
 const ApiProvider = ({ children }) => {
   // null = initial connection attempt pending ("connecting")
   // true = online / connected
@@ -14,12 +16,48 @@ const ApiProvider = ({ children }) => {
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
   const apiHandlers = useRef(null);
+  const _connectTimer = useRef(null);
 
   // ---------------- //
   // helper functions //
   // ---------------- //
-
   const correctPathname = serverPath;
+
+  const clearConnectTimer = () => {
+    if (_connectTimer.current) {
+      clearTimeout(_connectTimer.current);
+      _connectTimer.current = null;
+    }
+  };
+
+  // Detach handlers so late events can't touch a newer socket, then close
+  const detachAndClose = (sock) => {
+    sock.onopen = null;
+    sock.onmessage = null;
+    sock.onerror = null;
+    sock.onclose = null;
+    try {
+      sock.close();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Error while closing socket:', e);
+    }
+  };
+
+  const startConnectTimer = (instance) => {
+    clearConnectTimer();
+    _connectTimer.current = setTimeout(() => {
+      _connectTimer.current = null;
+      if (_socket.current !== instance) {
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Connection timed out');
+      _socket.current = null;
+      detachAndClose(instance);
+      setConnected(false);
+    }, CONNECT_TIMEOUT_MS);
+  };
 
   // ------------------- //
   // basic communication //
@@ -72,6 +110,7 @@ const ApiProvider = ({ children }) => {
       if (_socket.current !== instance) {
         return;
       }
+      clearConnectTimer();
       setConnected(true);
     };
 
@@ -80,6 +119,7 @@ const ApiProvider = ({ children }) => {
       if (_socket.current !== instance) {
         return;
       }
+      clearConnectTimer();
       _socket.current = null;
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
@@ -102,6 +142,7 @@ const ApiProvider = ({ children }) => {
         return;
       }
       _socket.current = pollerInstance;
+      startConnectTimer(pollerInstance);
       return;
     }
 
@@ -143,23 +184,18 @@ const ApiProvider = ({ children }) => {
     };
 
     _socket.current = socket;
+    startConnectTimer(socket);
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
+    clearConnectTimer(); // also runs on unmount, even with no socket
     const socketToClose = _socket.current;
     if (!socketToClose) {
       return;
     }
     _socket.current = null;
-
-    // Detach listeners so late events can't touch a newer socket
-    socketToClose.onopen = null;
-    socketToClose.onmessage = null;
-    socketToClose.onerror = null;
-    socketToClose.onclose = null;
-
-    socketToClose.close();
+    detachAndClose(socketToClose);
     setConnected(false);
   };
 

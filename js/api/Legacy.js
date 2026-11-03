@@ -36,7 +36,7 @@ function dispatchMessages(messages, handler) {
   });
 }
 
-function postData(url = ``, data = {}) {
+function postData(url = ``, data = {}, signal) {
   return fetch(url, {
     method: 'POST',
     mode: 'cors',
@@ -48,11 +48,18 @@ function postData(url = ``, data = {}) {
     redirect: 'follow',
     referrer: 'no-referrer',
     body: JSON.stringify(data),
+    signal,
   });
 }
 
 class Poller {
+  /**
+   * Wrapper around what would regularly be socket communications, but handled
+   * through a POST-based polling loop
+   */
   closed = false;
+  readyState = 0; // 0 connecting, 1 open, 3 closed (same values as WebSocket)
+  abortController = new AbortController();
 
   constructor(correctPathname, _handleMessage, onConnect, onDisconnect) {
     this.onConnect = onConnect;
@@ -62,7 +69,7 @@ class Poller {
       url.protocol + '//' + url.host + correctPathname() + 'socket_wrap';
     this.onmessage = _handleMessage;
 
-    fetch(this.target)
+    fetch(this.target, { signal: this.abortController.signal })
       .then((res) => {
         if (!res.ok) {
           throw new Error('HTTP ' + res.status);
@@ -76,6 +83,9 @@ class Poller {
         this.finishSetup(data.sid);
       })
       .catch((err) => {
+        if (this.closed) {
+          return; // aborted by close(), not a real failure
+        }
         // eslint-disable-next-line no-console
         console.error('[Visdom API] Poller setup failed:', err);
         this.close();
@@ -87,6 +97,7 @@ class Poller {
       return; // disconnected while setup was in flight
     }
     this.sid = sid;
+    this.readyState = 1;
     this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
     this.onConnect(true);
   };
@@ -96,16 +107,28 @@ class Poller {
       return;
     }
     this.closed = true;
+    this.readyState = 3;
+    this.abortController.abort(); // cancel in-flight requests
     window.clearInterval(this.poller_id);
     this.onDisconnect();
   };
+
   send = (msg) => {
-    if (this.closed) return;
-    // Post a messge containing the desired command
-    postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
+    if (this.closed || this.readyState !== 1) {
+      return;
+    }
+    // Post a message containing the desired command
+    postData(
+      this.target,
+      { message_type: 'send', sid: this.sid, message: msg },
+      this.abortController.signal
+    )
       .then((res) => res.json())
       .then(
         (result) => {
+          if (this.closed) {
+            return;
+          }
           if (!result.success) {
             this.close();
           } else {
@@ -119,12 +142,21 @@ class Poller {
   };
 
   poll = () => {
-    if (this.closed) return;
-    postData(this.target, { message_type: 'query', sid: this.sid })
+    if (this.closed || this.readyState !== 1) {
+      return;
+    }
+    // Post message to query possible socket messages
+    postData(
+      this.target,
+      { message_type: 'query', sid: this.sid },
+      this.abortController.signal
+    )
       .then((res) => res.json())
       .then(
         (result) => {
-          if (this.closed) return;
+          if (this.closed) {
+            return;
+          }
           if (!result.success) {
             this.close();
           } else {
@@ -137,5 +169,4 @@ class Poller {
       );
   };
 }
-
 export default Poller;
