@@ -287,20 +287,16 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent1["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent1["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # (1, M) single-row 2D timestamp array matching M series without legend
+    # (1, M) single-row 2D timestamp array without legend preserves legacy 1D point sequence
     sent2 = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
             Y=np.array([[100.0, 200.0]]),
         )
     )
-    assert len(sent2["payload"]["data"]) == 2
-    assert sent2["payload"]["data"][0]["name"] == "1"
-    assert sent2["payload"]["data"][1]["name"] == "2"
-    assert segments(sent2["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
-    assert segments(sent2["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
-    assert segments(sent2["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
-    assert segments(sent2["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+    assert len(sent2["payload"]["data"]) == 1
+    assert segments(trace(sent2)["x"]) == [[100.0, 100.0], [200.0, 200.0]]
+    assert segments(trace(sent2)["y"]) == [[0.0, 10.0], [0.0, 20.0]]
 
     # (1, M) single-row 2D timestamp array matching M series with legend
     sent3 = capture_send(
@@ -333,6 +329,22 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent4["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
     assert segments(sent4["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent4["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
+
+    # Column-vector Y (M, 1) matching M series with legend does not raise assertion error
+    sent5 = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([[100.0], [200.0]]),
+            opts={"legend": ["Series A", "Series B"]},
+        )
+    )
+    assert len(sent5["payload"]["data"]) == 2
+    assert sent5["payload"]["data"][0]["name"] == "Series A"
+    assert sent5["payload"]["data"][1]["name"] == "Series B"
+    assert segments(sent5["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
+    assert segments(sent5["payload"]["data"][1]["x"]) == [[200.0, 200.0]]
+    assert segments(sent5["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
+    assert segments(sent5["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
 
 def test_stem_handles_row_vector_x_inputs(capture_send):
