@@ -154,6 +154,59 @@ logins do not queue behind environment saves. Shutdown order is fixed in
 
 Full history and the follow-ups that were left: `REFACTORING.md`, Phase 4.
 
+## CPU Hot Paths
+
+Phase 7 took the repeated work out of six paths. Each had the same shape: a
+cost paid per point already plotted, per connected client, or per observation
+already logged, rather than per unit of new data. The rules below are what keep
+them that way. Each has a focused guard in the suite -- they assert a forbidden
+call or a call count, never wall-clock -- but a guard says only that the call
+does not happen, so read the reasoning before changing one of these paths.
+`REFACTORING.md` Phase 7 names the test for each invariant and has the
+measurements behind it.
+
+1. **An append does not copy the pane or diff it.** `UpdateHandler.update`
+   records its own JSON Patch ops and `update_packet` returns them, so the
+   append path never reaches `copy_json_data`, `copy.deepcopy` or
+   `jsonpatch.make_patch` — all three are O(points already plotted) where the
+   append is O(points added). The fast path owes the version bump, the
+   `contentID` reroll, *both* of those in the patch it returns, and an empty
+   patch when nothing was appended. The non-append path still diffs, by design.
+2. **Encode once per message, not once per recipient, and not at all for
+   nobody.** `broadcast_envs`, `broadcast_layouts` and `send_to_sources` encode
+   above their loop and return early on an empty recipient list. The early
+   return is required: the loop body it replaces never ran for an empty room.
+   Materialise a caller-supplied recipient list before testing it — an empty
+   generator is truthy, where a `dict_values` view sizes itself.
+3. **Copy environments as JSON, not as arbitrary objects.** `copy_json_data` in
+   `utils/shared_utils.py`, not `copy.deepcopy`, at the five on-loop env
+   copies. An env is JSON by construction, so scalars can be shared and leaf
+   lists sliced at C level instead of paying a dispatch lookup and a memo write
+   per value.
+4. **A stored blob is read-only.** `JSONStore._read_meta` hands repeat readers
+   the *same* dict, and `experiments_handler._resident_experiments` hands
+   stored blobs to the storage worker uncopied. Write by rebinding
+   (`env["experiment"] = …`), never in place. `LazyMetricList.append` copies
+   the underlying list when it is `_shared` for exactly this reason: appending
+   in place grows a list the worker is iterating.
+5. **Nothing at module scope imports torch, scikit-learn or a t-SNE backend.**
+   `_resolve_torch_types` reads `sys.modules`, which is a complete test — a
+   caller cannot hold a tensor without having imported torch. Resolve `Tensor`
+   and `nn.Parameter` separately and cache neither.
+6. **The plot pane's redraw effect keeps its dependency array.** It had none,
+   so every unrelated render — a keystroke in a note, a filter change — re-ran
+   `Plotly.react` over the whole figure. `annotations.modebarButton` is in the
+   array only because it is `useMemo`'d; a fresh object literal per render
+   would defeat the array entirely.
+
+The metadata cache has one sharp edge worth knowing before tuning anything: it
+is all-or-nothing against `meta_cache_bytes` (default 8 MB). A search touches
+every environment once in order, which is the worst case for LRU, so a working
+set that does not fit evicts every entry before its next use and the cache
+returns almost nothing. The budget is also not a hard ceiling — eviction keeps
+the last entry standing, so a single record bigger than the budget is held
+anyway. See `REFACTORING.md` follow-up 7a.
+
 ## Data Storage
 
 - **Location:** `~/.visdom/` (configurable via `-env_path`)
@@ -173,6 +226,6 @@ Full history and the follow-ups that were left: `REFACTORING.md`, Phase 4.
 | Location | Issue |
 |----------|-------|
 | `web_handlers.py:81` | Environment/layout parsing should move to `data_model` (Phase 3) |
-| `web_handlers.py:150` | `jsonpatch.make_patch` is not high-performance |
+| `web_handlers.py:405` | `jsonpatch.make_patch` still diffs the pane on the **non-append** `/update` path. Phase 7 took the append path off it, which is the one that grew with the plot |
 | `socket_handlers.py:50` | Socket edges need standardization (Phase 6) |
-| `py/visdom/__init__.py` | 4,974 lines; still awaiting the Phase 5 package split |
+| `py/visdom/__init__.py` | 5,396 lines; still awaiting the Phase 5 package split |
