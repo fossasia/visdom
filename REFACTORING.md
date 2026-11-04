@@ -389,8 +389,11 @@ is in one of those three.
   point, so its cost is Θ(Σ nᵢ²) over the label groups — N²/M in the number of
   points over the number of distinct labels only when the groups are roughly
   balanced, and N² at a single label, which is both the worst case and the
-  common one. Skew keeps it near N² however large M is. One 20,000-point
-  scatter with per-point styling paid 817 ms of it.
+  common one. Skew keeps it near N² for as long as one label still holds a
+  constant fraction of the points, however many other labels there are; it
+  falls back to linear only once M grows with N and the groups are mostly
+  singletons. One 20,000-point scatter with per-point styling paid 817 ms of
+  it.
 - **A layout helper walking a trace** (#1955). `_normalize_title_strings`
   descends into lists, so running it over a finished trace cost a Python call
   per plotted coordinate looking for a `title` key that cannot be in a list of
@@ -594,12 +597,15 @@ environments holding a 20,000-point window each:
 | 2,000 | 155.4 ms |
 
 The cliff sits where the arithmetic puts it. `meta_weight` charges
-`META_ENTRY_BYTES + observations x META_OBSERVATION_BYTES` for the series and
-then walks everything else the record holds — the name, the params, the tags,
-the description and a slot per key — so the series term is a floor rather than
-the whole weight, and "about 1,300 observations each" is what 8 MB bought
-across 20 environments of *this* fixture. A run logging large parameter values
-hits the cliff earlier. It is a cliff either way, not a slope. A deployment with long metric histories gets 1.7x where this table's top
+`META_ENTRY_BYTES` once per cached record and
+`META_SEQUENCE_BYTES + observations x META_OBSERVATION_BYTES` for the metric
+series, then walks everything else the record holds — the mapping itself, a
+slot per key, the name, the params, the tags and the description — so the
+series term is a floor rather than the whole weight, and "about 1,300
+observations each" is what 8 MB bought across 20 environments of *this*
+fixture. A run logging large parameter values hits the cliff earlier. It is a
+cliff either way, not a slope: past it the warm scan costs 143.5 ms, which is
+re-parsing every file plus the cache's own bookkeeping, where this table's top
 rows get 282x. Raising `meta_cache_bytes` fixes it; nothing sizes it
 automatically, and LRU is the wrong policy for a full sweep. That is follow-up
 7a below and it is the largest remaining item in the phase.
