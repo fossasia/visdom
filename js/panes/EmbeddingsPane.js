@@ -336,7 +336,6 @@ class Scene extends React.Component {
     }
 
     if (this.props.content.data.length !== prevProps.content.data.length) {
-      this.stop();
       this.setUpScene();
     }
   }
@@ -427,6 +426,8 @@ class Scene extends React.Component {
   }
 
   setUpScene() {
+    this.disposeScene();
+
     // References:
     // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
     // https://codepen.io/WebSeed/pen/MEBoRq
@@ -526,14 +527,26 @@ class Scene extends React.Component {
   }
 
   componentWillUnmount() {
-    this.stop();
     clearTimeout(this._errTimer);
-    let view = select(this.renderer.domElement);
-    view.on('mousemove', null);
-    view.on('mouseleave', null);
-    this.mount.removeChild(this.renderer.domElement);
+    this.disposeScene();
+  }
+
+  disposeScene() {
+    this.stop();
+    if (!this.renderer) return;
+
+    this.removeMouseInteractions();
+    select(this.renderer.domElement).on('.zoom', null);
+    this.debouncedFn.clear();
+    this.scene.traverse((object) => {
+      if (object.geometry) object.geometry.dispose();
+      if (object.material) object.material.dispose();
+    });
+    this.circle_sprite.dispose();
+    this.renderer.domElement.remove();
     this.renderer.forceContextLoss();
     this.renderer.dispose();
+    this.renderer = null;
   }
 
   /* utility methods */

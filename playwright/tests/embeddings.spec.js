@@ -61,27 +61,26 @@ test('embedding hovers release GPU buffers and retain the shared texture', async
   );
 
   const env = `hover-disposal-${Date.now()}`;
-  const response = await request.post('/events', {
-    data: {
-      eid: env,
-      win: 'embedding-hover',
-      opts: { title: 'Embedding hover disposal' },
-      data: [
-        {
-          type: 'embeddings',
-          content: {
-            data: [-0.5, 0.5].map((x, idx) => ({
-              position: [x, 0],
-              group: idx,
-              name: `Entity ${idx}`,
-              label: idx,
-              idx,
-            })),
-          },
+  const packet = {
+    eid: env,
+    win: 'embedding-hover',
+    opts: { title: 'Embedding hover disposal' },
+    data: [
+      {
+        type: 'embeddings',
+        content: {
+          data: [-0.5, 0.5].map((x, idx) => ({
+            position: [x, 0],
+            group: idx,
+            name: `Entity ${idx}`,
+            label: idx,
+            idx,
+          })),
         },
-      ],
-    },
-  });
+      },
+    ],
+  };
+  const response = await request.post('/events', { data: packet });
   expect(response.ok()).toBe(true);
 
   try {
@@ -129,6 +128,42 @@ test('embedding hovers release GPU buffers and retain the shared texture', async
         await page.evaluate(() => window.embeddingResources.textures)
       ).toBe(baseline.textures);
     }
+
+    for (const count of [3, 4, 2]) {
+      const previousCanvas = await canvas.elementHandle();
+      packet.data[0].content.data = Array.from({ length: count }, (_, idx) => ({
+        position: [idx / count - 0.5, 0],
+        group: idx % 2,
+        name: `Entity ${idx}`,
+        label: idx,
+        idx,
+      }));
+      const updated = await request.post('/events', { data: packet });
+      expect(updated.ok()).toBe(true);
+      await expect
+        .poll(() => previousCanvas.evaluate((element) => element.isConnected))
+        .toBe(false);
+      await expect(canvas).toHaveCount(1);
+      await expect
+        .poll(() =>
+          previousCanvas.evaluate((element) => {
+            const gl =
+              element.getContext('webgl2') || element.getContext('webgl');
+            return gl.isContextLost();
+          })
+        )
+        .toBe(true);
+      await expect
+        .poll(() => page.evaluate(() => window.embeddingResources.buffers))
+        .toBe(baseline.buffers);
+      await previousCanvas.dispose();
+    }
+
+    await page.locator('.window button[title="close"]').click();
+    await expect(canvas).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => window.embeddingResources.buffers))
+      .toBe(0);
   } finally {
     await request.post('/delete_env', { data: { eid: env } });
   }
