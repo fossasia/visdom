@@ -10,6 +10,8 @@ import { POLLING_INTERVAL } from '../settings.js';
  * unlike WebSocket which provides MessageEvent objects natively.
  *
  * The handler parses evt.data itself, so we do not pre-parse here.
+ * The server encodes non-finite numbers as null; forward messages unchanged
+ * so quoted text and identifiers are preserved.
  * A try/catch guards the dispatch instead, so a single malformed
  * message is skipped with a warning rather than aborting the poll.
  */
@@ -20,13 +22,6 @@ function dispatchMessages(messages, handler) {
   messages.forEach((msg) => {
     if (msg == null) {
       return;
-    }
-    if (typeof msg === 'string') {
-      msg = msg
-        .replace(/\bNaN\b/g, 'null')
-        .replace(/-Infinity\b/g, 'null')
-        .replace(/\bInfinity\b/g, 'null');
-
     }
     try {
       handler({ data: msg });
