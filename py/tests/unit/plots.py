@@ -973,6 +973,38 @@ class TestMatplotResizable(unittest.TestCase):
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
 
 
+def test_matplot_does_not_write_size_into_reused_opts(capture_send):
+    """Regression test for #2074: matplot() stored the size it computed from
+    the first figure in the caller's opts, so reusing the dict pinned every
+    later figure to that first size."""
+    opts = {"title": "training plot"}
+
+    first = capture_send(
+        lambda v: v.matplot(_FakePlot(width_pt="200", height_pt="100"), opts=opts)
+    )
+    assert first["payload"]["opts"]["width"] == 1.35 * 200
+    assert first["payload"]["opts"]["height"] == 1.4 * 100
+    assert opts == {"title": "training plot"}
+
+    second = capture_send(
+        lambda v: v.matplot(_FakePlot(width_pt="400", height_pt="300"), opts=opts)
+    )
+    assert second["payload"]["opts"]["width"] == 1.35 * 400
+    assert second["payload"]["opts"]["height"] == 1.4 * 300
+
+
+def test_matplot_keeps_explicit_size(capture_send):
+    """A width/height the caller sets must still win over the figure's size."""
+    sent = capture_send(
+        lambda v: v.matplot(
+            _FakePlot(width_pt="400", height_pt="300"),
+            opts={"width": 500, "height": 250},
+        )
+    )
+    assert sent["payload"]["opts"]["width"] == 500
+    assert sent["payload"]["opts"]["height"] == 250
+
+
 # -------------------------------------------------------------------- pie ----
 
 
