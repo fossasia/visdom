@@ -332,29 +332,40 @@ class Scene extends React.Component {
       } else {
         // remove handlers
         this.removeMouseInteractions();
+        this.scheduleRender();
       }
     }
 
     if (this.props.content.data.length !== prevProps.content.data.length) {
-      this.stop();
       this.setUpScene();
     }
   }
 
   removeMouseInteractions() {
-    const { renderer, zoom } = this;
-    let view = select(renderer.domElement);
+    const { renderer, zoom, hoverContainer } = this;
+    if (renderer) {
+      let view = select(renderer.domElement);
+      view.on('mousemove', null);
+      view.on('mouseleave', null);
+      view.on('.zoom', null);
+    }
 
-    view.on('mousemove', null);
-    view.on('mouseleave', null);
-    zoom.on('zoom', null);
+    if (zoom) zoom.on('zoom', null);
+    if (hoverContainer) {
+      this.removeHighlights(hoverContainer);
+      hoverContainer.removeFromParent();
+      this.hoverContainer = null;
+    }
+    this.debouncedFn?.clear();
   }
 
   setUpMouseInteractions() {
+    this.removeMouseInteractions();
     /* ----------------------------------------------------------- */
     // setup hover
 
     const { renderer, scene, points, camera, circle_sprite, near, far } = this;
+    if (!renderer || !this.props.interactive) return;
 
     let view = select(renderer.domElement);
 
@@ -362,6 +373,7 @@ class Scene extends React.Component {
     raycaster.params.Points.threshold = 30;
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
+    this.hoverContainer = hoverContainer;
 
     view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
@@ -427,6 +439,8 @@ class Scene extends React.Component {
   }
 
   setUpScene() {
+    this.disposeScene();
+
     // References:
     // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
     // https://codepen.io/WebSeed/pen/MEBoRq
@@ -526,14 +540,24 @@ class Scene extends React.Component {
   }
 
   componentWillUnmount() {
-    this.stop();
     clearTimeout(this._errTimer);
-    let view = select(this.renderer.domElement);
-    view.on('mousemove', null);
-    view.on('mouseleave', null);
-    this.mount.removeChild(this.renderer.domElement);
+    this.disposeScene();
+  }
+
+  disposeScene() {
+    this.stop();
+    this.removeMouseInteractions();
+    if (!this.renderer) return;
+
+    this.scene.traverse((object) => {
+      if (object.geometry) object.geometry.dispose();
+      if (object.material) object.material.dispose();
+    });
+    this.circle_sprite.dispose();
+    this.renderer.domElement.remove();
     this.renderer.forceContextLoss();
     this.renderer.dispose();
+    this.renderer = null;
   }
 
   /* utility methods */
@@ -650,6 +674,10 @@ class Scene extends React.Component {
   }
 
   removeHighlights(hoverContainer) {
+    for (const highlight of hoverContainer.children) {
+      highlight.geometry.dispose();
+      highlight.material.dispose();
+    }
     hoverContainer.remove(...hoverContainer.children);
   }
 
