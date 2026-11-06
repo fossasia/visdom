@@ -277,17 +277,6 @@ class TestLoginCredentials(LoginTestCase):
         )
         self._assert_rejected(resp)
 
-    def test_post_to_login_subpath_succeeds(self):
-        resp = self.fetch(
-            "/login",
-            method="POST",
-            body=json.dumps({"username": USERNAME, "password": CLIENT_HASH}),
-            headers={"Content-Type": "application/json"},
-        )
-        self.assertEqual(resp.code, 200)
-        cookies = resp.headers.get_list("Set-Cookie")
-        self.assertTrue(any("user_password" in c for c in cookies))
-
     def test_surrogate_username_is_rejected(self):
         resp = self.fetch(
             "/",
@@ -307,13 +296,14 @@ class TestLoginCredentials(LoginTestCase):
         self._assert_rejected(resp)
 
     def test_post_to_unknown_subpath_returns_404(self):
-        resp = self.fetch(
-            "/unknown_path",
-            method="POST",
-            body=json.dumps({"username": USERNAME, "password": CLIENT_HASH}),
-            headers={"Content-Type": "application/json"},
-        )
-        self.assertEqual(resp.code, 404)
+        for path in ("/unknown_path", "/login"):
+            resp = self.fetch(
+                path,
+                method="POST",
+                body=json.dumps({"username": USERNAME, "password": CLIENT_HASH}),
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 404)
 
 
 class TestLoginDisabled(VisdomHTTPTestCase):

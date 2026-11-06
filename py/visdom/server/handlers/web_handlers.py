@@ -1378,9 +1378,7 @@ class IndexHandler(BaseHandler):
             and the default value of self.current_user is None
             """
             if args not in ("", "/"):
-                raise tornado.web.HTTPError(
-                    404, reason=f"Path '{self.request.path}' not found"
-                )
+                raise tornado.web.HTTPError(404, reason="Path not found")
             self.render(
                 "index.html",
                 wrap_socket=self.wrap_socket,
@@ -1396,10 +1394,8 @@ class IndexHandler(BaseHandler):
             )
 
     async def post(self, arg, **kwargs):
-        if arg.strip("/") not in ("", "login"):
-            raise tornado.web.HTTPError(
-                404, reason=f"Path '{self.request.path}' not found"
-            )
+        if arg not in ("", "/"):
+            raise tornado.web.HTTPError(404, reason="Path not found")
 
         if not self.login_enabled or not self.user_credential:
             raise tornado.web.HTTPError(400, reason="login is disabled on this server")
