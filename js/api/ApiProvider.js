@@ -121,8 +121,14 @@ const ApiProvider = ({ children }) => {
       }
       clearConnectTimer();
       _socket.current = null;
-      apiHandlers.current.onDisconnect(_socket);
+      // Update the indicator first so a failing handler can't leave it stale
       setConnected(false);
+      try {
+        apiHandlers.current?.onDisconnect(_socket);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[Visdom API] onDisconnect handler failed:', e);
+      }
     };
 
     // eslint-disable-next-line no-undef
