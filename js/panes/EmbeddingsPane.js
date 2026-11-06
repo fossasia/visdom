@@ -332,6 +332,7 @@ class Scene extends React.Component {
       } else {
         // remove handlers
         this.removeMouseInteractions();
+        this.scheduleRender();
       }
     }
 
@@ -341,19 +342,30 @@ class Scene extends React.Component {
   }
 
   removeMouseInteractions() {
-    const { renderer, zoom } = this;
-    let view = select(renderer.domElement);
+    const { renderer, zoom, hoverContainer } = this;
+    if (renderer) {
+      let view = select(renderer.domElement);
+      view.on('mousemove', null);
+      view.on('mouseleave', null);
+      view.on('.zoom', null);
+    }
 
-    view.on('mousemove', null);
-    view.on('mouseleave', null);
-    zoom.on('zoom', null);
+    if (zoom) zoom.on('zoom', null);
+    if (hoverContainer) {
+      this.removeHighlights(hoverContainer);
+      hoverContainer.removeFromParent();
+      this.hoverContainer = null;
+    }
+    this.debouncedFn?.clear();
   }
 
   setUpMouseInteractions() {
+    this.removeMouseInteractions();
     /* ----------------------------------------------------------- */
     // setup hover
 
     const { renderer, scene, points, camera, circle_sprite, near, far } = this;
+    if (!renderer || !this.props.interactive) return;
 
     let view = select(renderer.domElement);
 
@@ -361,6 +373,7 @@ class Scene extends React.Component {
     raycaster.params.Points.threshold = 30;
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
+    this.hoverContainer = hoverContainer;
 
     view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
@@ -533,11 +546,9 @@ class Scene extends React.Component {
 
   disposeScene() {
     this.stop();
+    this.removeMouseInteractions();
     if (!this.renderer) return;
 
-    this.removeMouseInteractions();
-    select(this.renderer.domElement).on('.zoom', null);
-    this.debouncedFn.clear();
     this.scene.traverse((object) => {
       if (object.geometry) object.geometry.dispose();
       if (object.material) object.material.dispose();

@@ -129,6 +129,38 @@ test('embedding hovers release GPU buffers and retain the shared texture', async
       ).toBe(baseline.textures);
     }
 
+    const otherPane = await request.post('/events', {
+      data: {
+        eid: env,
+        win: 'other-pane',
+        opts: { title: 'Other pane' },
+        data: [{ type: 'text', content: 'Focus switching target' }],
+      },
+    });
+    expect(otherPane.ok()).toBe(true);
+    const otherTitle = page.getByText('Other pane', { exact: true });
+    const embeddingTitle = page.getByText('Embedding hover disposal', {
+      exact: true,
+    });
+    await expect(otherTitle).toBeVisible();
+
+    for (let cycle = 0; cycle < 6; cycle++) {
+      await embeddingTitle.dispatchEvent('click');
+      const bounds = await canvas.boundingBox();
+      await page.mouse.move(
+        bounds.x + bounds.width / 2 - 1000 * scale,
+        bounds.y + bounds.height / 2
+      );
+      await expect
+        .poll(() => page.evaluate(() => window.embeddingResources.buffers))
+        .toBe(baseline.buffers + 2);
+      // Switch focus without a mouseleave clearing the highlight first.
+      await otherTitle.dispatchEvent('click');
+      await expect
+        .poll(() => page.evaluate(() => window.embeddingResources.buffers))
+        .toBe(baseline.buffers);
+    }
+
     for (const count of [3, 4, 2]) {
       const previousCanvas = await canvas.elementHandle();
       packet.data[0].content.data = Array.from({ length: count }, (_, idx) => ({
@@ -159,7 +191,11 @@ test('embedding hovers release GPU buffers and retain the shared texture', async
       await previousCanvas.dispose();
     }
 
-    await page.locator('.window button[title="close"]').click();
+    await page
+      .locator('.window')
+      .filter({ has: embeddingTitle })
+      .locator('button[title="close"]')
+      .click();
     await expect(canvas).toHaveCount(0);
     await expect
       .poll(() => page.evaluate(() => window.embeddingResources.buffers))
