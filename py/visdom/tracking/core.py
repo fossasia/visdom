@@ -47,6 +47,9 @@ _TERMINAL_STATUSES = (STATUS_FINISHED, STATUS_FAILED, STATUS_UNFINISHED)
 
 DEFAULT_OUT_DIR = "visdom_runs"
 
+#: How long ``finish()`` and ``__exit__`` wait for tracked calls to finish.
+DEFAULT_FINISH_WAIT_TIMEOUT = 5.0
+
 
 DEFAULT_RECENT_EVENTS_LIMIT = 50
 
@@ -62,63 +65,17 @@ class RunAlreadyFinishedError(Exception):
 
 
 def _slugify(name: str) -> str:
-    """Return ``name`` made safe (and short enough) for use in a filename.
-
-    Keeps things simple and dependency-free: alnum/dash/underscore/dot
-    survive, everything else (path separators included) becomes ``_`` so a
-    run name can never escape ``out_dir`` or collide with OS-reserved
-    characters. Truncated to ``_MAX_SLUG_LEN`` UTF-8 bytes so an overly long
-    name can't push the final filename past OS limits, even for non-ASCII names.
-    """
+    """Make ``name`` safe and short enough for a filename."""
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
     safe = safe.encode("utf-8")[:_MAX_SLUG_LEN].decode("utf-8", errors="ignore")
     return safe or "run"
 
 
 def _json_safe(value: Any, _depth: int = 0, _max_depth: int = 20) -> Any:
-    """Recursively rebuild ``value`` into something guaranteed JSON-safe.
+    """Convert values to JSON-safe copies, including NumPy values.
 
-    This exists to fix several related problems with just passing arbitrary
-    caller data straight to ``json.dump(..., default=str)``:
-
-    1. A single value whose ``__str__`` itself raises would otherwise make
-       *every* future write for the run fail (the bad value never leaves
-       the in-memory history, so every subsequent write re-encounters it).
-       Here, a failing ``str()`` is caught and replaced with a placeholder
-       instead of propagating.
-    2. Passing a mutable object (e.g. a dict) straight through means a
-       caller mutating it later silently changes what a *previous* log
-       entry would re-serialize as. Rebuilding dicts/lists into new
-       objects here breaks that aliasing at the point of logging, not at
-       write time.
-    3. NumPy scalars (``np.float32``, ``np.int64``, ``np.bool_``, ...)
-       aren't Python ``int``/``float``/``bool`` (only ``np.float64``
-       happens to subclass ``float`` on most platforms -- everything else
-       doesn't) and would otherwise fall through to the ``str()``
-       fallback, silently turning e.g. a logged loss value into the
-       *string* ``"0.4523"`` instead of the number ``0.4523``. Converted
-       via ``.item()`` to the equivalent native Python type instead, since
-       this is an extremely common case: numpy arrays/scalars are what
-       most training loops actually produce.
-    4. NumPy arrays would otherwise stringify via ``str(array)``, which
-       truncates large arrays with ``...`` and isn't valid JSON or even
-       reparseable Python (``"[1 2 3]"`` has no commas). Converted via
-       ``.tolist()`` instead, which recursively yields plain nested
-       Python lists/numbers.
-    5. ``NaN``/``Infinity``/``-Infinity`` are not valid JSON (RFC 8259).
-       Python's ``json`` module writes them anyway by default as bare
-       ``NaN``/``Infinity``/``-Infinity`` tokens, which round-trips inside
-       Python but breaks any stricter parser (e.g. JavaScript's
-       ``JSON.parse``, most other languages' JSON libraries). This is also
-       a very real case for this tool specifically, not just a
-       theoretical one: "loss became NaN" is one of the most common
-       training failure modes there is, and a reproducibility record
-       should capture that cleanly rather than emit a file that then
-       fails to parse elsewhere. Converted to the strings ``"NaN"``/
-       ``"Infinity"``/``"-Infinity"`` instead.
-
-    ``_max_depth`` guards against pathological self-referential or very
-    deeply nested structures turning one bad call into a stack overflow.
+    Mutable inputs are copied so later changes do not alter logged events.
+    Non-finite floats become strings, and ``_max_depth`` limits recursion.
     """
     if _depth > _max_depth:
         return "<max nesting depth exceeded>"
@@ -266,6 +223,7 @@ class RunTracker:
         tags: Optional[dict] = None,
         capture_environment: bool = True,
         recent_events_limit: int = DEFAULT_RECENT_EVENTS_LIMIT,
+        record_data: bool = False,
     ):
         if not isinstance(name, str) or not name.strip():
             raise ValueError("name must be a non-empty string")
@@ -276,8 +234,14 @@ class RunTracker:
         self.out_dir = out_dir
         self.path = os.path.join(out_dir, self.run_id + ".json")
         self.events_path = os.path.join(out_dir, self.run_id + ".events.jsonl")
+        # Capture plot messages for replay when enabled; this can increase
+        # event log size, so it is off by default.
+        self.record_data = bool(record_data)
 
         self._lock = threading.Lock()
+        # finish() waits for active calls to record their events.
+        self._active_calls = 0
+        self._active_calls_cv = threading.Condition(self._lock)
         self.status = STATUS_RUNNING
         # _json_safe rebuilds params/tags into fresh, guaranteed-serializable
         # objects, which also means later caller-side mutation of whatever
@@ -290,6 +254,9 @@ class RunTracker:
         self._end_monotonic: Optional[float] = None
         self.stop_reason: Optional[str] = None
         self.environment = _capture_environment() if capture_environment else {}
+        # Stored with the run so workspace-scoped restores can verify its
+        # owner. Keyless clients leave this unset.
+        self.workspace: Optional[str] = None
 
         self._recent_events: "collections.deque[dict]" = collections.deque(
             maxlen=max(1, recent_events_limit)
@@ -297,19 +264,13 @@ class RunTracker:
         self.event_count = 0
         self._last_event_monotonic = self._start_monotonic
 
-        # Per-window bookkeeping for log_plot_update (see tracking.graphs):
-        # lets us report "this is the Nth update to window 'loss', arriving
-        # M seconds after the (N-1)th" without the caller having to track
-        # any of that themselves.
+        # Track update counts and timing for each window.
         self._window_update_count: dict = {}
         self._window_last_update_monotonic: dict = {}
 
         ensure_dir_exists(out_dir)
-        # Write-then-commit: build the "created" event but don't touch
-        # jsonl or any counters yet. Attempt the metadata write first; only
-        # if THAT succeeds do we commit anything, so a failure here leaves
-        # zero files behind instead of an orphaned .events.jsonl with no
-        # matching .json (see _build_event/_commit_event below).
+        # Write metadata before committing the event so a failed write does
+        # not leave an orphaned event log.
         event, now_mono = self._build_event(
             "created", {"params": self.params, "tags": self.tags}
         )
@@ -317,28 +278,13 @@ class RunTracker:
         self._commit_event(event, now_mono)
         self._append_event_line(event)
 
-        # Belt-and-braces: if the process ends without finish() ever being
-        # called (crash, uncaught signal, forgotten call), leave the record
-        # as "unfinished" rather than a permanently-stale "running". This
-        # keeps a reference to self alive until finish()/atexit fires -- see
-        # the module docstring's note on always finishing runs explicitly.
+        # Mark the run unfinished at exit if finish() was never called.
         atexit.register(self._atexit_finalize)
 
     # recording
 
     def _build_event(self, event_type: str, data: Optional[dict] = None):
-        """Build a candidate event, deliberately without touching any of
-        self's state yet.
-
-        Returns ``(event, now_monotonic)``. Callers persist ``event`` via
-        ``to_dict(pending_event=event)`` / ``_write()`` *first*; only once
-        that succeeds do they call :meth:`_commit_event` to make it count
-        in memory, then append it to the durable ``.jsonl`` log. This
-        write-then-commit ordering is what makes the rollback logic this
-        module used to need (snapshot fields, restore them in an
-        ``except``) unnecessary: if the write never happens, self was
-        never mutated in the first place, so there's nothing to undo.
-        """
+        """Build an event without changing tracker state."""
         now_wall = time.time()
         now_mono = time.monotonic()
         event = {
@@ -356,70 +302,74 @@ class RunTracker:
         return event, now_mono
 
     def _commit_event(self, event: dict, now_mono: float) -> None:
-        """Record an event in memory. Only ever call this *after* the
-        metadata write that included it (via ``pending_event``) has
-        already succeeded -- see :meth:`_build_event`.
-        """
+        """Commit a successfully written event to memory."""
         self.event_count = event["seq"]
         self._last_event_monotonic = now_mono
         self._recent_events.append(event)
 
     def _append_event_line(self, event: dict) -> None:
-        """Append one event as a JSON line to the full on-disk timeline.
-
-        O(1) in the number of events logged so far -- this is what keeps
-        ``log_event`` cheap across very long runs, unlike rewriting the
-        whole file (which the metadata file intentionally avoids doing
-        with the full event history -- see ``to_dict``).
-
-        Always called *after* the metadata write already succeeded (see
-        ``log_event``/``set_param``/``_finish_locked``), so the metadata
-        file -- the source of truth for ``status``/``params``/
-        ``event_count`` -- is never left inconsistent by a failure here.
-        The narrow remaining gap: if this specific call fails, the
-        ``.jsonl`` full history can be missing the line for an event the
-        metadata file already confirms happened. That's a real but minor
-        limitation (documented in the module docstring) rather than
-        something silently swept under the rug.
-        """
+        """Append one event to the full JSONL timeline."""
         line = json.dumps(event, default=str, allow_nan=False) + "\n"
         with open(self.events_path, "a") as f:
             f.write(line)
 
+    # in-flight call bookkeeping (see finish())
+
+    def _begin_call(self) -> bool:
+        """Register an active plot call, or return ``False`` if finished."""
+        with self._lock:
+            if self.status in _TERMINAL_STATUSES:
+                return False
+            self._active_calls += 1
+            return True
+
+    def _end_call(self) -> None:
+        """Unregister a call and wake ``finish()`` when none remain."""
+        with self._active_calls_cv:
+            self._active_calls = max(0, self._active_calls - 1)
+            if self._active_calls == 0:
+                self._active_calls_cv.notify_all()
+
+    # compact recent_events/metadata representation
+
+    _HEAVY_PAYLOAD_KEYS = ("call", "calls")
+
+    @classmethod
+    def _compact_event(cls, event: dict) -> dict:
+        """Drop replay payloads from the capped metadata event copy."""
+        data = event.get("data")
+        if not isinstance(data, dict) or not any(
+            key in data for key in cls._HEAVY_PAYLOAD_KEYS
+        ):
+            return event
+        compact = dict(event)
+        data = dict(data)
+        call = data.get("call")
+        if isinstance(call, dict):
+            data["call"] = {"endpoint": call.get("endpoint")}
+        calls = data.get("calls")
+        if isinstance(calls, list):
+            data["calls"] = {"count": len(calls)}
+        compact["data"] = data
+        return compact
+
     def log_event(self, event_type: str, **data) -> dict:
-        """Append a timestamped event to this run's timeline and persist it.
-
-        Free-form: use it for milestones the graph-level hooks in a later
-        part won't catch on their own, e.g. ``run.log_event("epoch_end",
-        epoch=3, loss=0.21)``. Every call records how long it's been since
-        the run started and since the previous event.
-
-        Note: in the rare case where the metadata write succeeds but the
-        subsequent ``.jsonl`` append then fails, this can raise even
-        though the event was already durably recorded in the metadata
-        file's ``event_count``/``recent_events``. The full ``.jsonl``
-        history may be missing this one line in that specific case.
-        """
+        """Append a timestamped event, such as an epoch milestone."""
         with self._lock:
             self._reject_if_terminal("log an event on")
             event, now_mono = self._build_event(event_type, data)
+            compact = self._compact_event(event)
             # Attempt the durable write with this event included *before*
             # touching self.event_count/_recent_events. If this raises,
             # self is untouched -- no rollback needed, log_event can just
             # be called again.
-            self._write(self.to_dict(pending_event=event))
-            self._commit_event(event, now_mono)
+            self._write(self.to_dict(pending_event=compact))
+            self._commit_event(compact, now_mono)
             self._append_event_line(event)
         return event
 
     def set_param(self, key: str, value: Any) -> None:
-        """Record/replace a parameter value, timestamped as an event too.
-
-        Note: as with :meth:`log_event`, this can raise in the rare case
-        where the metadata write succeeded but the trailing ``.jsonl``
-        append then failed -- ``self.params`` will already reflect the
-        new value.
-        """
+        """Set a parameter and record the change as an event."""
         with self._lock:
             self._reject_if_terminal("set a param on")
             key = str(key)
@@ -439,19 +389,7 @@ class RunTracker:
             self._append_event_line(event)
 
     def log_plot_update(self, method: str, win: Optional[str], **extra) -> dict:
-        """Log one graph/plot update, with per-window sequence and timing.
-
-        Meant to be called by :mod:`visdom.tracking.graphs` (or anything
-        else wrapping a Visdom instance), not typically by hand: it answers
-        "is this the first update to this window, and if not, how long
-        since the last one" so a plotted metric's own cadence shows up in
-        the record, not just the run's global event timeline.
-
-        Note: as with :meth:`log_event`, this can raise in the rare case
-        where the metadata write succeeded but the trailing ``.jsonl``
-        append then failed -- the per-window counters will already
-        reflect this update.
-        """
+        """Record a plot update with its window sequence and timing."""
         with self._lock:
             self._reject_if_terminal("log a plot update on")
             now = time.monotonic()
@@ -467,34 +405,24 @@ class RunTracker:
             }
             data.update(extra)
             event, now_mono = self._build_event("plot_update", data)
+            # Keep full replay data in the event log, not metadata.
+            compact = self._compact_event(event)
             # Same write-then-commit ordering as log_event/set_param: the
             # per-window counters below are only committed after the
             # metadata write (including this event) has actually
             # succeeded, so a failure can't leave self._window_update_count
             # claiming an update was recorded when it wasn't.
-            self._write(self.to_dict(pending_event=event))
+            self._write(self.to_dict(pending_event=compact))
             self._window_update_count[win] = seq
             self._window_last_update_monotonic[win] = now
-            self._commit_event(event, now_mono)
+            self._commit_event(compact, now_mono)
             self._append_event_line(event)
         return event
 
     def track(self, vis):
-        """Wrap a ``Visdom`` instance so its graph calls auto-log here.
+        """Wrap ``vis`` so chart calls are logged with this run."""
+        self.workspace = getattr(vis, "workspace", None)
 
-        Returns a thin proxy -- see :class:`visdom.tracking.graphs.TrackedVisdom`
-        -- that behaves exactly like ``vis`` except that calls to chart
-        methods (``line``, ``scatter``, ``bar``, ...) also call
-        :meth:`log_plot_update` for you. Everything else (``vis.image()``,
-        ``vis.close()``, attribute access, ...) passes straight through.
-
-            run = RunTracker("exp1", params={...})
-            tvis = run.track(vis)
-            tvis.line(X=..., Y=..., win="loss")  # auto-logged
-
-        Imported lazily to avoid a circular import (``graphs`` depends on
-        this module for type hints, not the other way around).
-        """
         from visdom.tracking.graphs import TrackedVisdom
 
         return TrackedVisdom(vis, self)
@@ -510,23 +438,15 @@ class RunTracker:
             )
 
     def finish(
-        self, status: str = STATUS_FINISHED, reason: Optional[str] = None
+        self,
+        status: str = STATUS_FINISHED,
+        reason: Optional[str] = None,
+        timeout: Optional[float] = DEFAULT_FINISH_WAIT_TIMEOUT,
     ) -> None:
-        """Mark the run terminal (``finished`` or ``failed``) and persist it.
+        """Mark the run finished or failed and save it.
 
-        ``reason`` is optional here since a deliberate ``finish()`` call
-        doesn't need explaining -- it's ``unfinished`` runs (see
-        :meth:`_atexit_finalize` / the context-manager path) where a reason
-        actually earns its place in the record.
-
-        Note: in the rare case where the metadata write succeeds but the
-        subsequent (best-effort) full-history ``.jsonl`` append then
-        fails, this can raise even though ``self.status``/the metadata
-        file already correctly show the run as terminal. Check
-        ``self.status`` in an ``except`` block before assuming the run
-        didn't finish -- a second ``finish()`` call in that situation
-        correctly raises ``RunAlreadyFinishedError``, not because it
-        failed, but because it already succeeded.
+        Wait up to ``timeout`` seconds for active plot calls to finish.
+        Pass ``None`` to wait indefinitely or ``0`` to skip the wait.
         """
         if status not in (STATUS_FINISHED, STATUS_FAILED):
             raise ValueError(
@@ -534,9 +454,21 @@ class RunTracker:
                     STATUS_FINISHED, STATUS_FAILED, status
                 )
             )
-        with self._lock:
+        with self._active_calls_cv:
             self._reject_if_terminal("finish")
+            self._wait_for_active_calls_locked(timeout)
             self._finish_locked(status, reason)
+
+    def _wait_for_active_calls_locked(self, timeout: Optional[float]) -> None:
+        """Wait for active calls to finish. The condition lock must be held."""
+        if timeout is not None and timeout <= 0:
+            return
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self._active_calls > 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                break
+            self._active_calls_cv.wait(remaining)
 
     def _finish_locked(self, status: str, reason: Optional[str]) -> None:
         end_time = time.time()
@@ -572,12 +504,7 @@ class RunTracker:
                 pass
 
     def _atexit_finalize(self) -> None:
-        """Catch the process ending without an explicit finish() call.
-
-        Fires on normal interpreter shutdown, ``sys.exit()``, and most
-        uncaught exceptions/``KeyboardInterrupt`` -- not on ``os._exit()``,
-        ``SIGKILL``, or a hard crash, which no in-process hook can observe.
-        """
+        """Mark the run unfinished if the process exits before ``finish()``."""
         with self._lock:
             if self.status not in _TERMINAL_STATUSES:
                 self._finish_locked(
@@ -587,11 +514,7 @@ class RunTracker:
 
     @property
     def total_duration(self) -> Optional[float]:
-        """Seconds between start and end, or ``None`` while still running.
-
-        Computed from a monotonic clock so it can't go negative from a
-        system clock adjustment mid-run (see ``_build_event``).
-        """
+        """Elapsed seconds, or ``None`` while the run is active."""
         if self._end_monotonic is None:
             return None
         return self._end_monotonic - self._start_monotonic
@@ -602,9 +525,11 @@ class RunTracker:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        with self._lock:
+        """Finish the run when leaving a context and wait for active calls."""
+        with self._active_calls_cv:
             if self.status in _TERMINAL_STATUSES:
                 return False
+            self._wait_for_active_calls_locked(DEFAULT_FINISH_WAIT_TIMEOUT)
             if exc_type is None:
                 self._finish_locked(STATUS_FINISHED, None)
             else:
@@ -624,22 +549,7 @@ class RunTracker:
         end_monotonic: Any = _UNSET,
         params: Any = _UNSET,
     ) -> dict:
-        """Build the metadata payload.
-
-        With no arguments, reflects the currently *committed* state --
-        this is what plain introspection and ``_write()``'s default use.
-
-        The keyword-only overrides exist for the write-then-commit pattern
-        used throughout this class (see ``log_event``/``set_param``/
-        ``_finish_locked``): a caller about to change ``status``,
-        ``stop_reason``, ``end_time``, ``params``, and/or add a new event
-        can render the *candidate* resulting payload here -- without
-        mutating ``self`` at all -- attempt to persist it, and only touch
-        ``self`` afterwards, once persisting has actually succeeded. That
-        ordering is what lets a failed write be handled by simply not
-        committing anything, rather than needing to mutate first and roll
-        back on failure.
-        """
+        """Build metadata for the current state or pending changes."""
         resolved_status = self.status if status is _UNSET else status
         resolved_stop_reason = (
             self.stop_reason if stop_reason is _UNSET else stop_reason
@@ -670,6 +580,7 @@ class RunTracker:
             "params": resolved_params,
             "tags": self.tags,
             "environment": self.environment,
+            "workspace": self.workspace,
             "start_time": self.start_time,
             "end_time": resolved_end_time,
             "total_duration": resolved_total_duration,
@@ -680,15 +591,7 @@ class RunTracker:
         }
 
     def _write(self, payload: Optional[dict] = None) -> None:
-        """Persist ``payload`` (or the current committed state if omitted),
-        atomically (write to tmp, then rename).
-
-        Deliberately does *not* include the full event history -- see
-        ``to_dict``/``_append_event_line`` -- so this file's write cost
-        stays roughly constant no matter how many events a run has logged.
-        Every mutation calls this, so a crash between two events still
-        leaves a readable, complete-up-to-that-point metadata file on disk.
-        """
+        """Atomically save metadata without rewriting the full event log."""
         if payload is None:
             payload = self.to_dict()
         tmp_path = self.path + ".tmp"

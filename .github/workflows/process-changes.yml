@@ -13,7 +13,7 @@ jobs:
     - name: "Checkout Repository"
       uses: actions/checkout@v7.0.1
     - name: "Install Node"
-      uses: actions/setup-node@v7.0.0
+      uses: actions/setup-node@v7.1.0
       with:
           node-version: '24'
     - name: "Install Dependencies"
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: psf/black@26.5.1
+      - uses: psf/black@26.10.0
         with:
           src: "./py"
           version: 23.1.0

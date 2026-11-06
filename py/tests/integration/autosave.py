@@ -691,6 +691,16 @@ class TestWorkspaceAutosaveIsolation(AutosaveTestCase):
             self.assertIn("expt", self.space(workspace).storage.list_envs())
         self.assertIn("solo", self.app.storage.list_envs())
 
+    def test_a_handler_marks_the_workspace_it_is_bound_to(self):
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.server_state = self.app.server_state
+
+        handler.bind_workspace("ws-a")
+        handler.mark_dirty("main")
+
+        self.assertEqual(self.space("ws-a").dirty_envs["main"], 1)
+        self.assertEqual(self.app.dirty_envs.get("main", 0), 0)
+
     def test_a_memory_only_workspace_does_not_hoard_marks(self):
         app = Application(port=8097, env_path=None)
         space = app.workspace_env_manager.space("ws-a")
