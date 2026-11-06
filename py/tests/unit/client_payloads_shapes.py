@@ -346,6 +346,17 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent5["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent5["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
+    # Tuple legend is supported
+    sent_tuple = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            opts={"legend": ("Series A", "Series B")},
+        )
+    )
+    assert len(sent_tuple["payload"]["data"]) == 2
+    assert sent_tuple["payload"]["data"][0]["name"] == "Series A"
+    assert sent_tuple["payload"]["data"][1]["name"] == "Series B"
+
 
 def test_stem_handles_row_vector_x_inputs(capture_send):
     """Row-vector X inputs (1, N) preserve existing behavior as 1D series of N points."""
@@ -401,6 +412,11 @@ def test_stem_handles_1d_x_with_row_vector_y(capture_send):
     "kwargs, message",
     [
         (dict(X=np.ones((2, 2, 2))), "X should be one or two-dimensional"),
+        (dict(X=np.ones((1, 2, 2))), "X should be one or two-dimensional"),
+        (
+            dict(X=np.ones((2, 2)), Y=np.ones((1, 2, 2))),
+            "Y should be one or two-dimensional",
+        ),
         (
             dict(X=np.ones((3, 1)), Y=np.ones((2, 1))),
             "number of rows in X and Y must match",
@@ -408,6 +424,14 @@ def test_stem_handles_1d_x_with_row_vector_y(capture_send):
         (
             dict(X=np.ones((2, 3)), Y=np.ones((2, 2))),
             "Y should be a single column or the same number of columns as X",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(legend="string_legend")),
+            "legend should be a list or tuple",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(legend=123)),
+            "legend should be a list or tuple",
         ),
     ],
 )
