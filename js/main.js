@@ -763,7 +763,6 @@ const App = () => {
     setStoreData((prev) => {
       let layoutMap = envLayoutList.get(layoutID);
       let sorted = sortLayout(prev.layout);
-      let old_sorted = sorted.slice();
       let newPanes = Object.assign({}, prev.panes);
 
       // Sort out things that were filtered away
@@ -782,7 +781,7 @@ const App = () => {
             return diff;
           }
         }
-        return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
+        return 0; // Stable sort preserves the existing order for ties.
       });
 
       // The bin packer indexes its dimensions by pane order, so initialize it
