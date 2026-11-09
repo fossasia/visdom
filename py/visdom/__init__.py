@@ -581,11 +581,6 @@ def _assert_opts(opts):
             opts.get("rownames"), list
         ), "rownames should be a list with row names"
 
-    if opts.get("legend") is not None:
-        assert isinstance(
-            opts.get("legend"), (list, tuple)
-        ), "legend should be a list or tuple"
-
     if opts.get("jpgquality"):
         assert isnum(opts.get("jpgquality")), "JPG quality should be a number"
         assert (
@@ -4495,7 +4490,14 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts.get("legend"), (list, tuple)
+            ), "legend should be a list or tuple"
+
         X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
         assert (
             X.ndim == 0 or X.ndim == 1 or X.ndim == 2
         ), "X should be one or two-dimensional"
@@ -4539,6 +4541,8 @@ class Visdom(object):
                 Y = np.arange(1, X.shape[0] + 1)[:, None]
         else:
             Y = np.asarray(Y)
+            if Y.ndim > 2:
+                Y = np.squeeze(Y)
             assert (
                 Y.ndim == 0 or Y.ndim == 1 or Y.ndim == 2
             ), "Y should be one or two-dimensional"

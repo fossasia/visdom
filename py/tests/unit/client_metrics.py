@@ -573,6 +573,20 @@ def test_roc_curve_respects_supplied_opts(capture_send):
     assert sent["payload"]["data"][0]["name"] == "a"
 
 
+def test_roc_curve_unusable_legend_falls_back_with_warning(capture_send):
+    """An unusable legend (non-list or too short) emits a warning and falls back to default."""
+    with pytest.warns(UserWarning, match="at least 2 elements"):
+        sent = capture_send(
+            lambda v: v.roc_curve(
+                y_true=[0, 1],
+                y_score=[0.2, 0.8],
+                opts={"legend": "ROC"},
+            )
+        )
+    opts = sent["payload"]["opts"]
+    assert opts["legend"] == ["ROC", "Chance"]
+
+
 def test_roc_curve_from_precomputed_points(capture_send):
     """The (fpr, tpr) mode skips the metric helpers and plots what it is given."""
     sent = capture_send(lambda v: v.roc_curve(fpr=[0.0, 0.5, 1.0], tpr=[0.0, 0.9, 1.0]))

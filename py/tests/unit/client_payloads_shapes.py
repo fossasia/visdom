@@ -407,14 +407,49 @@ def test_stem_handles_1d_x_with_row_vector_y(capture_send):
     assert segments(sent_multi["payload"]["data"][1]["y"]) == [[0.0, 20.0], [0.0, 40.0]]
 
 
+def test_stem_squeezes_multidimensional_inputs_with_singleton_dims(capture_send):
+    """Inputs with ndim > 2 containing singleton dimensions are squeezed."""
+    # 3D X with leading singleton dimension (1, 2, 2)
+    sent_3d_x = capture_send(
+        lambda v: v.stem(
+            X=np.ones((1, 2, 2)),
+            opts={"legend": ["Series A", "Series B"]},
+        )
+    )
+    assert len(sent_3d_x["payload"]["data"]) == 2
+
+    # 3D X with trailing singleton dimension (2, 1, 1) squeezes to 1D
+    sent_3d_1d = capture_send(
+        lambda v: v.stem(
+            X=np.array([[[10.0]], [[20.0]]]),
+        )
+    )
+    assert len(sent_3d_1d["payload"]["data"]) == 1
+
+    # 3D Y with singleton dimension (1, 2, 1) squeezes to match 2x1 X
+    sent_3d_y = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0], [20.0]]),
+            Y=np.array([[[1.0]], [[2.0]]]),
+        )
+    )
+    assert len(sent_3d_y["payload"]["data"]) == 1
+    assert segments(trace(sent_3d_y)["x"]) == [[1.0, 1.0], [2.0, 2.0]]
+    assert segments(trace(sent_3d_y)["y"]) == [[0.0, 10.0], [0.0, 20.0]]
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
     [
         (dict(X=np.ones((2, 2, 2))), "X should be one or two-dimensional"),
-        (dict(X=np.ones((1, 2, 2))), "X should be one or two-dimensional"),
+        (dict(X=np.ones((1, 2, 2, 2))), "X should be one or two-dimensional"),
         (
-            dict(X=np.ones((2, 2)), Y=np.ones((1, 2, 2))),
+            dict(X=np.ones((2, 2)), Y=np.ones((2, 2, 2))),
+            "Y should be one or two-dimensional",
+        ),
+        (
+            dict(X=np.ones((2, 2)), Y=np.ones((1, 2, 2, 2))),
             "Y should be one or two-dimensional",
         ),
         (
