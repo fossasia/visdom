@@ -4483,6 +4483,7 @@ class Visdom(object):
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.legend`  : `list` containing legend names
+        - `opts.multi_series`: treat row-vector `X` (shape `1xM`) as `M` separate series (`bool`; default = `False`)
         """
 
         opts = {} if opts is None else opts.copy()
@@ -4495,6 +4496,17 @@ class Visdom(object):
                 opts.get("legend"), (list, tuple)
             ), "legend should be a list or tuple"
 
+        if opts.get("multi_series") is not None:
+            assert isinstance(
+                opts.get("multi_series"), bool
+            ), "multi_series should be a boolean"
+        if opts.get("multiseries") is not None:
+            assert isinstance(
+                opts.get("multiseries"), bool
+            ), "multiseries should be a boolean"
+
+        multi_series = bool(opts.get("multi_series") or opts.get("multiseries"))
+
         X = np.asarray(X)
         if X.ndim > 2:
             X = np.squeeze(X)
@@ -4502,32 +4514,9 @@ class Visdom(object):
             X.ndim == 0 or X.ndim == 1 or X.ndim == 2
         ), "X should be one or two-dimensional"
 
-        has_multi_legend = (
-            X.ndim == 2
-            and X.shape[0] == 1
-            and X.shape[1] > 1
-            and isinstance(opts.get("legend"), (list, tuple))
-            and len(opts["legend"]) == X.shape[1]
-        )
-        y_arr = None if Y is None else np.asarray(Y)
-        y_is_single_timestamp = (
-            X.ndim == 2
-            and X.shape[0] == 1
-            and X.shape[1] > 1
-            and y_arr is not None
-            and y_arr.size == 1
-        )
-        is_single_timestamp_multi_series = has_multi_legend or y_is_single_timestamp
-
         # Preserve existing behavior for row-vector X inputs (e.g. shape (1, N)):
-        # Treat as 1D sequence of points unless explicitly a multi-series input
-        # (multi-series legend matching M, or single timestamp Y).
-        if (
-            X.ndim == 2
-            and X.shape[0] == 1
-            and X.shape[1] > 1
-            and not is_single_timestamp_multi_series
-        ):
+        # Treat as 1D sequence of points unless explicitly opted into multi_series.
+        if X.ndim == 2 and X.shape[0] == 1 and X.shape[1] > 1 and not multi_series:
             X = np.squeeze(X)
 
         is_1d_x = X.ndim <= 1
@@ -4535,7 +4524,7 @@ class Visdom(object):
             X = np.atleast_1d(X)[:, None]
 
         if Y is None:
-            if is_single_timestamp_multi_series:
+            if multi_series and X.shape[0] == 1:
                 Y = np.ones((1, X.shape[1]))
             else:
                 Y = np.arange(1, X.shape[0] + 1)[:, None]
@@ -4547,7 +4536,7 @@ class Visdom(object):
                 Y.ndim == 0 or Y.ndim == 1 or Y.ndim == 2
             ), "Y should be one or two-dimensional"
 
-            if is_single_timestamp_multi_series:
+            if multi_series and X.shape[0] == 1:
                 if Y.size == 1:
                     Y = np.atleast_2d(Y)
                 elif Y.size == X.shape[1]:

@@ -255,9 +255,13 @@ def test_stem_is_sent_as_a_line_mode_scatter(capture_send):
 
 
 def test_stem_handles_single_timestamp_multi_series_matrix(capture_send):
-    """A (1, M) matrix specifies 1 timestamp across M series and must not collapse to (M, 1)."""
+    """A (1, M) matrix with opts.multi_series=True specifies 1 timestamp across M series."""
     sent = capture_send(
-        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([100.0]))
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([100.0]),
+            opts={"multi_series": True},
+        )
     )
     assert len(sent["payload"]["data"]) == 2
     traces = sent["payload"]["data"]
@@ -277,9 +281,13 @@ def test_stem_does_not_mutate_caller_opts(capture_send):
 
 def test_stem_handles_single_row_2d_y_input(capture_send):
     """Single-row 2D Y input (1, 1) and (1, M) correctly supply timestamps without shape errors."""
-    # (1, 1) single-row 2D timestamp array shared across all series
+    # (1, 1) single-row 2D timestamp array shared across all series when opted into multi_series
     sent1 = capture_send(
-        lambda v: v.stem(X=np.array([[10.0, 20.0]]), Y=np.array([[100.0]]))
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([[100.0]]),
+            opts={"multi_series": True},
+        )
     )
     assert len(sent1["payload"]["data"]) == 2
     assert segments(sent1["payload"]["data"][0]["x"]) == [[100.0, 100.0]]
@@ -287,7 +295,7 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent1["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent1["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # (1, M) single-row 2D timestamp array without legend preserves legacy 1D point sequence
+    # (1, M) single-row 2D timestamp array without multi_series preserves legacy 1D point sequence
     sent2 = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
@@ -298,12 +306,12 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(trace(sent2)["x"]) == [[100.0, 100.0], [200.0, 200.0]]
     assert segments(trace(sent2)["y"]) == [[0.0, 10.0], [0.0, 20.0]]
 
-    # (1, M) single-row 2D timestamp array matching M series with legend
+    # (1, M) single-row 2D timestamp array matching M series with multi_series opted in
     sent3 = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
             Y=np.array([[100.0, 200.0]]),
-            opts={"legend": ["Series A", "Series B"]},
+            opts={"legend": ["Series A", "Series B"], "multi_series": True},
         )
     )
     assert len(sent3["payload"]["data"]) == 2
@@ -314,12 +322,12 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent3["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent3["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # 1D Y timestamp array matching M series with legend
+    # 1D Y timestamp array matching M series with multi_series opted in
     sent4 = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
             Y=np.array([100.0, 200.0]),
-            opts={"legend": ["Series A", "Series B"]},
+            opts={"legend": ["Series A", "Series B"], "multi_series": True},
         )
     )
     assert len(sent4["payload"]["data"]) == 2
@@ -330,12 +338,12 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent4["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent4["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # Column-vector Y (M, 1) matching M series with legend does not raise assertion error
+    # Column-vector Y (M, 1) matching M series with multi_series opted in
     sent5 = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
             Y=np.array([[100.0], [200.0]]),
-            opts={"legend": ["Series A", "Series B"]},
+            opts={"legend": ["Series A", "Series B"], "multi_series": True},
         )
     )
     assert len(sent5["payload"]["data"]) == 2
@@ -346,11 +354,11 @@ def test_stem_handles_single_row_2d_y_input(capture_send):
     assert segments(sent5["payload"]["data"][0]["y"]) == [[0.0, 10.0]]
     assert segments(sent5["payload"]["data"][1]["y"]) == [[0.0, 20.0]]
 
-    # Tuple legend is supported
+    # Tuple legend is supported with multi_series
     sent_tuple = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
-            opts={"legend": ("Series A", "Series B")},
+            opts={"legend": ("Series A", "Series B"), "multi_series": True},
         )
     )
     assert len(sent_tuple["payload"]["data"]) == 2
@@ -467,6 +475,14 @@ def test_stem_squeezes_multidimensional_inputs_with_singleton_dims(capture_send)
         (
             dict(X=np.ones((2, 2)), opts=dict(legend=123)),
             "legend should be a list or tuple",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(multi_series="invalid")),
+            "multi_series should be a boolean",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(multiseries=123)),
+            "multiseries should be a boolean",
         ),
     ],
 )
