@@ -8,15 +8,25 @@
 
 """Unit tests for the t-SNE helpers and backend selection.
 
-``do_tsne`` is bound at import time by a try/except ladder over openTSNE and
-bhtsne (``visdom/__init__.py:77-111``), so the only way to exercise the ladder
-is to reload the module with the candidate backends faked out. That mutates
-global state for the rest of the session, so every reload goes through
-``reloaded_visdom``, which restores the real module even when the test fails.
+``do_tsne`` picks its backend on first call -- openTSNE, then the bundled
+bhtsne, then an error naming both -- and keeps the choice in
+``visdom._tsne_backend``. Importing visdom must not run that search, because
+openTSNE drags scikit-learn and SciPy in behind it; the guard for that is
+``test_importing_visdom_does_not_pull_in_a_backend``, which has to measure a
+clean interpreter and so runs in a subprocess.
+
+The ladder itself is still exercised by reloading the module with the
+candidate backends faked out: a reload resets the cached choice, and it also
+covers the import machinery the fakes stand in for. That mutates global state
+for the rest of the session, so every reload goes through ``reloaded_visdom``,
+which restores the real module even when the test fails.
 """
 
 import importlib
+import os
+import subprocess
 import sys
+import textwrap
 import types
 from unittest.mock import MagicMock
 
@@ -208,3 +218,80 @@ def test_error_names_both_backends(reloaded_visdom):
     message = str(excinfo.value)
     assert "openTSNE" in message
     assert "bhtsne" in message
+
+
+def test_the_backend_is_resolved_once(reloaded_visdom):
+    """The search runs on the first call and the choice is kept.
+
+    ``embeddings()`` calls ``do_tsne`` once per selection, so re-running the
+    import ladder each time would put an import attempt on every call.
+    """
+    fake = _fake_opentsne(SQUARE)
+    module = reloaded_visdom({"openTSNE": fake})
+    assert module._tsne_backend is None
+
+    X = np.random.rand(30, 10).astype(np.float32)
+    module.do_tsne(X)
+    chosen = module._tsne_backend
+    assert chosen is not None
+
+    module.do_tsne(X)
+    assert module._tsne_backend is chosen
+
+
+def test_a_missing_backend_is_remembered_as_the_error(reloaded_visdom):
+    """The negative result is cached too, so it stays one lookup."""
+    module = reloaded_visdom(
+        {
+            "openTSNE": None,
+            "visdom.extra_deps": None,
+            "visdom.extra_deps.bhtsne": None,
+            "visdom.extra_deps.bhtsne.bhtsne": None,
+        }
+    )
+
+    for _ in range(2):
+        with pytest.raises(Exception, match="openTSNE"):
+            module.do_tsne(np.random.rand(10, 5))
+    assert module._tsne_backend is not None
+
+
+def test_importing_visdom_does_not_pull_in_a_backend():
+    """``import visdom`` must leave torch and the t-SNE stack alone.
+
+    This is the whole point of resolving late: openTSNE pulls scikit-learn and
+    SciPy with it, and torch was imported only to build an isinstance tuple.
+    Together they were the bulk of a ~3 s import paid by every script that
+    imports visdom, including every ``visdom.server`` start.
+
+    It runs in a subprocess because by the time this test executes the suite
+    has long since imported both; only a fresh interpreter can answer.
+    """
+    probe = textwrap.dedent(
+        """
+        import sys
+        import visdom
+        leaked = [
+            name
+            for name in ("torch", "openTSNE", "sklearn", "scipy")
+            if name in sys.modules
+        ]
+        print(",".join(leaked))
+        """
+    )
+    # the child has to import the visdom this test is running against, not
+    # whatever an editable install in the environment happens to point at.
+    env = dict(os.environ)
+    package_root = os.path.dirname(os.path.dirname(os.path.abspath(visdom.__file__)))
+    env["PYTHONPATH"] = os.pathsep.join(
+        [package_root] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "", "import visdom pulled in " + done.stdout.strip()
