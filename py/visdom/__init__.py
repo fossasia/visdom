@@ -4938,7 +4938,7 @@ class Visdom(object):
                 "l": opts.get("left", 60),
             },
         }
-        if "xtype" in opts:
+        if opts.get("xtype") is not None:
             layout["xaxis"] = {"type": opts["xtype"]}
         elif is_categorical:
             layout["xaxis"] = {"type": "category"}

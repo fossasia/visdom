@@ -590,3 +590,39 @@ def test_dual_axis_lines_accepts_mixed_categorical_x(capture_send):
     assert second["x"] == ["Jan", "1"]
     assert second["y"] == [100.0, 200.0]
     assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_explicit_xtype(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2),
+            Y1=np.arange(2),
+            Y2=np.arange(2),
+            opts={"xtype": "log"},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "log"}
+
+
+def test_dual_axis_lines_none_xtype_allows_categorical_fallback(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", "Feb"],
+            Y1=np.array([10, 20]),
+            Y2=np.array([100, 200]),
+            opts={"xtype": None},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_none_xtype_numeric_omits_xaxis(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2),
+            Y1=np.arange(2),
+            Y2=np.arange(2),
+            opts={"xtype": None},
+        )
+    )
+    assert "xaxis" not in sent["payload"]["layout"]
