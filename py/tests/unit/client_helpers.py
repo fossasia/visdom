@@ -32,6 +32,7 @@ import builtins
 import sys
 import tracemalloc
 import types
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -152,6 +153,40 @@ def test_scrub_dict_visits_each_value_once():
     nested = Counted(b=Counted(c=Counted(d=1)))
     assert _scrub_dict(Counted(a=nested)) == {"a": {"b": {"c": {"d": 1}}}}
     assert len(seen) == 4
+
+
+def _layout_helper_calls(capture_send, depth):
+    """Calls into the two layout helpers for one line() with nested layoutopts."""
+    nested = {"leaf": 1}
+    for _ in range(depth):
+        nested = {"k": nested}
+    opts = {"layoutopts": {"plotly": {"nested": nested}}}
+    with mock.patch.object(
+        visdom, "_scrub_dict", wraps=visdom._scrub_dict
+    ) as scrub, mock.patch.object(
+        visdom, "_normalize_title_strings", wraps=visdom._normalize_title_strings
+    ) as normalize:
+        sent = capture_send(
+            lambda v: v.line(X=np.array([1, 2]), Y=np.array([1.0, 2.0]), opts=opts)
+        )
+    shown = sent["payload"]["layout"]["nested"]
+    for _ in range(depth):
+        shown = shown["k"]
+    assert shown == {"leaf": 1}
+    return scrub.call_count, normalize.call_count
+
+
+def test_nested_layoutopts_cost_grows_linearly_with_depth(capture_send):
+    """#1908: one line() call walked 2**depth nodes of a nested layoutopts.
+
+    Both helpers on that path are counted, and each level of nesting has to
+    add the same number of calls.
+    """
+    calls = {depth: _layout_helper_calls(capture_send, depth) for depth in (3, 6, 12)}
+    for helper in range(2):
+        first = calls[6][helper] - calls[3][helper]
+        second = calls[12][helper] - calls[6][helper]
+        assert second == 2 * first
 
 
 def test_normalize_title_strings_wraps_a_bare_string():
