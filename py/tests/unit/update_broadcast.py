@@ -30,6 +30,7 @@ import pytest
 from visdom.server.handlers import web_handlers
 from visdom.server.handlers.web_handlers import UpdateHandler
 from visdom.utils.server_utils import window, NanSafeEncoder
+from visdom.utils import shared_utils
 
 from testutils.fakes import FakeHandler
 from testutils.payloads import plot_data, window_args
@@ -534,13 +535,17 @@ def test_repeated_append_broadcasts_carry_consecutive_versions():
     assert stored["version"] == 6
 
 
-def test_append_calls_neither_deepcopy_nor_make_patch(monkeypatch):
+def test_append_calls_neither_a_deep_copy_nor_make_patch(monkeypatch):
     """The regression guard: an append must not pay for either of them.
 
     Both are O(points already plotted), so if one creeps back onto this path
     the per-append cost starts tracking the size of the plot again -- #1805
     exactly. Asserting on wall-clock would be flaky on CI's shared runners;
     asserting the calls never happen is not.
+
+    The copy the general path takes is ``copy_json_data`` rather than
+    ``copy.deepcopy`` now, which is faster but still O(points) -- the guard is
+    that the append reaches neither.
     """
     handler = FakeHandler()
     handler.add_sub()
@@ -549,7 +554,7 @@ def test_append_calls_neither_deepcopy_nor_make_patch(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("an append must not reach this")
 
-    monkeypatch.setattr(web_handlers.copy, "deepcopy", forbidden)
+    monkeypatch.setattr(web_handlers, "copy_json_data", forbidden)
     monkeypatch.setattr(web_handlers.jsonpatch, "make_patch", forbidden)
 
     UpdateHandler.wrap_func(handler, append_args())
@@ -591,6 +596,30 @@ def test_a_replacing_update_still_rebinds_the_series():
 
     assert pane["content"]["data"][0]["x"] is not xs
     assert pane["content"]["data"][0]["x"] == [100.0, 101.0, 102.0]
+
+
+def test_a_replacing_update_copies_the_pane_as_json(monkeypatch):
+    """The diffed path still needs a copy, and a pane is JSON.
+
+    An update that is not a pure append has to keep the pane as it was to diff
+    against, so the copy cannot go away -- but it does not need
+    ``copy.deepcopy``'s per-element generality to take it. The patch this
+    produces is pinned against the deepcopy mirror by
+    ``test_direct_patch_matches_the_diffed_patch``; what this adds is that the
+    copy taken on the way there walks the pane as JSON.
+    """
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a JSON pane must not need copy.deepcopy")
+
+    monkeypatch.setattr(shared_utils.copy, "deepcopy", forbidden)
+    pane = plot_pane(n_points=5)
+    args = trace_append_args(n_points=3)
+    args["append"] = False
+
+    _, ops = UpdateHandler.update_packet(pane, args, *CAPS)
+
+    assert any(op["path"].startswith("/content/data/0/x") for op in ops), ops
 
 
 def test_named_append_patches_only_the_trace_it_names():

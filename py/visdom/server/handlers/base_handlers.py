@@ -32,6 +32,7 @@ WRITE_ENDPOINTS = {
     "save",
     "fork_env",
     "upload_env",
+    "restore_run",
 }
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
@@ -163,6 +164,13 @@ class BaseWebSocketHandler(
         if not app or not app.settings.get("cookie_secret"):
             return None
         return self.get_secure_cookie("user_password")
+
+    def write_message(self, message, binary=False):
+        try:
+            return super().write_message(message, binary)
+        except tornado.websocket.WebSocketClosedError:
+            logging.debug("Dropped a message for a closed socket")
+            return None
 
     async def get(self, *args, **kwargs):
         try:
