@@ -2449,6 +2449,9 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
+        # The t-SNE backends read ``features.shape``, so a list of rows has to
+        # become an array before the loading pane goes out, not after.
+        features = np.asarray(features)
 
         loading_message = {
             "content": {"isLoading": True},
