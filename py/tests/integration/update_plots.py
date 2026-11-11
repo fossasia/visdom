@@ -143,28 +143,30 @@ class TestHeatmapReplace(PlotUpdateTestCase):
 
 
 class TestHeatmapMismatch(PlotUpdateTestCase):
-    """A shape or label conflict logs and leaves the plot untouched."""
+    """A shape or label conflict is refused with a 400 and leaves the plot untouched."""
 
-    def test_wrong_column_count_is_a_no_op(self):
+    def test_wrong_column_count_is_refused(self):
         win = self.create_heatmap()
         resp = self.update_heatmap(win, [[5, 6, 7]], "appendRow", y=["e"])
-        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.code, 400)
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
-    def test_wrong_row_count_is_a_no_op(self):
+    def test_wrong_row_count_is_refused(self):
         win = self.create_heatmap()
         resp = self.update_heatmap(win, [[7]], "appendColumn", x=["e"])
-        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.code, 400)
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
-    def test_duplicate_labels_are_a_no_op(self):
+    def test_duplicate_labels_are_refused(self):
         win = self.create_heatmap()
-        self.update_heatmap(win, [[5, 6]], "appendRow", y=["c"])
+        resp = self.update_heatmap(win, [[5, 6]], "appendRow", y=["c"])
+        self.assertEqual(resp.code, 400)
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
-    def test_missing_labels_are_a_no_op(self):
+    def test_missing_labels_are_refused(self):
         win = self.create_heatmap()
-        self.update_heatmap(win, [[5, 6]], "appendRow", y=None)
+        resp = self.update_heatmap(win, [[5, 6]], "appendRow", y=None)
+        self.assertEqual(resp.code, 400)
         self.assertEqual(self.heatmap_z(win), [[1, 2], [3, 4]])
 
 
@@ -193,13 +195,16 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
             layout={"title": "hm"},
         )
 
-    def update_nan_heatmap(self, win, z, update_dir, x=None, y=None, nancolor="gray"):
+    def update_nan_heatmap(
+        self, win, z, update_dir, x=None, y=None, nancolor="gray", opts=None
+    ):
         return self.update(
             win,
             self.heatmap_traces(z, x, y, nancolor),
             name=None,
             updateDir=update_dir,
             append=update_dir != "replace",
+            opts={} if opts is None else opts,
         )
 
     def test_append_row_grows_the_data_and_the_background(self):
@@ -238,7 +243,7 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
                 resp = self.update_nan_heatmap(
                     win, z, update_dir, y=["e"], nancolor=None
                 )
-                self.assertEqual(resp.code, 200)
+                self.assertEqual(resp.code, 400)
                 self.assertEqual(self.traces(win), before)
 
     def test_an_update_with_too_many_traces_changes_no_trace(self):
@@ -247,15 +252,24 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
         for update_dir, z in (("appendRow", [[5, 6]]), ("replace", [[9]])):
             with self.subTest(update_dir=update_dir):
                 resp = self.update_nan_heatmap(win, z, update_dir, y=["e"])
-                self.assertEqual(resp.code, 200)
+                self.assertEqual(resp.code, 400)
                 self.assertEqual(self.traces(win), before)
 
     def test_a_shape_mismatch_leaves_both_traces_untouched(self):
         win = self.create_nan_heatmap()
         before = self.traces(win)
         resp = self.update_nan_heatmap(win, [[5, 6, 7]], "appendRow", y=["e"])
-        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.code, 400)
         self.assertEqual(self.traces(win), before)
+
+    def test_a_refused_update_applies_no_opts(self):
+        win = self.create_nan_heatmap()
+        before = self.get_win_data(win)
+        resp = self.update_nan_heatmap(
+            win, [[5, 6]], "appendRow", y=["e"], nancolor=None, opts={"title": "new"}
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(self.get_win_data(win), before)
 
     def test_appending_to_a_removed_heatmap_restores_both_traces(self):
         win = self.create_nan_heatmap()
@@ -275,7 +289,10 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
                 data[short_trace]["z"] = [[0, 0], [0, 0]]
                 win = self.create_window(data, layout={"title": "hm"})
                 before = self.traces(win)
-                self.update_nan_heatmap(win, [[7], [8], [9]], "appendColumn", x=["f"])
+                resp = self.update_nan_heatmap(
+                    win, [[7], [8], [9]], "appendColumn", x=["f"]
+                )
+                self.assertEqual(resp.code, 400)
                 self.assertEqual(self.traces(win), before)
 
 
