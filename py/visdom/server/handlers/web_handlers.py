@@ -85,8 +85,22 @@ def _reject_json_constant(value):
     raise ValueError("invalid JSON constant: {}".format(value))
 
 
+def _validate_win(win):
+    """Validate that win is a string or finite number (and not a bool)."""
+    if (
+        win is None
+        or isinstance(win, bool)
+        or not isinstance(win, (str, int, float))
+        or (isinstance(win, float) and (win != win or abs(win) == float("inf")))
+    ):
+        raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
+
+
 def _resolve_win_key(env_jsons, win):
     """Return the key in env_jsons matching win (string or numeric), or win itself."""
+    if win is None:
+        return None
+    _validate_win(win)
     if win in env_jsons:
         return win
     win_str = str(win)
@@ -157,13 +171,7 @@ class ExistsHandler(BaseHandler):
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
         win = args["win"]
-        if (
-            win is None
-            or isinstance(win, bool)
-            or not isinstance(win, (str, int, float))
-            or (isinstance(win, float) and (win != win or abs(win) == float("inf")))
-        ):
-            raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
+        _validate_win(win)
         eid = extract_eid(args)
         if eid in handler.state:
             env_jsons = handler.state[eid]["jsons"]
