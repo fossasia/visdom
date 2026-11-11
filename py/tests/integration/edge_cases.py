@@ -562,6 +562,25 @@ class TestWinExistsEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp_missing.code, 200)
         self.assertEqual(resp_missing.body.decode(), "false")
 
+    def test_structured_or_boolean_win_returns_400_on_win_endpoints(self):
+        """Structured or boolean win ids are rejected with 400 across win endpoints."""
+        self.create_text_window(eid="main", content="valid win", win="42")
+        for invalid_win in ([1, 2], {"a": 1}, True):
+            resp_data = self.post_json("/win_data", {"win": invalid_win, "eid": "main"})
+            self.assertEqual(resp_data.code, 400)
+            self.assertIn("'win' must be a string or number", resp_data.reason)
+
+            resp_close = self.post_json("/close", {"win": invalid_win, "eid": "main"})
+            self.assertEqual(resp_close.code, 400)
+            self.assertIn("'win' must be a string or number", resp_close.reason)
+
+            resp_update = self.post_json(
+                "/update",
+                {"win": invalid_win, "eid": "main", "opts": {"title": "t"}},
+            )
+            self.assertEqual(resp_update.code, 400)
+            self.assertIn("'win' must be a string or number", resp_update.reason)
+
 
 if __name__ == "__main__":
     unittest.main()
