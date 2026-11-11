@@ -471,6 +471,31 @@ def test_embeddings_sends_a_loading_pane_then_the_points(offline_client):
     assert len(points["data"][0]["content"]["data"]) == 3
 
 
+def test_embeddings_accepts_a_list_of_feature_rows(offline_client):
+    """The t-SNE backends need an array, so a list is converted before use."""
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            FEATURES.tolist(), LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+def test_embeddings_rejects_ragged_features_before_sending_anything(offline_client):
+    """A failure must not leave a loading pane behind."""
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError):
+            offline_client.embeddings(
+                [[0.0, 1.0], [1.0]], LABELS, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
 def test_embeddings_point_carries_group_label_and_index(offline_client):
     calls = []
     with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
