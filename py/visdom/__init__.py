@@ -2997,7 +2997,7 @@ class Visdom(object):
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["fps"] = opts.get("fps", 25)
         opts["loop"] = opts.get("loop", False)
         opts["autoplay"] = opts.get("autoplay", False)
@@ -3830,7 +3830,7 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         assert X.ndim == 2, "data should be two-dimensional"
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -4109,7 +4109,7 @@ class Visdom(object):
         else:
             Y = np.arange(1, len(X) + 1)
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["stacked"] = opts.get("stacked", False)
 
         _title2str(opts)
@@ -4200,7 +4200,7 @@ class Visdom(object):
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -4391,7 +4391,7 @@ class Visdom(object):
         assert gridY.shape == Y.shape, "Y and gridY should have the same size"
 
         # default options:
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["mode"] = "lines"
         opts["arrowheads"] = opts.get("arrowheads", True)
         _title2str(opts)
@@ -4954,7 +4954,7 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         try:
             import networkx as nx
         except ImportError:
