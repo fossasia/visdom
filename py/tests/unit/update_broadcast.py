@@ -613,11 +613,9 @@ def test_a_replacing_update_copies_the_pane_as_json(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("a JSON pane must not need copy.deepcopy")
 
-    monkeypatch.setattr(
-        shared_utils,
-        "copy",
-        types.SimpleNamespace(copy=copy.copy, deepcopy=forbidden),
-    )
+    guarded_copy = types.SimpleNamespace(copy=copy.copy, deepcopy=forbidden)
+    monkeypatch.setattr(shared_utils, "copy", guarded_copy)
+    monkeypatch.setattr(web_handlers, "copy", guarded_copy, raising=False)
     pane = plot_pane(n_points=5)
     args = trace_append_args(n_points=3)
     args["append"] = False
