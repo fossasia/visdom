@@ -80,6 +80,22 @@ def test_application_has_json_store(app, env_path):
     assert app.storage.env_path == env_path
 
 
+def test_the_app_keeps_one_store_for_every_request(app, env_path, store):
+    """One ``JSONStore`` serves the whole process, so its cache is shared.
+
+    The metadata cache lives on the store, and the search routes build a fresh
+    ``ExperimentStore`` wrapper per request around this one. If the backend
+    itself were ever rebuilt per request the cache would never be hit, so the
+    single instance is pinned here rather than assumed.
+    """
+    store.save_env("run", {"jsons": {}, "reload": {}, "experiment": {"env_id": "run"}})
+
+    assert app.storage is app.storage
+    assert app.storage.load_experiment("run") == {"env_id": "run"}
+    assert app.storage._meta_cache
+    assert app.storage.load_experiment("run") is app.storage.load_experiment("run")
+
+
 def test_save_routes_through_storage(app, spy_store):
     """SaveHandler persists via storage.save_envs rather than writing files."""
     handler = FakeHandler(state=app.state, storage=spy_store)
