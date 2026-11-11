@@ -256,13 +256,17 @@ def test_stem_is_sent_as_a_line_mode_scatter(capture_send):
 
 def test_stem_handles_single_timestamp_multi_series_matrix(capture_send):
     """A (1, M) matrix with opts.multi_series=True specifies 1 timestamp across M series."""
+    caller_opts = {"multi_series": True}
     sent = capture_send(
         lambda v: v.stem(
             X=np.array([[10.0, 20.0]]),
             Y=np.array([100.0]),
-            opts={"multi_series": True},
+            opts=caller_opts,
         )
     )
+    assert caller_opts == {"multi_series": True}
+    assert "multi_series" not in sent["payload"]["opts"]
+    assert "multiseries" not in sent["payload"]["opts"]
     assert len(sent["payload"]["data"]) == 2
     traces = sent["payload"]["data"]
     assert traces[0]["name"] == "1"

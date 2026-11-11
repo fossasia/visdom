@@ -4496,16 +4496,18 @@ class Visdom(object):
                 opts.get("legend"), (list, tuple)
             ), "legend should be a list or tuple"
 
-        if opts.get("multi_series") is not None:
+        multi_series_val = opts.pop("multi_series", None)
+        if multi_series_val is not None:
             assert isinstance(
-                opts.get("multi_series"), bool
+                multi_series_val, bool
             ), "multi_series should be a boolean"
-        if opts.get("multiseries") is not None:
-            assert isinstance(
-                opts.get("multiseries"), bool
-            ), "multiseries should be a boolean"
+        multiseries_val = opts.pop("multiseries", None)
+        if multiseries_val is not None:
+            assert isinstance(multiseries_val, bool), "multiseries should be a boolean"
 
-        multi_series = bool(opts.get("multi_series") or opts.get("multiseries"))
+        multi_series = (
+            multi_series_val if multi_series_val is not None else bool(multiseries_val)
+        )
 
         X = np.asarray(X)
         if X.ndim > 2:
