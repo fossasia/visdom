@@ -204,6 +204,18 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 if popped:
                     win_id, p_data = popped
                     env = self.state[eid]["jsons"]
+                    if win_id in env:
+                        # A window was created under this id since the close,
+                        # usually by an append to it. Restoring over it would
+                        # lose that window, so the pane goes back on the stack.
+                        await push_deleted_off_loop(self, eid, win_id, p_data)
+                        notify(
+                            self,
+                            f"Pane '{win_id}' is already open in environment '{eid}'.",
+                            type="warning",
+                            target_subs=[self],
+                        )
+                        return
                     max_i = max((p.get("i", -1) for p in env.values()), default=-1)
                     p_data["i"] = max_i + 1
                     env[win_id] = p_data
