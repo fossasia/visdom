@@ -26,16 +26,18 @@ the frontend exactly as badly as no bump at all.
 
 The other half of the rule is that a version is only spent on an update that
 was actually applied. ``update()`` declines several of them -- a ``/update``
-aimed at a table pane, a slider move on a pane holding no frames, a heatmap
-append whose shape or column names do not fit the plot -- and an unrecognised
-embeddings ``update_type`` applies nothing either. Bumping for one of those
-announces a revision that carries no change, so the second half of this file
-pins the refusals: no bump, no patch, and nothing put on the wire.
+aimed at a table pane, a slider move on a pane holding no frames -- and an
+unrecognised embeddings ``update_type`` applies nothing either. Bumping for one
+of those announces a revision that carries no change, so the second half of
+this file pins the refusals: no bump, no patch, and nothing put on the wire. A
+heatmap append whose shape or column names do not fit the plot is refused with
+a 400 before anything is applied, so it leaves the pane and its version alone.
 """
 
 import copy
 
 import pytest
+import tornado.web
 
 from visdom.server.defaults import (
     DEFAULT_MAX_IMAGE_HISTORY,
@@ -339,6 +341,9 @@ def _unnamed_heatmap_append():
 REJECTED = {
     "table": _table_update,
     "empty_image_slider": _empty_image_slider,
+}
+
+REFUSED_HEATMAPS = {
     "duplicate_heatmap_labels": _duplicate_heatmap_labels,
     "mismatched_heatmap_row": _mismatched_heatmap_row,
     "unnamed_heatmap_append": _unnamed_heatmap_append,
@@ -363,6 +368,17 @@ def test_repeated_rejections_never_advance_the_version(case):
     assert pane["version"] == 1
 
 
+@pytest.mark.parametrize("case", sorted(REFUSED_HEATMAPS))
+def test_a_refused_heatmap_update_is_a_400_that_changes_nothing(case):
+    pane, args = REFUSED_HEATMAPS[case]()
+    before = copy.deepcopy(pane)
+    for _ in range(4):
+        with pytest.raises(tornado.web.HTTPError) as refused:
+            _update_packet(pane, args)
+        assert refused.value.status_code == 400
+    assert pane == before
+
+
 def test_a_rejection_leaves_no_gap_in_the_sequence():
     """The accepted update after a refusal is the client's next number.
 
@@ -377,8 +393,8 @@ def test_a_rejection_leaves_no_gap_in_the_sequence():
 
     too_wide = copy.deepcopy(accepted)
     too_wide["data"][0]["z"] = [[1, 2, 3]]
-    pane, patch = _update_packet(pane, too_wide)
-    assert patch == []
+    with pytest.raises(tornado.web.HTTPError):
+        _update_packet(pane, too_wide)
 
     pane, patch = _update_packet(pane, accepted)
     assert pane["version"] == 3
