@@ -80,6 +80,7 @@ NON_GRAPH_METHODS = frozenset(
         "set_window_data",
         "setup_polling",
         "setup_socket",
+        "show",
         "update_window_opts",
         "win_exists",
         "compare_experiments",

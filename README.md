@@ -425,6 +425,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
+- [`vis.show`](#visshow): embed the dashboard in a Jupyter, Colab, VS Code or Kaggle notebook cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1659,6 +1660,45 @@ Arguments:
 Returns a dict: `run_id`, `name`, `status`, `eid` (the env replayed into), `total` (calls recorded), `replayed` (successfully resent), `failed`, and `errors` (one message per failed call, if any). Raises `visdom.tracking.restore.RunRestoreError` if the run has no replayable data recorded, and `ValueError` up front for an invalid `delay`.
 
 Also available as `POST /restore_run` (body: `{"path": ..., "eid": ..., "delay": ...}`, `path` resolved under the `VISDOM_TRACKING_DIR` environment variable, defaulting to `visdom_runs`), so a run can be replayed directly into a running server without a Python client in between. Refused (`403`) in `-readonly` mode, and subject to the same per-workspace storage limits as any other write.
+
+#### vis.show
+
+Embeds the dashboard in a notebook cell, so the plots show up next to the code
+that drew them instead of in a separate browser tab. Works in Jupyter, Colab,
+VS Code and Kaggle, and needs no extra dependency: notebooks render any object
+that has a `_repr_html_`, and this adds one rather than importing IPython.
+
+```python
+from visdom import Visdom
+vis = Visdom(env="run-7")
+vis.line(Y=losses, win="loss")
+
+vis              # renders the dashboard for env 'run-7' in the cell
+vis.show()       # the same thing, explicitly
+vis.show(env="baseline", height=400)
+```
+
+Arguments:
+- `env`: environment to open. Defaults to the client's own env, as elsewhere in the API. The embedded dashboard keeps its environment selector, so this is the starting point rather than a restriction.
+- `height`: iframe height. A number is pixels (default `600`); a string is CSS, e.g. `"40vh"`.
+- `width`: iframe width. Defaults to `"100%"`, the full width of the cell.
+
+Returns an object that renders as the iframe in a notebook and prints as the
+plain dashboard URL anywhere else, so it is also a quick way to get a link to
+the right environment from a script. An offline client (`offline=True`) has no
+server to embed and says so instead.
+
+In Colab the notebook is served from a different origin than the kernel, so an
+iframe pointing at `localhost` would resolve against the browser and load
+nothing. For a server on the kernel's own machine, Colab's port proxy is asked
+for a reachable URL instead; a server on a real host is embedded as-is.
+
+Two limits worth knowing about: a server started with `-enable_login` serves
+its login form inside the frame, and a JupyterLab reached over HTTPS blocks a
+plain-HTTP frame to another port unless something like
+[`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/) fronts
+the server — pass that prefix as `base_url` and it is carried into the embedded
+URL.
 
 ### Experiments
 
