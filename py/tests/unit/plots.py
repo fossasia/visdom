@@ -522,7 +522,11 @@ _UPDATE_CALLS = {
 }
 
 
-@pytest.mark.parametrize("update", ["apend", "Append", "APPEND", True])
+@pytest.mark.parametrize(
+    "update",
+    ["apend", "Append", "APPEND", True, ["append"]],
+    ids=["apend", "Append", "APPEND", "True", "list"],
+)
 @pytest.mark.parametrize("method", sorted(_UPDATE_CALLS))
 def test_misspelled_update_raises_instead_of_replacing(offline_client, method, update):
     """Anything that isn't 'append' replaces the data, so a typo used to

@@ -253,7 +253,9 @@ LINE_UPDATES = (None, "append", "replace", "remove", "insert", "new")
 
 def _check_line_update(update):
     """Raise for an ``update`` that line/scatter/learning_curve don't know."""
-    if update not in LINE_UPDATES:
+    # A str check first: a list reaches here as a numpy array, whose `in`
+    # compares element by element and would let ['append'] through.
+    if not (update is None or isinstance(update, str)) or update not in LINE_UPDATES:
         raise ValueError(
             "update must be one of {}, got {!r}".format(LINE_UPDATES, update)
         )
