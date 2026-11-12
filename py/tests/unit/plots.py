@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import pytest
+from testutils import recording_array
 import visdom
 
 pytestmark = pytest.mark.unit
@@ -1097,3 +1098,105 @@ def test_parallel_coordinates_multi_experiment(capture_send):
     trace = sent["payload"]["data"][0]
     assert trace["type"] == "parcoords"
     assert trace["line"]["color"] == [0.1, 0.9]
+
+
+# ------------------------------------------------- per-label trace grouping ----
+
+
+def _traces_by_label_mask(X, Y):
+    """The x/y/z lists a boolean mask per label produces, for cross-checking."""
+    traces = []
+    for k in np.unique(Y):
+        ind = np.equal(Y, k)
+        trace = {
+            "x": X.take(0, 1)[ind].tolist(),
+            "y": X.take(1, 1)[ind].tolist(),
+        }
+        if X.shape[1] == 3:
+            trace["z"] = X.take(2, 1)[ind].tolist()
+        traces.append(trace)
+    return traces
+
+
+@pytest.mark.parametrize("n_cols", [2, 3])
+@pytest.mark.parametrize("n_labels", [1, 2, 5])
+def test_scatter_groups_points_by_label_like_a_per_label_mask(
+    capture_send, n_cols, n_labels
+):
+    """One sort replaces one full pass over Y per label; the traces must match.
+
+    Grouping is now a single stable argsort sliced per label rather than
+    ``np.equal(Y, k)`` for every k, so this pins the result against the mask it
+    replaced -- trace for trace, point for point, in order.
+    """
+    rng = np.random.default_rng(n_cols * 10 + n_labels)
+    n = 60
+    X = rng.random((n, n_cols))
+    Y = rng.integers(0, n_labels, n) + 1
+    Y[:n_labels] = np.arange(1, n_labels + 1)
+
+    sent = capture_send(lambda v: v.scatter(X, Y=Y))
+
+    expected = _traces_by_label_mask(X, Y)
+    assert len(sent["payload"]["data"]) == len(expected)
+    for trace, want in zip(sent["payload"]["data"], expected):
+        for axis, values in want.items():
+            assert trace[axis] == values
+
+
+def test_scatter_extracts_each_coordinate_column_once(capture_send):
+    """Columns are pulled out of X before the loop, not inside it.
+
+    ``X.take(axis, 1)`` used to run once per axis *per trace*, so a 200-trace
+    scatter copied the whole coordinate array 400 times.
+    """
+    X = recording_array(np.arange(24, dtype=float).reshape(8, 3))
+    Y = np.array([1, 2, 3, 4, 1, 2, 3, 4])
+
+    capture_send(lambda v: v.scatter(X, Y=Y))
+
+    assert X.counts["take"] == 3
+
+
+def test_scatter_with_a_single_label_skips_the_grouping_sort(capture_send):
+    """Every unlabelled plot -- ``line`` included -- lands on the fast path.
+
+    With one trace the sort would be pure overhead: the trace is the whole
+    array, so the column is handed over as-is.
+    """
+    X = np.arange(12, dtype=float).reshape(6, 2)
+    with patch.object(visdom.np, "argsort", wraps=np.argsort) as argsort:
+        sent = capture_send(lambda v: v.scatter(X))
+    assert argsort.call_count == 0
+    assert sent["payload"]["data"][0]["x"] == X.take(0, 1).tolist()
+
+
+def test_scatter_multi_label_groups_with_one_sort(capture_send):
+    """The grouping costs exactly one sort regardless of the label count."""
+    X = np.arange(20, dtype=float).reshape(10, 2)
+    Y = np.array([1, 2, 3, 4, 5, 1, 2, 3, 4, 5])
+    with patch.object(visdom.np, "argsort", wraps=np.argsort) as argsort:
+        capture_send(lambda v: v.scatter(X, Y=Y))
+    assert argsort.call_count == 1
+
+
+def test_dual_axis_lines_rejects_a_two_dimensional_x(offline_client):
+    """``.tolist()`` would nest a 2-D input instead of failing on it.
+
+    The ``float()`` loop this replaced raised a numpy TypeError for anything
+    that was not a scalar, so the dimensionality is now asserted outright,
+    alongside the two shape assertions it belongs with.
+    """
+    square = np.zeros((2, 2))
+    with pytest.raises(AssertionError, match="values of X should be one-dimensional"):
+        offline_client.dual_axis_lines(X=square, Y1=square, Y2=square)
+
+
+def test_dual_axis_lines_accepts_matching_column_vectors(capture_send):
+    """A set of (N, 1) columns plots flat, as the ``float()`` loop had it."""
+    column = np.arange(3).reshape(3, 1)
+    sent = capture_send(lambda v: v.dual_axis_lines(X=column, Y1=column, Y2=column * 2))
+    first, second = sent["payload"]["data"]
+    assert first["x"] == [0.0, 1.0, 2.0]
+    assert first["y"] == [0.0, 1.0, 2.0]
+    assert second["y"] == [0.0, 2.0, 4.0]
