@@ -207,6 +207,50 @@ class TestLoginCredentials(LoginTestCase):
 # -- Authorization on the routes ---------------------------------------------
 
 
+    def test_malformed_json_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body="{",
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_json_array_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps(["username", "password"]),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_missing_username_is_rejected(self):
+        resp = self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"password": CLIENT_HASH}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._assert_rejected(resp)
+
+    def test_non_string_credentials_are_rejected(self):
+        for payload in (
+            {"username": None, "password": CLIENT_HASH},
+            {"username": USERNAME, "password": None},
+            {"username": 123, "password": CLIENT_HASH},
+            {"username": USERNAME, "password": 123},
+        ):
+            with self.subTest(payload=payload):
+                resp = self.fetch(
+                    "/",
+                    method="POST",
+                    body=json.dumps(payload),
+                    headers={"Content-Type": "application/json"},
+                )
+                self._assert_rejected(resp)
+
+
 class TestUnauthenticatedRequests(LoginTestCase):
     """``@check_auth`` answers 401 and does nothing else."""
 
