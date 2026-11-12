@@ -485,12 +485,23 @@ def test_embeddings_accepts_a_list_of_feature_rows(offline_client):
     np.testing.assert_array_equal(received, FEATURES)
 
 
-def test_embeddings_rejects_ragged_features_before_sending_anything(offline_client):
+@pytest.mark.parametrize(
+    "bad_features",
+    [
+        pytest.param([[0.0, 1.0], [1.0]], id="ragged"),
+        pytest.param([[1, "nope"], [2, 3]], id="non_numeric"),
+        pytest.param([0.0, 1.0, 2.0], id="one_dimensional"),
+        pytest.param([], id="empty"),
+    ],
+)
+def test_embeddings_rejects_bad_features_before_sending_anything(
+    offline_client, bad_features
+):
     """A failure must not leave a loading pane behind."""
     with patch.object(offline_client, "_send", return_value="w") as send:
         with pytest.raises(ValueError):
             offline_client.embeddings(
-                [[0.0, 1.0], [1.0]], LABELS, opts={"register_embedding_events": False}
+                bad_features, LABELS, opts={"register_embedding_events": False}
             )
 
     send.assert_not_called()
