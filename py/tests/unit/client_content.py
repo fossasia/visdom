@@ -821,6 +821,22 @@ def test_handle_post_raises_for_an_error_status(offline_client):
     assert caught.value.body == "<html>"
 
 
+@pytest.mark.parametrize("reason", [None, ""], ids=["none", "empty"])
+def test_a_server_error_without_a_reason_has_an_empty_one(offline_client, reason):
+    """requests can report None, and callers read e.reason as text."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (500, reason, "<html>"))
+    with pytest.raises(visdom.ServerError) as caught:
+        offline_client._handle_post("http://localhost:8097/x")
+    assert caught.value.reason == ""
+    assert str(caught.value) == "500"
+
+
+def test_server_error_defaults_a_none_reason_to_empty():
+    error = visdom.ServerError(502, None, "<html>")
+    assert (error.reason, str(error), error.body) == ("", "502", "<html>")
+
+
 def test_handle_post_returns_the_body_for_a_success_status(offline_client):
     offline_client.raise_exceptions = True
     _answering(offline_client, (200, "OK", '{"env_id": "a"}'))

@@ -836,6 +836,20 @@ class TestAsyncVisdomErrors(tornado.testing.AsyncTestCase):
         assert caught.value.body == "<html>"
 
     @gen_test
+    async def test_the_transport_gives_an_empty_reason_when_there_is_none(self):
+        transport = _AsyncTransport("http://localhost", 8097)
+        transport.raise_exceptions = True
+
+        async def _fetch(request):
+            return _FakeResponse(code=502, body=b"<html>", reason=None)
+
+        transport._fetch = _fetch
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/x", "{}")
+        assert caught.value.reason == ""
+        assert str(caught.value) == "502"
+
+    @gen_test
     async def test_the_transport_returns_the_page_unless_asked_to_raise(self):
         transport = self._answering_transport()
         transport.answer = (409, b"<html>")

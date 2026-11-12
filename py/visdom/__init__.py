@@ -224,6 +224,7 @@ class ServerError(Exception):
     """
 
     def __init__(self, status, reason="", body=""):
+        reason = "" if reason is None else reason  # requests can report None
         message = "{} {}".format(status, reason) if reason else str(status)
         super().__init__(message)
         self.status = status
