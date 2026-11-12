@@ -307,10 +307,23 @@ def test_image_suggested_fixes_render(capture_send):
         assert sent["payload"]["opts"]["width"] == 40
 
 
-def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client):
-    with pytest.raises(ValueError) as error:
-        offline_client.image(np.zeros((5, 8, 8), dtype=np.uint8))
-    assert "HxWxC" not in str(error.value)
+@pytest.mark.parametrize(
+    "shape",
+    [(5, 8, 8), (2, 8, 3), (2, 8, 4), (2, 8, 1), (0, 8, 3), (32, 0, 3)],
+    ids=[
+        "no_channel_side",
+        "2ch_width3",
+        "2ch_width4",
+        "2ch_width1",
+        "empty",
+        "no_pixels",
+    ],
+)
+def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client, shape):
+    """A CxHxW image with 2 channels and a width of 3 isn't channels last."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.image(np.zeros(shape, dtype=np.uint8))
+    assert "HxWxC" not in str(e.value)
 
 
 @pytest.mark.parametrize(
@@ -337,6 +350,30 @@ def test_images_suggested_fixes_render(capture_send):
     ):
         sent = capture_send(lambda v, fixed=fixed: v.images(fixed))
         assert sent["payload"]["data"][0]["type"] == "image"
+
+
+@pytest.mark.parametrize(
+    "shape", [(4, 2, 16, 3), (4, 2, 16, 4), (4, 2, 16, 1)], ids=["w3", "w4", "w1"]
+)
+def test_images_gives_no_channels_last_hint_for_a_2_channel_batch(
+    offline_client, shape
+):
+    """NxCxHxW with C=2 and a small width is not NxHxWxC."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.images(np.zeros(shape))
+    assert "NxHxWxC" not in str(e.value) and "HxWxC" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "shape, padding",
+    [((1, 6, 8, 2), 1), ((1, 5, 8, 0), 2), ((1, 32, 4, 2), 1)],
+    ids=["6ch_width2", "no_pixels", "32ch_width2"],
+)
+def test_images_never_hints_about_its_own_grid(offline_client, shape, padding):
+    """The grid is images()'s own; a hint naming its shape would mislead."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.images(np.zeros(shape), padding=padding)
+    assert "HxWxC" not in str(e.value)
 
 
 def test_images_still_tiles_a_chw_batch_whose_width_is_three(capture_send):

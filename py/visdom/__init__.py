@@ -2563,7 +2563,9 @@ class Visdom(object):
                 im = Image.fromarray(img, mode="RGBA")
             else:
                 hint = ""
-                if img.shape[2] in (1, 3, 4):
+                # Only when the first side can't be channels: CxHxW with 2
+                # channels and a width of 3 is not channels last.
+                if img.shape[0] > 4 and img.shape[2] in (1, 3, 4) and img.size:
                     hint = (
                         f" Shape {img.shape} looks like HxWxC (channels last), but"
                         " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
@@ -2829,8 +2831,9 @@ class Visdom(object):
             return self.image(tensor, win, env, opts)
         if (
             tensor.ndim == 4
-            and tensor.shape[1] not in (1, 3, 4)
+            and tensor.shape[1] > 4  # too many to be channels, as in image()
             and tensor.shape[3] in (1, 3, 4)
+            and tensor.size
         ):
             raise ValueError(
                 f"Unsupported number of image channels: {tensor.shape[1]}."
@@ -2848,6 +2851,12 @@ class Visdom(object):
         ymaps = int(math.ceil(float(nmaps) / xmaps))
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
+        if tensor.shape[1] not in (3, 4):
+            # Checked here so image()'s layout hint never describes the grid.
+            raise ValueError(
+                f"Unsupported number of image channels: {tensor.shape[1]}. "
+                "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+            )
 
         # The tile has always been inset one extra pixel into its cell, which
         # leaves one pixel less padding below and to the right of it. That
