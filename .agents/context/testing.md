@@ -46,7 +46,8 @@ isolated Visdom server automatically.
 
 `basic.spec.js` (connection), `pane.spec.js` (CRUD), `text.spec.js`,
 `image.spec.js`, `properties.spec.js`, `modal.spec.js`, `misc.spec.js`,
-`screenshots.init.spec.js` (baseline), `screenshots.spec.js` (comparison).
+`screenshots.init.spec.js` (baseline), `screenshots.spec.js` (comparison),
+`plot_redraw.spec.js` (how often a plot pane redraws).
 
 ## Writing Python Tests
 

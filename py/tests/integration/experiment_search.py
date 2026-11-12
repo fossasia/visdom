@@ -504,6 +504,40 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["experiments"][0]["env_id"], "run-e")
 
+    def test_search_sees_a_run_updated_after_it_was_already_searched(self):
+        """A run searched, then written, then searched again reads as written.
+
+        The first search is what puts the env's metadata in the store's cache,
+        so this is the case a cache that failed to notice its own writes would
+        break -- and it would break silently, answering with the run as it
+        stood when it was first read.
+        """
+        self.assertEqual(self.search_ok({"query": "lr = 0.1"})["total"], 1)
+
+        resp = self.fetch(
+            "/experiments/log",
+            method="POST",
+            body=json.dumps({"eid": "run-a", "action": "log", "params": {"lr": 0.42}}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 200)
+
+        self.assertEqual(self.search_ok({"query": "lr = 0.1"})["total"], 0)
+        updated = self.search_ok({"query": "lr = 0.42"})
+        self.assertEqual([e["env_id"] for e in updated["experiments"]], ["run-a"])
+
+    def test_two_identical_searches_answer_identically(self):
+        """Reading an experiment twice must not change what it reads.
+
+        Repeat reads of an unchanged env hand back the same metadata object, so
+        anything downstream that edited it in place would show up as a second
+        search disagreeing with the first.
+        """
+        first = self.search_ok({})
+        second = self.search_ok({})
+
+        self.assertEqual(first, second)
+
 
 class TestSearchClientMessage(unittest.TestCase):
     """Visdom.search_experiments builds the message the endpoint expects.

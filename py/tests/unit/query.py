@@ -30,7 +30,13 @@ from visdom.experiments import (
     build_record,
     parse_query,
 )
-from visdom.experiments.query import And, Comparison, Or, tokenize
+from visdom.experiments.query import (
+    And,
+    Comparison,
+    Or,
+    latest_metric_values,
+    tokenize,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -513,7 +519,12 @@ class _FakeNamedValue:
 
 
 class _FakeExperiment:
-    """Experiment-shaped without being an Experiment; satisfies ExperimentLike."""
+    """Experiment-shaped without being an Experiment; satisfies ExperimentLike.
+
+    Exposes the metric series and nothing else, which is all the protocol asks
+    for: the shortcut a stored experiment offers is added by the subclass
+    below, so the two sides of :func:`latest_metric_values` are both covered.
+    """
 
     def __init__(self):
         self.env_id = "fake1"
@@ -523,8 +534,23 @@ class _FakeExperiment:
         self.created_at = 0.0
         self.finished_at = 1.0
         self.params = [_FakeNamedValue("lr", 0.5)]
-        self.metrics = [_FakeNamedValue("acc", 99.0)]
+        self.metrics = [
+            _FakeNamedValue("acc", 10.0),
+            _FakeNamedValue("acc", 99.0),
+        ]
         self.tags = [_FakeNamedValue("owner", "bob")]
+
+
+class _FakeExperimentWithShortcut(_FakeExperiment):
+    """The same shape, able to answer for its series without walking it."""
+
+    def __init__(self):
+        super().__init__()
+        self.shortcut_calls = 0
+
+    def latest_metric_values(self):
+        self.shortcut_calls += 1
+        return {"acc": 99.0}
 
 
 class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
@@ -536,6 +562,23 @@ class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
         self.assertEqual(record["metric.acc"], 99.0)
         self.assertEqual(record["tag.owner"], "bob")
         self.assertTrue(Query("lr < 1 AND acc > 90").matches(record))
+
+    def test_an_object_without_the_metric_shortcut_still_builds(self):
+        """The shortcut is an optimisation, so its absence is not an error."""
+        plain = _FakeExperiment()
+        self.assertFalse(hasattr(plain, "latest_metric_values"))
+
+        self.assertEqual(
+            build_record(plain), build_record(_FakeExperimentWithShortcut())
+        )
+
+    def test_the_shortcut_is_used_when_offered(self):
+        shortcut = _FakeExperimentWithShortcut()
+        build_record(shortcut)
+        self.assertEqual(shortcut.shortcut_calls, 1)
+
+    def test_latest_metric_values_walks_the_series_as_a_fallback(self):
+        self.assertEqual(latest_metric_values(_FakeExperiment()), {"acc": 99.0})
 
 
 if __name__ == "__main__":

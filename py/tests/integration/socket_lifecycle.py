@@ -21,10 +21,12 @@ dispatch, which is what ``integration`` means in this suite.
 import asyncio
 import json
 import types
+from unittest import mock
 
 import pytest
 
 from visdom.server.app import Application
+from visdom.server.handlers import socket_handlers
 from visdom.server.handlers.socket_handlers import (
     SocketFailureReason,
     SocketWrapper,
@@ -124,6 +126,77 @@ def test_opening_only_notifies_the_new_socket(app):
     open_sub(app)
 
     assert len(first.messages) == before
+
+
+def test_broadcast_layouts_encodes_once_for_every_subscriber(app):
+    """One encode per broadcast, not one per recipient.
+
+    ``initialize`` calls ``broadcast_layouts()`` with no argument, so each new
+    connection sends the layouts to every subscriber already registered --
+    encoding inside the loop made that quadratic in open tabs. ``socket_double``
+    skips the subclass ``initialize`` (see ``testutils.sockets``), so the
+    all-subscribers path is driven directly here.
+    """
+    app.layouts = '[["view A", {"win_0": [0, 0, 3, 3]}]]'
+    subs = [open_sub(app) for _ in range(3)]
+    for sub in subs:
+        sub.messages.clear()
+
+    calls = []
+    real = socket_handlers.json.dumps
+
+    def counted(*args, **kwargs):
+        calls.append(args[0] if args else None)
+        return real(*args, **kwargs)
+
+    with mock.patch.object(socket_handlers.json, "dumps", counted):
+        subs[0].broadcast_layouts()
+
+    assert len(calls) == 1
+    first = subs[0].messages[0]
+    assert [list(s.messages) for s in subs] == [[first]] * 3
+    assert json.loads(first)["data"] == app.layouts
+
+
+def test_broadcast_layouts_to_an_explicit_subscriber_list_reaches_only_it(app):
+    """``open`` hands in ``[self]``; that must stay a single-recipient send."""
+    subs = [open_sub(app) for _ in range(3)]
+    for sub in subs:
+        sub.messages.clear()
+
+    subs[0].broadcast_layouts([subs[1]])
+
+    assert len(subs[1].messages) == 1
+    assert list(subs[0].messages) == []
+    assert list(subs[2].messages) == []
+
+
+def test_broadcast_layouts_with_an_empty_generator_does_not_encode(app):
+    """A generator is truthy even when it yields nothing, so it is drained first."""
+    sub = open_sub(app)
+
+    calls = []
+    real = socket_handlers.json.dumps
+
+    def counted(*args, **kwargs):
+        calls.append(args[0] if args else None)
+        return real(*args, **kwargs)
+
+    with mock.patch.object(socket_handlers.json, "dumps", counted):
+        sub.broadcast_layouts(s for s in [])
+
+    assert calls == []
+
+
+def test_broadcast_layouts_to_a_generator_of_subscribers_still_sends(app):
+    """Draining it for the emptiness check must not consume the recipients."""
+    subs = [open_sub(app) for _ in range(3)]
+    for sub in subs:
+        sub.messages.clear()
+
+    subs[0].broadcast_layouts(s for s in subs[:2])
+
+    assert [len(s.messages) for s in subs] == [1, 1, 0]
 
 
 # -- Opening a source --------------------------------------------------------

@@ -17,10 +17,14 @@ per call so window bookkeeping can be asserted.
 
 import unittest
 import warnings
+from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
+if not any(find_spec(name) for name in ("lightning", "pytorch_lightning")):
+    pytest.skip("lightning is not installed", allow_module_level=True)
 
 from visdom.loggers.lightning import VisdomLightningLogger
 

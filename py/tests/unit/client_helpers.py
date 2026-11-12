@@ -28,23 +28,32 @@ Several of these functions are unusual enough to trip up a reader:
 
 import base64
 import binascii
+import builtins
+import sys
+import tracemalloc
+import types
 
 import numpy as np
 import pytest
 
+import visdom
+from testutils import recording_array
 from visdom import (
     _assert_opts,
     _axisformat,
     _axisformat3d,
     _dashCheck,
     _decode_binary_arrays,
+    _finite_range,
     _lineColorCheck,
     _markerColorCheck,
     _markerSizeCheck,
     _normalize_labels,
+    _normalize_title_strings,
     _opts2layout,
     _scrub_dict,
     _title2str,
+    _to_numpy,
 )
 
 pytestmark = pytest.mark.unit
@@ -121,6 +130,78 @@ def test_scrub_dict_keeps_an_emptied_dict():
 def test_scrub_dict_passes_non_dicts_through(value):
     """Lists are not descended into, so a None inside one survives."""
     assert _scrub_dict(value) == value
+
+
+def test_scrub_dict_visits_each_value_once():
+    """The scrub is a single pass, not one pass per nesting level.
+
+    The surviving-key test used to be ``v is not None and _scrub_dict(v) is not
+    None``, so every value was scrubbed twice -- once to answer the condition
+    and once to produce the result -- and because each of those two passes
+    scrubbed the children twice in turn, the cost doubled at every level. The
+    second test could never fail, so counting the calls pins the cheap shape
+    without changing what comes out.
+    """
+    seen = []
+
+    class Counted(dict):
+        def items(self):
+            seen.append(self)
+            return super().items()
+
+    nested = Counted(b=Counted(c=Counted(d=1)))
+    assert _scrub_dict(Counted(a=nested)) == {"a": {"b": {"c": {"d": 1}}}}
+    assert len(seen) == 4
+
+
+def test_normalize_title_strings_wraps_a_bare_string():
+    """plotly.js v3 rejects a bare string, so it becomes {'text': ...}."""
+    assert _normalize_title_strings({"title": "Loss"}) == {"title": {"text": "Loss"}}
+
+
+def test_normalize_title_strings_leaves_an_object_title_alone():
+    """Visdom's own layouts already emit the object form; it must pass through."""
+    layout = {"title": {"text": "Loss", "font": {"size": 14}}}
+    assert _normalize_title_strings(layout) == layout
+
+
+@pytest.mark.parametrize("value", [5, 5.0, True, None, ["a"], {"text": "t"}])
+def test_normalize_title_strings_only_wraps_strings(value):
+    """Only a ``str`` is the deprecated form; anything else is left as it is."""
+    assert _normalize_title_strings({"title": value}) == {"title": value}
+
+
+def test_normalize_title_strings_reaches_every_depth():
+    """A raw figure from plotlyplot() can hide a title at any depth."""
+    layout = {"scene": {"xaxis": {"title": "epoch"}}}
+    assert _normalize_title_strings(layout) == {
+        "scene": {"xaxis": {"title": {"text": "epoch"}}}
+    }
+
+
+def test_normalize_title_strings_descends_into_lists_of_dicts():
+    """Why it walks lists at all: layout['annotations'] is a list of dicts.
+
+    This is also why it must be kept away from a trace, whose coordinate arrays
+    are lists of numbers that can hold no title and cost one call apiece.
+    """
+    layout = {"annotations": [{"title": "note"}, {"title": {"text": "kept"}}]}
+    assert _normalize_title_strings(layout) == {
+        "annotations": [{"title": {"text": "note"}}, {"title": {"text": "kept"}}]
+    }
+
+
+@pytest.mark.parametrize("value", [5, "text", None, [1.0, 2.0]])
+def test_normalize_title_strings_passes_scalars_and_plain_lists_through(value):
+    """Nothing outside a dict can carry a title key, so nothing changes."""
+    assert _normalize_title_strings(value) == value
+
+
+def test_normalize_title_strings_does_not_mutate_its_argument():
+    """It returns a new structure; plotlyplot() hands it a user's own figure."""
+    layout = {"xaxis": {"title": "epoch"}}
+    _normalize_title_strings(layout)
+    assert layout == {"xaxis": {"title": "epoch"}}
 
 
 @pytest.mark.parametrize(
@@ -595,6 +676,7 @@ def test_assert_opts_accepts_a_fully_populated_opts():
             "columnnames": ["a"],
             "rownames": ["b"],
             "jpgquality": 100,
+            "compresslevel": 6,
             "opacity": 1,
             "fps": 30,
         }
@@ -626,6 +708,17 @@ def test_assert_opts_accepts_scalar_and_sequence_marker_sizes(markersize):
         ({"rownames": "abc"}, "rownames should be a list"),
         ({"jpgquality": "high"}, "JPG quality should be a number"),
         ({"jpgquality": 101}, "JPG quality should be number between 0 and 100"),
+        ({"compresslevel": 6.5}, "PNG compress level should be an integer"),
+        ({"compresslevel": "fast"}, "PNG compress level should be an integer"),
+        ({"compresslevel": True}, "PNG compress level should be an integer"),
+        (
+            {"compresslevel": 10},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
+        (
+            {"compresslevel": -1},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
         ({"opacity": "half"}, "opacity should be a number"),
         ({"opacity": 1.5}, "opacity should be a number between 0 and 1"),
         ({"fps": "fast"}, "fps should be a number"),
@@ -643,6 +736,8 @@ def test_assert_opts_rejects_bad_input(opts, message):
     [
         {"jpgquality": 100},
         {"jpgquality": 0},
+        {"compresslevel": 0},
+        {"compresslevel": 9},
         {"opacity": 0},
         {"opacity": 1},
         {"fps": 1},
@@ -652,7 +747,9 @@ def test_assert_opts_accepts_the_boundaries(opts):
     """The inclusive ends of each range are valid.
 
     ``opacity=0`` and ``jpgquality=0`` reach no assertion at all, since the
-    guards are ``if opts.get(...)`` and zero is falsy.
+    guards are ``if opts.get(...)`` and zero is falsy. ``compresslevel`` is
+    guarded on ``is not None`` instead, precisely because 0 is a level there
+    rather than an unset value, so its boundary really is validated.
     """
     _assert_opts(opts)
 
@@ -728,3 +825,392 @@ def test_decode_binary_arrays_yields_an_empty_list_for_junk_base64():
     with pytest.raises(binascii.Error):
         base64.b64decode("!!!", validate=True)
     assert _decode_binary_arrays({"dtype": "float64", "bdata": "!!!"}) == []
+
+
+# ----------------------------------------- vectorised per-point validators ----
+#
+# These three helpers used to walk their arguments one element at a time in
+# Python. The tests below pin the grouping and the expansion they produce, and
+# assert that none of them traverses an array element by element any more.
+
+
+def test_marker_color_check_keeps_each_label_s_points_in_input_order():
+    """Grouping by label must not reorder the points inside a label.
+
+    The browser pairs the Nth colour of a trace with the Nth point of that
+    trace, so a grouping that sorted the colours would silently recolour every
+    multi-label scatter.
+    """
+    result = _markerColorCheck(
+        np.array([0, 51, 102, 153, 204]),
+        _points(5),
+        np.array([2, 1, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == [
+        "rgba(0, 0, 255, %s)" % (51 / 255.0),
+        "rgba(0, 0, 255, %s)" % (153 / 255.0),
+    ]
+    assert result[2] == [
+        "rgba(0, 0, 255, 0.0)",
+        "rgba(0, 0, 255, %s)" % (102 / 255.0),
+        "rgba(0, 0, 255, %s)" % (204 / 255.0),
+    ]
+
+
+def test_marker_color_check_groups_a_long_single_label_run():
+    """One label holding every point is the worst case for the grouping.
+
+    Appending to the label's list is linear; rebuilding it per point, as the
+    helper used to, is quadratic -- 20k points took 0.8 s. Correctness is the
+    assertion here, the cost is covered by ``example/benchmarks``.
+    """
+    n = 2000
+    result = _markerColorCheck(
+        np.zeros(n, dtype=int), _points(n), np.ones(n, dtype=int), 1
+    )
+    assert list(result) == [1]
+    assert result[1] == ["rgba(0, 0, 255, 0.0)"] * n
+
+
+def test_marker_color_check_indexes_a_palette_by_label_not_by_position():
+    """A palette shorter than the point count is indexed by ``Y``.
+
+    Label ``k`` takes the ``k - 1``th palette entry for every one of its
+    points, which is what makes a palette distinguishable from a per-point
+    array of the same length.
+    """
+    result = _markerColorCheck(
+        np.array([[255, 0, 0], [0, 255, 0]]),
+        _points(4),
+        np.array([2, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == ["#ff0000"]
+    assert result[2] == ["#00ff00"] * 3
+
+
+def test_marker_color_check_groups_without_indexing_the_label_vector():
+    """The label vector is read once, not once per point per lookup.
+
+    The grouping used to index ``Y`` three times for every point -- once to
+    expand the palette and twice to key the result dict.
+    """
+    labels = recording_array([2, 1, 2], dtype=int)
+    result = _markerColorCheck(np.array([0, 255]), _points(), labels, 2)
+    assert sorted(result) == [1, 2]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_marker_size_check_expands_a_palette_without_indexing_point_by_point():
+    """The per-label expansion is one numpy gather, not a loop over ``Y``."""
+    labels = recording_array([2, 1, 2, 1], dtype=int)
+    result = _markerSizeCheck(np.array([5.0, 10.0]), _points(4), labels)
+    assert result.tolist() == [10.0, 5.0, 10.0, 5.0]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_assert_opts_validates_a_marker_size_array_without_iterating_it():
+    """``_markerSizeCheck`` already scans the array in numpy; this was a second,
+    slower scan in Python, paid by every plot call that passes per-point sizes.
+    """
+    sizes = recording_array([1.0, 2.0, 3.0])
+    _assert_opts({"markersize": sizes})
+    assert sizes.counts["iter"] == 0
+
+
+# -- tensor unwrapping, without importing torch ------------------------------
+
+
+class _FakeTensor:
+    """Stands in for ``torch.Tensor``: unwraps through detach/cpu/numpy."""
+
+    def __init__(self, array):
+        self._array = array
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self._array
+
+
+class _FakeParameter(_FakeTensor):
+    """Stands in for ``torch.nn.Parameter``, which is not a ``Tensor`` here."""
+
+
+def _tensor_class(name):
+    """Build another tensor-like class, unrelated to the ones above.
+
+    It has to be unrelated: a subclass of ``_FakeTensor`` would satisfy an
+    isinstance check against the stale types too, so a test built on one would
+    pass whether or not the rebinding was noticed.
+    """
+    return type(
+        name,
+        (),
+        {
+            "__init__": _FakeTensor.__init__,
+            "detach": _FakeTensor.detach,
+            "cpu": _FakeTensor.cpu,
+            "numpy": _FakeTensor.numpy,
+        },
+    )
+
+
+@pytest.fixture
+def fake_torch(monkeypatch):
+    """Install a torch stand-in in ``sys.modules`` and hand it back.
+
+    ``_to_numpy`` finds torch through ``sys.modules`` rather than importing it,
+    so a module object with the two attributes it reads is enough -- and the
+    suite does not have to depend on torch being installed to cover the path.
+    """
+    module = types.ModuleType("torch")
+    module.Tensor = _FakeTensor
+    module.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", module)
+    return module
+
+
+def test_to_numpy_coerces_a_list():
+    assert isinstance(_to_numpy([1, 2, 3]), np.ndarray)
+
+
+@pytest.mark.parametrize("value", [np.arange(3), 5, "text", None, {"a": 1}])
+def test_to_numpy_passes_everything_else_through(value):
+    """Anything that is not a list or a tensor is handed back untouched."""
+    assert _to_numpy(value) is value
+
+
+def test_to_numpy_does_not_import_torch(monkeypatch):
+    """The lookup is a ``sys.modules`` read, never an import.
+
+    This is what lets ``import visdom`` skip torch entirely: a caller cannot
+    be holding a tensor without having imported torch themselves, so torch
+    being absent is proof there is nothing to unwrap.
+    """
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+
+    def fail(name, *args, **kwargs):
+        raise AssertionError("_to_numpy imported {0!r}".format(name))
+
+    monkeypatch.setattr(builtins, "__import__", fail)
+    value = np.arange(3)
+    assert _to_numpy(value) is value
+
+
+@pytest.mark.parametrize("kind", ["Tensor", "Parameter"])
+def test_to_numpy_unwraps_a_tensor_once_torch_is_imported(fake_torch, kind):
+    """Both of the types the old module-scope list held are still unwrapped."""
+    array = np.arange(4).reshape(2, 2)
+    cls = fake_torch.Tensor if kind == "Tensor" else fake_torch.nn.Parameter
+    assert _to_numpy(cls(array)) is array
+
+
+def test_to_numpy_picks_up_a_torch_that_finishes_initialising(monkeypatch):
+    """A torch that had no ``nn`` on the first call must not stay unusable.
+
+    Holding on to the first answer would be silent: every later tensor would
+    be passed through unconverted and reach the server as an object it cannot
+    serialise.
+    """
+    half = types.ModuleType("torch")
+    half.Tensor = _FakeTensor
+    monkeypatch.setitem(sys.modules, "torch", half)
+    untouched = np.arange(2)
+    assert _to_numpy(untouched) is untouched
+
+    half.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
+def test_to_numpy_follows_a_torch_reloaded_in_place(fake_torch, monkeypatch):
+    """A reload keeps the module object but rebinds the classes."""
+    _to_numpy(fake_torch.Tensor(np.arange(2)))
+
+    reloaded = _tensor_class("ReloadedTensor")
+    monkeypatch.setattr(fake_torch, "Tensor", reloaded)
+    array = np.arange(3)
+    assert _to_numpy(reloaded(array)) is array
+
+
+def test_to_numpy_follows_a_swapped_torch_module(fake_torch, monkeypatch):
+    """Replacing the module in ``sys.modules`` is picked up just as well."""
+    _to_numpy(fake_torch.Tensor(np.arange(2)))
+
+    swapped = _tensor_class("SwappedTensor")
+    replacement = types.ModuleType("torch")
+    replacement.Tensor = swapped
+    replacement.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", replacement)
+    array = np.arange(3)
+    assert _to_numpy(swapped(array)) is array
+
+
+def test_to_numpy_survives_a_half_initialised_torch(monkeypatch):
+    """A torch without ``nn`` yet must not raise out of a plot call.
+
+    ``import visdom`` from inside torch's own import leaves a partially
+    initialised module in ``sys.modules``; the old code caught the same
+    ``AttributeError`` at import time.
+    """
+    half = types.ModuleType("torch")
+    half.Tensor = _FakeTensor
+    monkeypatch.setitem(sys.modules, "torch", half)
+    value = np.arange(3)
+    assert _to_numpy(value) is value
+
+
+def test_to_numpy_unwraps_a_tensor_while_torch_nn_is_absent(monkeypatch):
+    """The missing ``nn`` must not cost the ``Tensor`` that is there.
+
+    Resolving the pair together would discard both the moment one of them is
+    missing, and that failure is silent: the tensor is handed back as it came
+    in and reaches the server as an object it cannot serialise.
+    """
+    half = types.ModuleType("torch")
+    half.Tensor = _FakeTensor
+    monkeypatch.setitem(sys.modules, "torch", half)
+    array = np.arange(4)
+    assert _to_numpy(_FakeTensor(array)) is array
+
+
+def test_to_numpy_unwraps_a_parameter_while_torch_tensor_is_absent(monkeypatch):
+    """And the other way round, for the same reason."""
+    half = types.ModuleType("torch")
+    half.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", half)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
+def test_to_numpy_ignores_torch_attributes_that_are_not_types(monkeypatch):
+    """A stub whose ``Tensor`` is not a class must not break ``isinstance``.
+
+    Passing a non-type into the isinstance tuple raises ``TypeError`` out of
+    the plot call, which is worse than the conversion being skipped.
+    """
+    stub = types.ModuleType("torch")
+    stub.Tensor = object()
+    stub.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", stub)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
+def test_torch_types_is_still_an_extension_point(monkeypatch):
+    """The module-scope list stays honoured, so an added type still unwraps."""
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(visdom, "torch_types", [_FakeTensor])
+    array = np.arange(3)
+    assert _to_numpy(_FakeTensor(array)) is array
+
+
+# ------------------------------------------------------------ _finite_range ----
+
+
+def _reference_finite_range(ar):
+    """What the call sites did before ``_finite_range`` existed."""
+    finite = ar[np.isfinite(ar)]
+    if finite.size > 0:
+        return float(finite.min()), float(finite.max())
+    return None
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [1.0, 2.0, 3.0],
+        [-5.0, 0.0, 5.0],
+        [0.0],
+        [np.nan, 3.0, 1.0],
+        [np.nan],
+        [np.nan, np.nan],
+        [np.inf, 2.0, 1.0],
+        [-np.inf, 2.0, 1.0],
+        [-np.inf, np.inf],
+        [-np.inf, np.inf, 4.0],
+        [np.inf, np.nan],
+        [-np.inf, np.nan],
+        [np.inf, np.nan, -np.inf],
+        [np.inf],
+        [-np.inf],
+        [],
+        [1, 2, 3],
+    ],
+)
+def test_finite_range_matches_the_mask_it_replaces(values):
+    """Every combination of NaN, infinities and emptiness agrees with the mask.
+
+    ``fmin``/``fmax`` skip NaN but *propagate* infinities, which is the one
+    case the fast path cannot answer on its own -- so the interesting rows here
+    are the ones mixing an infinity with a finite value, and the ones holding
+    nothing finite at all.
+    """
+    ar = np.asarray(values, dtype=np.float64)
+    assert _finite_range(ar) == _reference_finite_range(ar)
+
+
+def test_finite_range_reads_a_multidimensional_array_whole():
+    """The reduction is over every axis, as the mask was."""
+    ar = np.arange(24, dtype=np.float64).reshape(2, 3, 4)
+    assert _finite_range(ar) == (0.0, 23.0)
+
+
+def test_finite_range_handles_an_integer_array():
+    """``histogram`` may be handed ints, which have no NaN to skip."""
+    assert _finite_range(np.array([3, -1, 7])) == (-1.0, 7.0)
+
+
+def test_finite_range_returns_floats_not_numpy_scalars():
+    """The call sites compare against Python floats and put them in payloads."""
+    low, high = _finite_range(np.array([1.5, 2.5], dtype=np.float32))
+    assert type(low) is float and type(high) is float
+
+
+def _peak_bytes(call):
+    """Peak allocation during ``call``, numpy's own buffers included."""
+    call()  # first call pays for any one-off import or cache
+    tracemalloc.start()
+    try:
+        call()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        lambda ar: ar[np.isfinite(ar)],
+        lambda ar: ar[~np.isnan(ar)],
+    ],
+    ids=["isfinite", "isnan"],
+)
+def test_finite_range_allocates_nothing_without_an_infinity(spelling):
+    """The whole point is that the common case allocates nothing.
+
+    The thing to protect is the *allocation*, not the absence of one named
+    function: asserting that ``np.isfinite`` goes uncalled would pin a single
+    spelling of the mask, and ``ar[~np.isnan(ar)]`` costs exactly as much while
+    slipping past it. So the budget is measured instead, and each mask spelling
+    is run against the same budget in the same test -- which is what proves the
+    budget is tight enough to catch one rather than merely generous.
+    """
+    ar = np.linspace(0.0, 1.0, 1 << 18)
+    ar[0] = np.nan
+    budget = ar.nbytes // 64  # a bare bool mask is eight times this, uncompacted
+
+    assert _finite_range(ar) == (ar[1], 1.0)
+    assert _peak_bytes(lambda: _finite_range(ar)) < budget
+    assert _peak_bytes(lambda: spelling(ar)) > budget
+
+
+def test_finite_range_falls_back_to_the_mask_for_an_infinity():
+    """The slow path is the only way to get the finite extremes past an inf."""
+    assert _finite_range(np.array([-np.inf, 1.0, 4.0, np.inf])) == (1.0, 4.0)
