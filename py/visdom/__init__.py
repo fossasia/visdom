@@ -2449,9 +2449,18 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        # The t-SNE backends read ``features.shape``, so a list of rows has to
-        # become an array before the loading pane goes out, not after.
+        # The t-SNE backends read ``features.shape`` and crunch the values as
+        # floats, so a list of rows has to become a rectangular numeric array
+        # here, before the loading pane goes out: a failure after that leaves
+        # the browser on a spinner. ``np.asarray`` on its own is not enough --
+        # a ragged or non-numeric input silently becomes a 1-D object array.
         features = np.asarray(features)
+        if features.ndim < 2 or features.dtype.kind not in "biufc":
+            raise ValueError(
+                "features must be a rectangular 2-D numeric array or a list "
+                "of equal-length numeric rows; got shape %r with dtype %r."
+                % (features.shape, features.dtype)
+            )
 
         loading_message = {
             "content": {"isLoading": True},
