@@ -235,16 +235,40 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
         self.assertEqual(data["x"], ["only"])
         self.assertEqual(background["z"], [[0]])
 
-    def test_an_update_with_too_few_traces_changes_no_trace(self):
-        win = self.create_nan_heatmap()
-        before = self.traces(win)
-        for update_dir, z in (("appendRow", [[5, 6]]), ("replace", [[9]])):
+    def test_an_update_without_nancolor_also_grows_the_background(self):
+        cases = [
+            ("appendRow", [[5, 6]], None, ["e"], [[1, 2], [3, 4], [5, 6]]),
+            ("prependRow", [[5, 6]], None, ["e"], [[5, 6], [1, 2], [3, 4]]),
+            ("appendColumn", [[5], [6]], ["e"], None, [[1, 2, 5], [3, 4, 6]]),
+            ("prependColumn", [[5], [6]], ["e"], None, [[5, 1, 2], [6, 3, 4]]),
+            ("replace", [[9]], ["only"], ["one"], [[9]]),
+        ]
+        for update_dir, z, x, y, expected in cases:
             with self.subTest(update_dir=update_dir):
-                resp = self.update_nan_heatmap(
-                    win, z, update_dir, y=["e"], nancolor=None
+                win = self.create_nan_heatmap()
+                before_background = self.traces(win)[0]
+                resp = self.update_nan_heatmap(win, z, update_dir, x, y, nancolor=None)
+                self.assertEqual(resp.code, 200)
+                background, data = self.traces(win)
+                self.assertEqual(data["z"], expected)
+                self.assertEqual(background["z"], [[0] * len(row) for row in expected])
+                self.assertEqual(
+                    (background["x"], background["y"]), (data["x"], data["y"])
                 )
-                self.assertEqual(resp.code, 400)
-                self.assertEqual(self.traces(win), before)
+                self.assertEqual(
+                    background["colorscale"], before_background["colorscale"]
+                )
+                self.assertIs(background["showscale"], False)
+
+    def test_a_missing_trace_that_is_not_a_nancolor_background_is_refused(self):
+        trace = {"type": "heatmap", "z": [[1, 2]], "x": ["a", "b"], "y": ["c"]}
+        win = self.create_window([dict(trace), dict(trace)], layout={"title": "hm"})
+        before = self.traces(win)
+        resp = self.update_nan_heatmap(
+            win, [[5, 6]], "appendRow", y=["e"], nancolor=None
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(self.traces(win), before)
 
     def test_an_update_with_too_many_traces_changes_no_trace(self):
         win = self.create_nan_heatmap(nancolor=None)
@@ -266,7 +290,7 @@ class TestHeatmapNanColorUpdates(PlotUpdateTestCase):
         win = self.create_nan_heatmap()
         before = self.get_win_data(win)
         resp = self.update_nan_heatmap(
-            win, [[5, 6]], "appendRow", y=["e"], nancolor=None, opts={"title": "new"}
+            win, [[5, 6, 7]], "appendRow", y=["e"], opts={"title": "new"}
         )
         self.assertEqual(resp.code, 400)
         self.assertEqual(self.get_win_data(win), before)

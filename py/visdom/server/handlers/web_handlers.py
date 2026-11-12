@@ -149,6 +149,23 @@ class UpdateHandler(BaseHandler):
         return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
 
     @staticmethod
+    def is_nancolor_background(trace):
+        """Whether ``trace`` is the background ``opts.nancolor`` puts behind a heatmap.
+
+        ``Visdom.heatmap`` draws it as a heatmap with no colour bar and a
+        colorscale that maps every value to the nancolor.
+        """
+        colorscale = trace.get("colorscale")
+        return (
+            trace.get("type") == "heatmap"
+            and trace.get("showscale") is False
+            and isinstance(colorscale, list)
+            and len(colorscale) == 2
+            and all(isinstance(stop, list) and len(stop) == 2 for stop in colorscale)
+            and colorscale[0][1] == colorscale[1][1]
+        )
+
+    @staticmethod
     def heatmap_update_error(pdata, idxs, new_data, updateDir):
         """Why a heatmap update cannot be applied, or None when it can.
 
@@ -575,6 +592,27 @@ class UpdateHandler(BaseHandler):
         pdata = p["content"]["data"]
 
         new_data = args.get("data")
+        # opts.nancolor puts a background trace behind the heatmap, and an
+        # update sent without nancolor carries only the data. Add the
+        # background back, all zeros like the one Visdom.heatmap sends, so
+        # both traces stay in sync.
+        if (
+            new_data
+            and not args.get("delete")
+            and args.get("name") is None
+            and len(pdata) == 2
+            and len(new_data) == 1
+            and all(trace.get("type") == "heatmap" for trace in pdata + new_data)
+            and UpdateHandler.is_nancolor_background(pdata[0])
+        ):
+            data = new_data[0]
+            background = {
+                "type": "heatmap",
+                "z": [[0] * len(row) for row in data["z"]],
+                "x": data.get("x"),
+                "y": data.get("y"),
+            }
+            new_data = [background] + new_data
         # check a heatmap update before applying anything, opts included, so a
         # refused one leaves the pane exactly as it was
         if new_data and not args.get("delete"):
