@@ -134,6 +134,33 @@ def test_text_rejects_a_mistyped_known_opt(capture_send):
         capture_send(lambda v: v.text("hi", opts={"colormap": 7}))
 
 
+def test_text_decodes_utf8_bytes_to_a_string(capture_send):
+    sent = capture_send(lambda v: v.text("café".encode("utf-8")))
+    assert block(sent) == {"content": "café", "type": "text"}
+
+
+def test_text_coerces_a_numpy_array_to_its_str_form(capture_send):
+    sent = capture_send(lambda v: v.text(np.array([1, 2, 3])))
+    assert block(sent)["content"] == "[1 2 3]"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        pytest.param(42, "42", id="int"),
+        pytest.param(3.5, "3.5", id="float"),
+        pytest.param(True, "True", id="bool"),
+        pytest.param(None, "None", id="none"),
+        pytest.param([1, 2, 3], "[1, 2, 3]", id="list"),
+    ],
+)
+def test_text_coerces_non_string_input_to_str(capture_send, value, expected):
+    """Values that happen to JSON-serialize still go through str() for a
+    stable content type on the wire."""
+    sent = capture_send(lambda v: v.text(value))
+    assert block(sent)["content"] == expected
+
+
 # ------------------------------------------------------------ properties ----
 
 
