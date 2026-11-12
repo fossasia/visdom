@@ -208,13 +208,16 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         # A window was created under this id since the close,
                         # usually by an append to it. Restoring over it would
                         # lose that window, so the pane goes back on the stack.
-                        await push_deleted_off_loop(self, eid, win_id, p_data)
+                        undo_count = await push_deleted_off_loop(
+                            self, eid, win_id, p_data
+                        )
                         notify(
                             self,
                             f"Pane '{win_id}' is already open in environment '{eid}'.",
                             type="warning",
                             target_subs=[self],
                         )
+                        broadcast_undo_state(self, eid, self.storage, undo_count)
                         return
                     max_i = max((p.get("i", -1) for p in env.values()), default=-1)
                     p_data["i"] = max_i + 1
