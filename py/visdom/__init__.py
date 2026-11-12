@@ -2191,6 +2191,11 @@ class Visdom(object):
             svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
+        # The svgfile path decodes bytes; a direct ``svgstr=b"<svg ...>"``
+        # otherwise fell straight into ``re.search`` and raised
+        # ``TypeError: cannot use a string pattern on a bytes-like object``.
+        if isinstance(svgstr, bytes):
+            svgstr = svgstr.decode("utf-8")
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
         assert svg is not None, "could not parse SVG string"
         return self.text(text=svg.group(0), win=win, env=env, opts=opts)
