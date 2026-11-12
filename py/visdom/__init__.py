@@ -2350,7 +2350,16 @@ class Visdom(object):
             raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     def _register_embeddings(
-        self, features, labels, points, data_getter, data_type, win, env, opts
+        self,
+        features,
+        labels,
+        points,
+        data_getter,
+        data_type,
+        win,
+        env,
+        opts,
+        label_groups=None,
     ):
         self.win_data[win] = {
             "features": features,
@@ -2361,6 +2370,10 @@ class Visdom(object):
             "env": env,
             "opts": opts,
         }
+
+        if label_groups is None:
+            labels_normalized, _, _ = _normalize_labels(labels)
+            _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2393,10 +2406,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2467,9 +2479,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -2496,7 +2509,15 @@ class Visdom(object):
 
         if opts.get("register_embedding_events", True):
             self._register_embeddings(
-                features, labels, points, data_getter, data_type, win, env, opts
+                features,
+                labels,
+                points,
+                data_getter,
+                data_type,
+                win,
+                env,
+                opts,
+                label_groups=label_groups,
             )
         return win
 
