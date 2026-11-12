@@ -83,6 +83,9 @@ class VisdomXGBLogger(TrainingCallback):
         self._run_start = None  # rounds the model had when this run began
         self._run_pending = False  # a run began but hasn't logged a round yet
         self._silent_end = None  # rounds after an unevaluated continuation
+        self._start_trees = None  # last round's trees of the model a run began from
+        self._curve_trees = None  # ... of the model where the curve ends
+        self._silent_trees = None  # ... where an unevaluated continuation ended
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -278,20 +281,40 @@ class VisdomXGBLogger(TrainingCallback):
         rounds = getattr(model, "num_boosted_rounds", None)
         return rounds() if callable(rounds) else None
 
+    @staticmethod
+    def _last_trees(model, rounds):
+        """The last round's trees as text: the same for a model and its reload."""
+        if not rounds:
+            return None
+        try:
+            return tuple(model[rounds - 1 : rounds].get_dump())
+        except Exception:
+            try:  # gblinear can't be sliced; its whole dump is one small entry
+                return tuple(model.get_dump())
+            except Exception:
+                return None
+
     def before_training(self, model):
         # Decided on the first logged round, so a run without evals changes nothing.
         self._run_start = self._rounds(model)
+        self._start_trees = self._last_trees(model, self._run_start)
         self._run_pending = True
         return model
 
     def _continues(self, start):
-        return bool(start) and start in (self._next_round, self._silent_end)
+        # The round count alone would let an unrelated checkpoint of the same
+        # size append to this curve, so its last trees have to match too.
+        if not start or self._start_trees is None:
+            return False
+        return (start, self._start_trees) in (
+            (self._next_round, self._curve_trees),
+            (self._silent_end, self._silent_trees),
+        )
 
     def _start_run(self):
-        # Matched by round count only, so an unrelated model of that size appends.
         start, self._run_pending = self._run_start, False
         continues = self._continues(start)
-        self._silent_end = None
+        self._silent_end = self._silent_trees = None
         self._fresh = not continues
         if self._new_windows and not continues:
             self._wins = {}
@@ -355,11 +378,15 @@ class VisdomXGBLogger(TrainingCallback):
         return False
 
     def after_training(self, model):
+        rounds = self._rounds(model)
         if self._run_pending:
             # Nothing was plotted; remember where a continuation left the model.
             self._run_pending = False
             if self._continues(self._run_start):
-                self._silent_end = self._rounds(model)
+                self._silent_end = rounds
+                self._silent_trees = self._last_trees(model, rounds)
+        else:
+            self._curve_trees = self._last_trees(model, rounds)
         try:
             best_iteration = model.best_iteration
             best_score = model.best_score

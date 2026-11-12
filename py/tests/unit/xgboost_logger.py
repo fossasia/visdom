@@ -378,27 +378,69 @@ class TestRunsWithoutEvals(unittest.TestCase):
         self.assertEqual([c.get("update") for c in later], ["replace", "append"])
 
 
-class TestContinuationIsMatchedByRoundCount(unittest.TestCase):
-    """Only the round count is compared, as before_training documents."""
+class TestContinuationIsMatchedByModel(unittest.TestCase):
+    """A run continues the curve only when it starts from that curve's model."""
 
-    def test_an_unrelated_model_with_the_same_rounds_is_appended(self):
+    PARAMS = {"objective": "binary:logistic", "verbosity": 0}
+
+    def setUp(self):
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
         rng = np.random.RandomState(0)
-        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
-        params = {"objective": "binary:logistic", "verbosity": 0}
-        unrelated = xgb.train(params, dtrain, 3)
-        viz = _unconnected_visdom()
-        logger = VisdomXGBLogger(viz, env="xgb_test")
-        with patch.object(viz, "line", return_value="win1") as line:
-            xgb.train(params, dtrain, 3, evals=[(dtrain, "eval")], callbacks=[logger])
-            xgb.train(
-                params,
-                dtrain,
-                2,
-                evals=[(dtrain, "eval")],
-                callbacks=[logger],
-                xgb_model=unrelated,
-            )
-        later = line.call_args_list[3:]
+        X = rng.rand(60, 3)
+        self.dtrain = xgb.DMatrix(X, label=rng.randint(0, 2, 60))
+        # Same size, different trees: trained on other labels.
+        self.other = xgb.DMatrix(X, label=rng.randint(0, 2, 60))
+        self.viz = _unconnected_visdom()
+
+    def _train(self, rounds, params=None, **kwargs):
+        return xgb.train(
+            params or self.PARAMS,
+            self.dtrain,
+            rounds,
+            evals=[(self.dtrain, "eval")],
+            verbose_eval=False,
+            **kwargs,
+        )
+
+    def _later_calls(self, resume, params=None, autolog=False):
+        """Train 3 rounds, then 2 more from ``resume(first)``; the calls after."""
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        if autolog:
+            VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        callbacks = {} if autolog else {"callbacks": [logger]}
+        created = []
+
+        def line(**kwargs):
+            if kwargs.get("win") is None:
+                created.append("win%d" % len(created))
+                return created[-1]
+            return kwargs["win"]
+
+        with patch.object(self.viz, "line", side_effect=line) as calls:
+            first = self._train(3, **callbacks)
+            self._train(2, params=params, xgb_model=resume(first), **callbacks)
+        return calls.call_args_list[3:], created
+
+    def test_an_unrelated_model_of_the_same_size_starts_its_own_curve(self):
+        unrelated = xgb.train(self.PARAMS, self.other, 3)
+        later, _ = self._later_calls(lambda first: unrelated)
+        self.assertEqual([c.kwargs["X"][0] for c in later], [3, 4])
+        self.assertEqual([c.kwargs.get("update") for c in later], ["replace", "append"])
+
+    def test_autolog_opens_new_windows_for_an_unrelated_model(self):
+        unrelated = xgb.train(self.PARAMS, self.other, 3)
+        _, created = self._later_calls(lambda first: unrelated, autolog=True)
+        self.assertEqual(created, ["win0", "win1"])
+
+    def test_a_reloaded_model_still_continues(self):
+        reload = lambda first: xgb.Booster(model_file=bytearray(first.save_raw()))
+        later, created = self._later_calls(reload)
+        self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
+        self.assertEqual(created, ["win0"])
+
+    def test_new_params_on_the_same_model_still_continue(self):
+        params = dict(self.PARAMS, eta=0.05)
+        later, _ = self._later_calls(lambda first: first, params=params)
         self.assertEqual([c.kwargs["X"][0] for c in later], [3, 4])
         self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
 
