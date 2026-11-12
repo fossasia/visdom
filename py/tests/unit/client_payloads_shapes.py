@@ -277,6 +277,37 @@ def test_stem_handles_single_timestamp_multi_series_matrix(capture_send):
     assert segments(traces[1]["y"]) == [[0.0, 20.0]]
 
 
+def test_stem_handles_numpy_bool_multi_series_opt(capture_send):
+    """NumPy boolean scalars (np.bool_ / np.bool) are accepted for multi_series and multiseries."""
+    sent_true = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([100.0]),
+            opts={"multi_series": np.bool_(True)},
+        )
+    )
+    assert len(sent_true["payload"]["data"]) == 2
+    assert "multi_series" not in sent_true["payload"]["opts"]
+
+    sent_alias = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            Y=np.array([100.0]),
+            opts={"multiseries": np.bool_(True)},
+        )
+    )
+    assert len(sent_alias["payload"]["data"]) == 2
+    assert "multiseries" not in sent_alias["payload"]["opts"]
+
+    sent_false = capture_send(
+        lambda v: v.stem(
+            X=np.array([[10.0, 20.0]]),
+            opts={"multi_series": np.bool_(False)},
+        )
+    )
+    assert len(sent_false["payload"]["data"]) == 1
+
+
 def test_stem_does_not_mutate_caller_opts(capture_send):
     opts = {"title": "Custom Stem Plot"}
     capture_send(lambda v: v.stem(X=np.array([1.0, 2.0]), opts=opts))
@@ -486,6 +517,14 @@ def test_stem_squeezes_multidimensional_inputs_with_singleton_dims(capture_send)
         ),
         (
             dict(X=np.ones((2, 2)), opts=dict(multiseries=123)),
+            "multiseries should be a boolean",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(multi_series=np.int64(1))),
+            "multi_series should be a boolean",
+        ),
+        (
+            dict(X=np.ones((2, 2)), opts=dict(multiseries=np.int64(0))),
             "multiseries should be a boolean",
         ),
     ],

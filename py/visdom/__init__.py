@@ -4499,15 +4499,16 @@ class Visdom(object):
         multi_series_val = opts.pop("multi_series", None)
         if multi_series_val is not None:
             assert isinstance(
-                multi_series_val, bool
+                multi_series_val, (bool, np.bool_)
             ), "multi_series should be a boolean"
         multiseries_val = opts.pop("multiseries", None)
         if multiseries_val is not None:
-            assert isinstance(multiseries_val, bool), "multiseries should be a boolean"
+            assert isinstance(
+                multiseries_val, (bool, np.bool_)
+            ), "multiseries should be a boolean"
 
-        multi_series = (
-            multi_series_val if multi_series_val is not None else bool(multiseries_val)
-        )
+        val = multi_series_val if multi_series_val is not None else multiseries_val
+        multi_series = bool(val) if val is not None else False
 
         X = np.asarray(X)
         if X.ndim > 2:
