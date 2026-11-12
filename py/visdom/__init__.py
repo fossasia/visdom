@@ -2450,14 +2450,25 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         # The t-SNE backends read ``features.shape`` and crunch the values as
-        # floats, so a list of rows has to become a rectangular numeric array
-        # here, before the loading pane goes out: a failure after that leaves
-        # the browser on a spinner. ``np.asarray`` on its own is not enough --
-        # a ragged or non-numeric input silently becomes a 1-D object array.
-        features = np.asarray(features)
-        if features.ndim < 2 or features.dtype.kind not in "biufc":
+        # floats, so the input has to be a rectangular numeric matrix before
+        # the loading pane goes out: a failure after that leaves the browser
+        # on a spinner. Leave array-likes alone so scipy sparse matrices still
+        # reach the backend intact, and only convert plain sequences; even
+        # then ``np.asarray`` is not enough on its own, because a ragged list
+        # becomes a 1-D object array and a mixed-type list becomes strings.
+        if not (
+            hasattr(features, "ndim")
+            and hasattr(features, "dtype")
+            and hasattr(features, "shape")
+        ):
+            features = np.asarray(features)
+        if (
+            features.ndim != 2
+            or 0 in features.shape
+            or getattr(features.dtype, "kind", "O") not in "biufc"
+        ):
             raise ValueError(
-                "features must be a rectangular 2-D numeric array or a list "
+                "features must be a non-empty 2-D numeric matrix or a list "
                 "of equal-length numeric rows; got shape %r with dtype %r."
                 % (features.shape, features.dtype)
             )
