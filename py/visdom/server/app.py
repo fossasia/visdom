@@ -50,6 +50,7 @@ from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsUpdateHandler,
     make_live_queue,
 )
+from visdom.server.handlers.tracking_restore_handler import RestoreRunHandler
 from visdom.server.handlers.web_handlers import (
     ActivityHandler,
     EvictHandler,
@@ -278,6 +279,7 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, server_state_args),
             (r"%s/env_state" % self.base_url, EnvStateHandler, server_state_args),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, server_state_args),
+            (r"%s/restore_run" % self.base_url, RestoreRunHandler, server_state_args),
             (r"%s/log" % experiments_url, ExperimentLogHandler, server_state_args),
             (
                 r"%s/search" % experiments_url,
