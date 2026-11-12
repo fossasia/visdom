@@ -809,8 +809,9 @@ by default it emits a warning and allows the study to continue. A trial whose
 writes get no reply or a server error is set aside without waiting and logged
 later, from where it stopped, by a later trial, `flush()` or
 `update_dashboard()`; a write whose reply was lost is checked against what the
-server stored first, so no metric is recorded twice. Call `flush()` after
-`study.optimize()` when no dashboard is kept. Single- and
+server stored first, so no metric is recorded twice. Up to 1000 trials are held
+this way during an outage; a trial beyond that is not kept, and its warning says
+so. Call `flush()` after `study.optimize()` when no dashboard is kept. Single- and
 multi-objective studies are supported, and `COMPLETE`, `PRUNED` and `FAIL`
 states are preserved in the `optuna_state` tag. A pruned trial retains every
 intermediate value reported before pruning. Optuna remains responsible for the

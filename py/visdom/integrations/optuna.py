@@ -22,7 +22,7 @@ import json
 import threading
 import time
 import warnings
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
@@ -68,7 +68,9 @@ class OptunaCallback:
     that interval. A trial whose writes get no reply or a server error is
     set aside and logged later, from where it stopped, by a later trial,
     :meth:`flush` or :meth:`update_dashboard`; a write whose reply was lost is
-    checked against what the server stored before it is sent again. Supplying
+    checked against what the server stored before it is sent again. Up to 1000
+    trials are held this way; a trial beyond that is not kept and its warning
+    says so. Supplying
     ``contour_params`` adds one Optuna contour pane per objective. The HParams
     pane selects trials through stable experiment tags rather than
     callback-local state, so a new callback can rebuild a persisted study
@@ -115,6 +117,8 @@ class OptunaCallback:
     # Seconds to wait before retrying set-aside trials, doubling to the max.
     _retry_backoff = 5.0
     _retry_backoff_max = 300.0
+    # Trials held for the server during an outage; later ones aren't kept.
+    _max_pending = 1000
 
     def __init__(
         self,
@@ -153,8 +157,10 @@ class OptunaCallback:
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
-        # env -> (trial, writes, next write, whether that write may be stored)
-        self._pending: dict[str, tuple[Any, list, int, bool]] = {}
+        # Set-aside trials, oldest first, as (env, trial, writes, next write,
+        # whether that write may be stored). Not keyed by env: two studies
+        # sharing dashboard_env give two trials the same env.
+        self._pending: deque[tuple[str, Any, list, int, bool]] = deque()
         self._pending_lock = threading.Lock()
         self._retry_wait = 0.0
         self._retry_at = 0.0
@@ -778,14 +784,17 @@ class OptunaCallback:
         return all((name, None) in logged for name in detail)
 
     def _run_writes(self, trial: Any, env: str, writes: list, start: int) -> None:
-        """Send ``writes[start:]`` once each; set the trial aside on a failure."""
+        """Send ``writes[start:]`` once each.
+
+        On no reply or a 5xx, the error's ``resume_at`` is the write it stopped
+        at; that request may still have been stored, so it is checked first.
+        """
         index = start
         try:
             for index in range(start, len(writes)):
                 self._check_recorded(writes[index][2](), env)
-        except (_WriteFailed, OSError):
-            # The request may still have been stored, so it is checked first.
-            self._set_aside(env, (trial, writes, index, True))
+        except (_WriteFailed, OSError) as error:
+            error.resume_at = index
             raise
         except _WriteRejected:
             # A refusal is final: close a trial left half-written.
@@ -793,9 +802,13 @@ class OptunaCallback:
                 self._close_as_failed(trial, env)
             raise
 
-    def _set_aside(self, env: str, item: tuple) -> None:
+    def _set_aside(self, item: tuple) -> bool:
+        """Queue a trial for the server. False when the queue is already full."""
         with self._pending_lock:
-            self._pending.setdefault(env, item)
+            if len(self._pending) >= self._max_pending:
+                return False
+            self._pending.append(item)
+            return True
 
     def _server_failed(self) -> None:
         """Back off before the next retry, so trials don't wait on a down server."""
@@ -816,33 +829,42 @@ class OptunaCallback:
                 return True
             if not force and time.monotonic() < self._retry_at:
                 return False
-            pending = list(self._pending.items())
+            pending = list(self._pending)
             self._pending.clear()
-        for position, (env, (trial, writes, start, maybe_stored)) in enumerate(pending):
-            try:
-                if maybe_stored and self._is_stored(env, writes[start]):
-                    start += 1
-                self._run_writes(trial, env, writes, start)
-            except (_WriteFailed, OSError):
-                # Still down; _run_writes kept this trial unless the read failed.
-                self._set_aside(env, (trial, writes, start, maybe_stored))
-                for later_env, item in pending[position + 1 :]:
-                    self._set_aside(later_env, item)
-                self._server_failed()
-                return False
-            except Exception as error:
-                if self.raise_on_error:
-                    raise
-                warnings.warn(
-                    "OptunaCallback failed to log trial {}: {}".format(
-                        trial.number, error
-                    ),
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-            else:
-                with self._dashboard_lock:
-                    self._trial_envs.append(env)
+        done = 0
+        try:
+            for env, trial, writes, start, maybe_stored in pending:
+                try:
+                    if maybe_stored and self._is_stored(env, writes[start]):
+                        start += 1
+                    self._run_writes(trial, env, writes, start)
+                except (_WriteFailed, OSError) as error:
+                    # Still down: keep this trial at the write it stopped at.
+                    if hasattr(error, "resume_at"):
+                        start, maybe_stored = error.resume_at, True
+                    pending[done] = (env, trial, writes, start, maybe_stored)
+                    self._server_failed()
+                    return False
+                except Exception as error:
+                    done += 1  # final: a refusal, or an error a resend won't fix
+                    if self.raise_on_error:
+                        raise
+                    warnings.warn(
+                        "OptunaCallback failed to log trial {}: {}".format(
+                            trial.number, error
+                        ),
+                        RuntimeWarning,
+                        stacklevel=3,
+                    )
+                else:
+                    done += 1
+                    with self._dashboard_lock:
+                        self._trial_envs.append(env)
+        finally:
+            # What wasn't handled goes back first, in order, so a retry that
+            # stops early (an outage, a raise, an interrupt) loses no trial.
+            with self._pending_lock:
+                self._pending.extendleft(reversed(pending[done:]))
         with self._pending_lock:
             self._retry_wait = 0.0
         return True
@@ -852,19 +874,21 @@ class OptunaCallback:
         server_down = not self._retry_pending()
         env = None
         logged = False
+        kept = True
         try:
             payload = self._build_payload(study, trial)
             env = payload["env"]
             writes = self._trial_writes(payload)
             if server_down:
                 # Earlier trials are still waiting on the server; don't block.
-                self._set_aside(env, (trial, writes, 0, False))
+                kept = self._set_aside((env, trial, writes, 0, False))
                 raise _WriteFailed("the visdom server could not be reached")
             try:
                 self._run_writes(trial, env, writes, 0)
-            except (_WriteFailed, OSError):
+            except (_WriteFailed, OSError) as error:
                 server_down = True
                 self._server_failed()
+                kept = self._set_aside((env, trial, writes, error.resume_at, True))
                 raise
             logged = True
         except Exception as error:
@@ -872,7 +896,12 @@ class OptunaCallback:
                 raise
             later = ""
             if isinstance(error, (_WriteFailed, OSError)):
-                later = "; it will be logged once the server can be reached"
+                later = (
+                    "; it will be logged once the server can be reached"
+                    if kept
+                    else "; {} trials are already waiting for the server, so "
+                    "it is not kept".format(self._max_pending)
+                )
             warnings.warn(
                 "OptunaCallback failed to log trial {}: {}{}".format(
                     trial.number, error, later
