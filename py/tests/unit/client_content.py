@@ -491,7 +491,10 @@ def test_embeddings_accepts_a_list_of_feature_rows(offline_client):
         pytest.param([[0.0, 1.0], [1.0]], id="ragged"),
         pytest.param([[1, "nope"], [2, 3]], id="non_numeric"),
         pytest.param([0.0, 1.0, 2.0], id="one_dimensional"),
-        pytest.param([], id="empty"),
+        pytest.param([], id="empty_list"),
+        pytest.param(np.empty((0, 3)), id="zero_rows"),
+        pytest.param(np.empty((3, 0)), id="zero_cols"),
+        pytest.param(np.zeros((3, 2, 2)), id="three_dimensional"),
     ],
 )
 def test_embeddings_rejects_bad_features_before_sending_anything(
@@ -505,6 +508,25 @@ def test_embeddings_rejects_bad_features_before_sending_anything(
             )
 
     send.assert_not_called()
+
+
+def test_embeddings_passes_an_array_like_through_without_converting(offline_client):
+    """A scipy-sparse-like object with ndim/shape/dtype reaches do_tsne intact."""
+
+    class _ArrayLike:
+        ndim = 2
+        shape = (3, 4)
+        dtype = np.dtype("float64")
+
+    array_like = _ArrayLike()
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            array_like, LABELS, opts={"register_embedding_events": False}
+        )
+
+    assert tsne.call_args[0][0] is array_like
 
 
 def test_embeddings_point_carries_group_label_and_index(offline_client):
