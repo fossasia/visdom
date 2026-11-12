@@ -410,6 +410,41 @@ class TestAsyncStub:
         assert annotated["http_proxy_port"] == "None"
 
 
+class TestLineUpdatesStub:
+    """``LINE_UPDATES`` is public, and a checker should reject what it rejects."""
+
+    def test_line_updates_are_declared(self):
+        declared = module_annotations(CLIENT_STUB)["LINE_UPDATES"]
+        assert declared == "Tuple[Optional[Text], ...]"
+        assert all(u is None or isinstance(u, str) for u in visdom.LINE_UPDATES)
+
+    def test_the_literal_lists_exactly_the_line_updates(self):
+        alias = next(
+            node
+            for node in parse_stub(CLIENT_STUB).body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "_LineUpdate"
+        )
+        assert ast.unparse(alias.value).startswith("Optional[Literal[")
+        literals = {
+            n.value
+            for n in ast.walk(alias.value)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        }
+        assert literals == {u for u in visdom.LINE_UPDATES if u is not None}
+        assert None in visdom.LINE_UPDATES  # the Optional
+
+    @pytest.mark.parametrize(
+        "path, cls", [(CLIENT_STUB, "Visdom"), (ASYNC_STUB, "AsyncVisdom")]
+    )
+    @pytest.mark.parametrize("method", ["line", "scatter", "learning_curve"])
+    def test_the_checked_methods_take_the_literal(self, path, cls, method):
+        node = stub_functions(stub_class(path, cls))[method]
+        update = next(arg for arg in node.args.args if arg.arg == "update")
+        assert ast.unparse(update.annotation) == "_LineUpdate"
+
+
 class TestAsyncStubInternals:
     """``visdom/async_client.pyi`` against the module's non-public surface.
 
