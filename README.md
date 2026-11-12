@@ -866,7 +866,7 @@ or a PIL image (e.g. `Image.open("photo.png")`), which is drawn like the array i
 Most other Python image libraries (e.g. OpenCV, matplotlib) return numpy arrays in `HxWxC` format.
 Passing arrays in that format will raise errors or lead to incorrect rendering.
 A uint16 image, such as a 16-bit PNG (mode `I;16`), is shown at its full scale (65535 is white).
-Floats and other integers are read by value: `[0, 1]` and `[-1, 1]` are scaled up and other values are clipped to `[0, 255]`;
+Floats and other integers are read by value: `[0, 1]` and `[-1, 1]` are scaled up and other values are clipped to `[0, 255]`, except integers, which are scaled to fit (a 32-bit image such as PIL mode `I` has no fixed white point);
 pass `opts.normalize=True` to min-max scale the image instead.
 
 For example:

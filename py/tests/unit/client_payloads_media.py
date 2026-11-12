@@ -553,17 +553,47 @@ def test_the_16_bit_byte_orders_look_the_same(capture_send):
 @pytest.mark.parametrize(
     "img, expected",
     [
-        (np.array([[0, 1, 100, 255, 300, -5]]), [0, 1, 100, 255, 255, 0]),
+        (np.array([[0, 1, 100, 255]]), [0, 1, 100, 255]),
         (np.array([[0, 1, 100, 127]], np.int8), [0, 1, 100, 127]),
         (np.array([[0, 1, 0, 1]], np.int32), [0, 255, 0, 255]),
         (np.array([[False, True]]), [0, 255]),
         (np.array([[0, 257, 65535]], np.uint16), [0, 1, 255]),
+        (np.array([[0, 300, 600]]), [0, 127, 255]),
+        (np.array([[-100, 0, 100]], np.int16), [0, 127, 255]),
     ],
-    ids=["int64", "int8", "int_mask", "bool_mask", "uint16"],
+    ids=["int64", "int8", "int_mask", "bool_mask", "uint16", "wide", "negative"],
 )
 def test_image_draws_integer_arrays_by_value(capture_send, img, expected):
     """They used to be handed to PIL as raw bytes and come out garbled."""
     assert _shown(capture_send, lambda v: v.image(img))[0].tolist() == expected
+
+
+def _mode_i_image(top):
+    values = np.linspace(0, top, 6 * 9).reshape(6, 9).astype(np.int32)
+    img = Image.fromarray(values)
+    assert img.mode == "I"
+    return img, values
+
+
+def test_image_scales_a_32_bit_pil_image_to_fit(capture_send):
+    """Mode I has no fixed white point; clipping at 255 left it nearly all white."""
+    img, values = _mode_i_image(100000)
+    shown = _shown(capture_send, lambda v: v.image(img))
+    np.testing.assert_array_equal(shown, np.uint8(values / 100000 * 255))
+
+
+def test_image_reads_a_mode_i_image_that_fits_bytes_by_value(capture_send):
+    img, values = _mode_i_image(200)
+    np.testing.assert_array_equal(_shown(capture_send, lambda v: v.image(img)), values)
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_images_scales_32_bit_pil_images_to_fit(capture_send, count):
+    img, values = _mode_i_image(100000)
+    grid = _shown(capture_send, lambda v: v.images([img] * count, padding=0))
+    tile = np.uint8(values / 100000 * 255)
+    for k in range(count):
+        np.testing.assert_array_equal(grid[:, 9 * k : 9 * (k + 1), 0], tile)
 
 
 _RNG = np.random.RandomState(7)

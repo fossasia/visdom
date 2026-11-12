@@ -717,19 +717,34 @@ def _is_16_bit(dtype):
     return dtype.kind == "u" and dtype.itemsize == 2
 
 
+def _fit_integers(img):
+    """An integer or bool image as floats, scaled into [0, 1] if 0..255 can't hold it.
+
+    Unlike uint8 and uint16, a wider integer image (PIL mode I, say) has no
+    fixed white point, so clipping it at 255 would lose most of its values.
+    Values that fit, including masks in [-1, 1], are kept as they are.
+    """
+    img = img.astype(np.float64)
+    if img.size == 0:
+        return img
+    lo, hi = float(img.min()), float(img.max())
+    fits = (lo >= 0 and hi <= 255) or (lo >= -1 and hi <= 1)
+    return img if fits or hi == lo else (img - lo) / (hi - lo)
+
+
 def _image_to_bytes(img, normalize=False):
     """``img`` as uint8, by the rules ``image()`` documents.
 
     uint16 is a 16-bit image, shown at its full scale (65535 is white) as an
     image viewer shows a 16-bit PNG. Other integers and bools are read by
-    value, like floats.
+    value, like floats, unless they don't fit 0..255 (see ``_fit_integers``).
     """
     if img.dtype == np.uint8:
         return img
     if _is_16_bit(img.dtype):
         img = img / 65535.0
     elif not np.issubdtype(img.dtype, np.floating):
-        img = img.astype(np.float64)
+        img = img.astype(np.float64) if normalize else _fit_integers(img)
     finite_range = _finite_range(img)
     if finite_range is not None:
         img_min, img_max = finite_range
@@ -2619,9 +2634,10 @@ class Visdom(object):
         other integers, bools) are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
-        [-1, 1] to [0, 255]; all other values are clipped to [0, 255].
-        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
-        instead.
+        [-1, 1] to [0, 255]; all other values are clipped to [0, 255], except
+        integers, which are scaled to fit (a 32-bit image such as PIL mode `I`
+        has no fixed white point). Pass `opts.normalize=True` to min-max scale
+        the image to fill [0, 255] instead.
 
         The following `opts` are supported:
 
@@ -2897,6 +2913,9 @@ class Visdom(object):
             tensor = np.asarray(_to_numpy(tensor))
         if _is_16_bit(tensor.dtype):
             tensor = tensor / 65535.0  # full 16-bit scale, as image() reads it
+        elif tensor.dtype.kind in "biu" and tensor.dtype != np.uint8:
+            if not is_bytes and not normalize:
+                tensor = _fit_integers(tensor)  # as image() reads it
 
         if tensor.ndim == 2:  # single image H x W
             tensor = np.expand_dims(tensor, 0)
