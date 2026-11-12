@@ -37,7 +37,7 @@ visdom/
 │   ├── __init__.py                      — Visdom client class
 │   ├── __init__.pyi                     — Type stubs (PEP 484)
 │   ├── async_client.py(+.pyi)           — AsyncVisdom: awaitable front end to Visdom
-│   ├── VERSION                          — Version string ("0.3.0")
+│   ├── VERSION                          — Version string ("0.3.1")
 │   ├── data_model/                      — DataStore abstraction + JSONStore backend
 │   ├── server/                          — Tornado web server
 │   │   ├── app.py                       — Application class: routes, wiring
