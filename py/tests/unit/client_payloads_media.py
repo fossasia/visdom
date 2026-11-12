@@ -948,6 +948,18 @@ def test_svg_file_preserves_text(capture_send, tmp_path, text):
     assert content(sent) == markup
 
 
+def test_svg_accepts_bytes_svgstr(capture_send):
+    """bytes svgstr decodes as UTF-8, same as the svgfile path does."""
+    sent = capture_send(lambda v: v.svg(svgstr=b"<svg a='1'><g/></svg>"))
+    assert content(sent) == "<svg a='1'><g/></svg>"
+
+
+def test_svg_accepts_utf8_bytes_with_non_ascii_text(capture_send):
+    markup = "<svg a='1'><text>café</text></svg>"
+    sent = capture_send(lambda v: v.svg(svgstr=markup.encode("utf-8")))
+    assert content(sent) == markup
+
+
 def test_svg_passes_opts_through(capture_send):
     sent = capture_send(
         lambda v: v.svg(svgstr="<svg a='1'><g/></svg>", opts=dict(title="diagram"))
