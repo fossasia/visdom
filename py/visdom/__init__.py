@@ -613,6 +613,9 @@ def _assert_opts(opts):
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
+    if opts.get("xtype") is not None:
+        assert isstr(opts.get("xtype")), "xtype should be a string"
+
 
 def _assert_sunburst_opts(opts):
     """
@@ -4849,27 +4852,47 @@ class Visdom(object):
         - `opts.bottom` :  Set the bottom margin of the plot
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
+        - `opts.xtype` :  Type of the x-axis (e.g. `'linear'`, `'log'`, `'date'`, `'category'`)
         """
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
+
+        if X.ndim == 2 and X.shape[1] == 1:
+            X = X.ravel()
+        if Y1.ndim == 2 and Y1.shape[1] == 1:
+            Y1 = Y1.ravel()
+        if Y2.ndim == 2 and Y2.shape[1] == 1:
+            Y2 = Y2.ravel()
+
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
-        if X.ndim == 2 and X.shape[1] == 1:
-            # The shapes match, so all three are column vectors holding one
-            # value per row, which the ``float(value)`` loop this replaced
-            # flattened implicitly. Every other 2-D shape still fails the
-            # assertion below.
-            X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
         assert X.ndim == 1, "values of X should be one-dimensional"
-        if opts is None:
-            opts = {}
-            opts["height"] = 300
-            opts["width"] = 500
-        X = X.astype(float).tolist()
+
+        is_categorical = False
+        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
+            X = X.astype(float).tolist()
+        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character):
+            X = X.astype(str).tolist()
+            is_categorical = True
+        elif any(isinstance(val, str) for val in X):
+            X = [str(value) for value in X]
+            is_categorical = True
+        else:
+            try:
+                X = X.astype(float).tolist()
+            except (ValueError, TypeError):
+                X = [str(value) for value in X]
+                is_categorical = True
+
         Y1 = Y1.astype(float).tolist()
         Y2 = Y2.astype(float).tolist()
         trace1 = {
@@ -4915,6 +4938,11 @@ class Visdom(object):
                 "l": opts.get("left", 60),
             },
         }
+        if opts.get("xtype") is not None:
+            layout["xaxis"] = {"type": opts["xtype"]}
+        elif is_categorical:
+            layout["xaxis"] = {"type": "category"}
+
         if "height" not in opts:
             opts["height"] = 300
         if "width" not in opts:
