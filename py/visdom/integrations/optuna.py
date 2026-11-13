@@ -16,11 +16,15 @@ Visdom dependency just for this optional adapter.
 
 from __future__ import annotations
 
+import atexit
+import functools
 import html
 import json
+import os
 import threading
+import time
 import warnings
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
@@ -40,6 +44,51 @@ _OPTUNA_TAG_NAMES = {
 }
 
 
+# Callbacks still holding set-aside trials. Held strongly, so a callback
+# passed inline to study.optimize() is still flushed when the program exits.
+_WAITING: set = set()
+_WAITING_LOCK = threading.Lock()
+
+
+# How long the exit flush waits for a worker still sending, so a thread
+# stuck on the network can't hang the program's exit.
+_EXIT_WAIT = 30.0
+
+
+@atexit.register
+def _flush_waiting_callbacks() -> None:
+    """Send what outages left set aside, once, before the program exits."""
+    with _WAITING_LOCK:
+        callbacks = list(_WAITING)
+    for callback in callbacks:
+        callback._flush_at_exit()
+
+
+def _forget_parent_trials() -> None:
+    """In a forked child: the queued trials are the parent's to send."""
+    global _WAITING_LOCK
+    _WAITING_LOCK = threading.Lock()
+    for callback in list(_WAITING):
+        callback._pending.clear()
+        callback._sending = False
+        # A parent thread may have held these at the fork.
+        callback._pending_lock = threading.Lock()
+        callback._retry_lock = threading.Lock()
+    _WAITING.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_parent_trials)
+
+
+class _WriteRejected(RuntimeError):
+    """The server refused a trial write (a 4xx reply), so retrying won't help."""
+
+
+class _WriteFailed(RuntimeError):
+    """A trial write got no reply or a 5xx, so it may still go through later."""
+
+
 class OptunaCallback:
     """Log completed Optuna trials and optionally maintain a study dashboard.
 
@@ -53,15 +102,22 @@ class OptunaCallback:
     ``create_dashboard=True`` creates a summary, an HParams pane and Optuna's
     Plotly study visualizations in that environment. The first completed trial
     creates the dashboard; later trials refresh it every ``refresh_every``
-    successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
-    to ensure the final trials are included when the total is not an exact
-    multiple of that interval. Supplying ``contour_params`` adds one Optuna
-    contour pane per objective. The HParams pane selects trials through stable
-    experiment tags rather than callback-local state, so a new callback can
-    rebuild a persisted study dashboard and multiple workers share the same
-    trial selection. Dashboard refreshes are serialized within one callback
-    instance. When separate processes share a dashboard namespace, only one
-    callback should enable ``create_dashboard`` and act as its writer.
+    trials. Call :meth:`update_dashboard` after ``Study.optimize`` to ensure
+    the final trials are included when the total is not an exact multiple of
+    that interval. A trial whose writes get no reply or a server error is
+    set aside and logged later, from where it stopped, by a later trial,
+    :meth:`flush` or :meth:`update_dashboard`; a write whose reply was lost is
+    checked against what the server stored before it is sent again. Up to 1000
+    trials are held this way; a trial beyond that is not kept and its warning
+    says so. Set-aside trials are sent in order, one worker at a time, and any
+    still waiting when the program exits are sent then. Supplying
+    ``contour_params`` adds one Optuna contour pane per objective. The HParams
+    pane selects trials through stable experiment tags rather than
+    callback-local state, so a new callback can rebuild a persisted study
+    dashboard and multiple workers share the same trial selection. Dashboard
+    refreshes are serialized within one callback instance. When separate
+    processes share a dashboard namespace, only one callback should enable
+    ``create_dashboard`` and act as its writer.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -97,6 +153,12 @@ class OptunaCallback:
         study.optimize(objective, callbacks=[callback])
         callback.update_dashboard(study)
     """
+
+    # Seconds to wait before retrying set-aside trials, doubling to the max.
+    _retry_backoff = 5.0
+    _retry_backoff_max = 300.0
+    # Trials held for the server during an outage; later ones aren't kept.
+    _max_pending = 1000
 
     def __init__(
         self,
@@ -135,6 +197,16 @@ class OptunaCallback:
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
+        # Set-aside trials, oldest first, as (env, trial, writes, next write,
+        # whether that write may be stored). Not keyed by env: two studies
+        # sharing dashboard_env give two trials the same env.
+        self._pending: deque[tuple[str, Any, list, int, bool]] = deque()
+        self._pending_lock = threading.Lock()
+        # One worker sends the queue at a time, so trials keep their order.
+        self._retry_lock = threading.Lock()
+        self._sending = False  # trials are out of the queue, being sent
+        self._retry_wait = 0.0
+        self._retry_at = 0.0
         self._dashboard_lock = threading.RLock()
 
     @staticmethod
@@ -524,7 +596,8 @@ class OptunaCallback:
     def update_dashboard(self, study: Any) -> bool:
         """Create or refresh all dashboard panes for ``study``.
 
-        Returns whether the dashboard was written successfully. The HParams
+        Trials set aside by a server outage are logged first. Returns
+        whether the dashboard was written successfully. The HParams
         pane queries the server for every trial carrying this study's stable
         dashboard tag. It therefore includes trials logged by earlier callback
         instances and by other workers that share the dashboard namespace. A
@@ -532,6 +605,34 @@ class OptunaCallback:
         newer payload. Separate processes must designate a single dashboard
         writer because they do not share this lock.
         """
+        self.flush()
+        return self._write_dashboard(study)
+
+    def flush(self) -> bool:
+        """Log the trials a server outage set aside, without backing off.
+
+        Returns whether none are left. A retry already running in another
+        worker is waited for. Trials still waiting when the program exits are
+        sent then, but calling this after ``Study.optimize`` reports the result.
+        """
+        return self._retry_pending(force=True, wait=True) is True
+
+    def _flush_at_exit(self) -> None:
+        try:
+            self._retry_pending(force=True, wait=_EXIT_WAIT)
+        except Exception:
+            pass  # warned about below, with whatever is still waiting
+        with self._pending_lock:
+            left = len(self._pending)
+        if left:
+            warnings.warn(
+                "OptunaCallback could not log {} trial(s) before exit: the "
+                "visdom server could not be reached".format(left),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    def _write_dashboard(self, study: Any) -> bool:
         with self._dashboard_lock:
             try:
                 payload = self._build_dashboard_payload(study)
@@ -569,7 +670,7 @@ class OptunaCallback:
                 not self._dashboard_created
                 or self._trials_since_refresh >= self.refresh_every
             ):
-                self.update_dashboard(study)
+                self._write_dashboard(study)
 
     def _build_payload(self, study: Any, trial: Any) -> dict[str, Any]:
         env = self.trial_env(trial, study)
@@ -591,43 +692,328 @@ class OptunaCallback:
                 trial.number, study.study_name
             ),
             "metrics": metrics,
+            "intermediate": self._intermediate_values(trial),
             "status": "finished" if state == "COMPLETE" else "failed",
         }
 
+    def _check_recorded(self, reply: Any, env: str) -> None:
+        """Raise unless the reply is the stored experiment.
+
+        ``True`` is the client's offline sentinel: nothing was sent, so there is
+        nothing to confirm. A 4xx reply raises ``_WriteRejected`` with a reason
+        that matches its status; no reply or a 5xx raises ``_WriteFailed``,
+        since the server may still accept the write later.
+        """
+        if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
+            return
+        if reply is None or reply is False:
+            raise _WriteFailed(
+                "visdom did not record it in env {!r}: the server could not be "
+                "reached".format(env)
+            )
+        status = getattr(self.viz, "_last_response_status", None)
+        if not isinstance(status, int) or isinstance(status, bool):
+            status = None
+        if status is not None and status >= 500:
+            raise _WriteFailed(
+                "visdom did not record it in env {!r}: server error "
+                "(status {})".format(env, status)
+            )
+        if status == 409:
+            # Trial envs come from dashboard_env when it is set, else study_name.
+            rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: an experiment already "
+                "finished there. If an earlier run used the same {}, use a "
+                "new one or delete the old trial envs".format(env, rename)
+            )
+        if status in (401, 403):
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server refused the "
+                "request (status {}). Check the API key and whether the "
+                "server is running in readonly mode".format(env, status)
+            )
+        if status is not None and 400 <= status < 500:
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server rejected "
+                "the request (status {})".format(env, status)
+            )
+        raise _WriteRejected(
+            "visdom did not record it in env {!r}: unexpected reply {!r}".format(
+                env, reply
+            )
+        )
+
+    def _close_as_failed(self, trial: Any, env: str) -> None:
+        """Mark a half-written trial failed, warning if that is refused too."""
+        try:
+            self._check_recorded(
+                self.viz.finish_experiment(status="failed", env=env), env
+            )
+        except Exception as error:
+            warnings.warn(
+                "OptunaCallback could not mark trial {} as failed: {}".format(
+                    trial.number, error
+                ),
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
+    def _trial_writes(self, payload: dict[str, Any]) -> list:
+        """The writes that record one trial, in order, as (kind, detail, call)."""
+        env = payload["env"]
+        writes = [
+            (
+                "experiment",
+                None,
+                functools.partial(
+                    self.viz.experiment,
+                    name=payload["name"],
+                    params=payload["params"],
+                    tags=payload["tags"],
+                    description=payload["description"],
+                    env=env,
+                ),
+            )
+        ]
+        for step, value in payload["intermediate"]:
+            writes.append(
+                (
+                    "intermediate",
+                    step,
+                    functools.partial(
+                        self.viz.log_metrics,
+                        {_INTERMEDIATE_METRIC_NAME: value},
+                        step=step,
+                        env=env,
+                    ),
+                )
+            )
+        if payload["metrics"]:
+            writes.append(
+                (
+                    "metrics",
+                    tuple(payload["metrics"]),
+                    functools.partial(
+                        self.viz.log_metrics, payload["metrics"], env=env
+                    ),
+                )
+            )
+        writes.append(
+            (
+                "finish",
+                None,
+                functools.partial(
+                    self.viz.finish_experiment, status=payload["status"], env=env
+                ),
+            )
+        )
+        return writes
+
+    def _stored_experiment(self, env: str) -> Any:
+        """Read back what the server holds for ``env``, or None if nothing."""
+        reply = self.viz.search_experiments(
+            query="env_id = {}".format(self._query_literal(env))
+        )
+        experiments = reply.get("experiments") if isinstance(reply, Mapping) else None
+        if not isinstance(experiments, list):
+            raise _WriteFailed("visdom could not read back env {!r}".format(env))
+        for experiment in experiments:
+            if isinstance(experiment, Mapping) and experiment.get("env_id") == env:
+                return experiment
+        return None
+
+    def _is_stored(self, env: str, write: tuple) -> bool:
+        """Whether a write whose reply was lost reached the server anyway."""
+        kind, detail, _ = write
+        if kind == "experiment":
+            return False  # sending it again only merges the same metadata
+        stored = self._stored_experiment(env)
+        if stored is None:
+            return False
+        if kind == "finish":
+            return stored.get("status") in ("finished", "failed")
+        logged = {
+            (metric.get("key"), metric.get("step"))
+            for metric in stored.get("metrics") or ()
+            if isinstance(metric, Mapping)
+        }
+        if kind == "intermediate":
+            return (_INTERMEDIATE_METRIC_NAME, detail) in logged
+        return all((name, None) in logged for name in detail)
+
+    def _run_writes(self, trial: Any, env: str, writes: list, start: int) -> None:
+        """Send ``writes[start:]`` once each.
+
+        On no reply or a 5xx, the error's ``resume_at`` is the write it stopped
+        at; that request may still have been stored, so it is checked first.
+        """
+        index = start
+        try:
+            for index in range(start, len(writes)):
+                self._check_recorded(writes[index][2](), env)
+        except (_WriteFailed, OSError) as error:
+            error.resume_at = index
+            raise
+        except _WriteRejected:
+            # A refusal is final: close a trial left half-written.
+            if 0 < index < len(writes) - 1:
+                self._close_as_failed(trial, env)
+            raise
+
+    def _set_aside(self, item: tuple) -> bool:
+        """Queue a trial for the server. False when the queue is already full."""
+        with self._pending_lock:
+            if len(self._pending) >= self._max_pending:
+                return False
+            self._pending.append(item)
+            with _WAITING_LOCK:
+                _WAITING.add(self)
+            return True
+
+    def _server_failed(self) -> None:
+        """Back off before the next retry, so trials don't wait on a down server."""
+        with self._pending_lock:
+            self._retry_wait = min(
+                max(2 * self._retry_wait, self._retry_backoff),
+                self._retry_backoff_max,
+            )
+            self._retry_at = time.monotonic() + self._retry_wait
+
+    def _retry_pending(
+        self, force: bool = False, wait: bool | float = False
+    ) -> bool | None:
+        """Log set-aside trials, oldest first, one worker at a time.
+
+        Returns True when none are left and False when some are: the server
+        is down, or, unless ``force``, still being backed off from. Returns
+        None when another worker is sending them; ``wait`` waits for it
+        instead, for that many seconds when it is a number.
+        """
+        while True:
+            with self._pending_lock:
+                if not self._pending and not self._sending:
+                    with _WAITING_LOCK:
+                        _WAITING.discard(self)
+                    return True
+                if not force and time.monotonic() < self._retry_at:
+                    return False
+            if wait is True:
+                got = self._retry_lock.acquire()
+            elif wait:
+                got = self._retry_lock.acquire(timeout=wait)
+            else:
+                got = self._retry_lock.acquire(blocking=False)
+            if not got:
+                return None
+            try:
+                if not self._send_pending():
+                    return False
+            finally:
+                self._retry_lock.release()
+            # Trials queued while this one held the lock go round again.
+
+    def _send_pending(self) -> bool:
+        """Send the queue as it stands. Returns whether nothing failed to send."""
+        with self._pending_lock:
+            pending = list(self._pending)
+            self._pending.clear()
+            self._sending = True
+        done = 0
+        try:
+            for env, trial, writes, start, maybe_stored in pending:
+                try:
+                    if maybe_stored and self._is_stored(env, writes[start]):
+                        start += 1
+                    self._run_writes(trial, env, writes, start)
+                except (_WriteFailed, OSError) as error:
+                    # Still down: keep this trial at the write it stopped at.
+                    if hasattr(error, "resume_at"):
+                        start, maybe_stored = error.resume_at, True
+                    pending[done] = (env, trial, writes, start, maybe_stored)
+                    self._server_failed()
+                    return False
+                except Exception as error:
+                    done += 1  # final: a refusal, or an error a resend won't fix
+                    if self.raise_on_error:
+                        raise
+                    warnings.warn(
+                        "OptunaCallback failed to log trial {}: {}".format(
+                            trial.number, error
+                        ),
+                        RuntimeWarning,
+                        stacklevel=4,
+                    )
+                else:
+                    done += 1
+                    with self._dashboard_lock:
+                        self._trial_envs.append(env)
+        finally:
+            # What wasn't handled goes back first, in order, so a retry that
+            # stops early (an outage, a raise, an interrupt) loses no trial.
+            with self._pending_lock:
+                self._pending.extendleft(reversed(pending[done:]))
+                self._sending = False
+        with self._pending_lock:
+            self._retry_wait = 0.0
+        return True
+
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
+        state = self._retry_pending()
+        server_down = state is not True
+        env = None
+        logged = False
+        kept = True
         try:
             payload = self._build_payload(study, trial)
-            self.viz.experiment(
-                name=payload["name"],
-                params=payload["params"],
-                tags=payload["tags"],
-                description=payload["description"],
-                env=payload["env"],
-            )
-            for step, value in self._intermediate_values(trial):
-                self.viz.log_metrics(
-                    {_INTERMEDIATE_METRIC_NAME: value},
-                    step=step,
-                    env=payload["env"],
-                )
-            if payload["metrics"]:
-                self.viz.log_metrics(payload["metrics"], env=payload["env"])
-            self.viz.finish_experiment(
-                status=payload["status"],
-                env=payload["env"],
-            )
+            env = payload["env"]
+            writes = self._trial_writes(payload)
+            if server_down:
+                # Older trials are waiting, or being sent by another worker:
+                # queue behind them, so the server gets trials in order.
+                kept = self._set_aside((env, trial, writes, 0, False))
+                if kept and state is None:
+                    # Sent by whichever worker drains the queue next, maybe us.
+                    state = self._retry_pending()
+                    server_down = state is not True
+                if not kept or state is False:
+                    raise _WriteFailed("the visdom server could not be reached")
+            else:
+                try:
+                    self._run_writes(trial, env, writes, 0)
+                except (_WriteFailed, OSError) as error:
+                    server_down = True
+                    self._server_failed()
+                    kept = self._set_aside((env, trial, writes, error.resume_at, True))
+                    raise
+                logged = True
         except Exception as error:
             if self.raise_on_error:
                 raise
+            later = ""
+            if isinstance(error, (_WriteFailed, OSError)):
+                later = (
+                    "; it will be logged once the server can be reached"
+                    if kept
+                    else "; {} trials are already waiting for the server, so "
+                    "it is not kept".format(self._max_pending)
+                )
             warnings.warn(
-                "OptunaCallback failed to log trial {}: {}".format(trial.number, error),
+                "OptunaCallback failed to log trial {}: {}{}".format(
+                    trial.number, error, later
+                ),
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return
 
         with self._dashboard_lock:
-            self._trial_envs.append(payload["env"])
-            if self.create_dashboard:
+            if logged:
+                self._trial_envs.append(env)
+            if not self.create_dashboard:
+                return
+            if server_down:
+                # Refresh once the server is back rather than wait on it now.
+                self._trials_since_refresh += 1
+            else:
                 self._maybe_update_dashboard(study)
