@@ -2562,9 +2562,21 @@ class Visdom(object):
                 img = np.transpose(img, (1, 2, 0))
                 im = Image.fromarray(img, mode="RGBA")
             else:
+                hint = ""
+                # Only when the first two sides look like an image's and the
+                # last like its channels: CxHxW with 2 channels, or many channels
+                # and only a few rows (a feature map), is not channels last.
+                if img.shape[0] > 4 and img.shape[1] > 4 and img.shape[2] in (1, 3, 4):
+                    hint = (
+                        f" Shape {img.shape} looks like HxWxC (channels last), but"
+                        " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
+                        " (numpy), img.permute(2, 0, 1) (torch) or"
+                        " np.transpose(img, (2, 0, 1)) (plain list) first."
+                    )
                 raise ValueError(
                     f"Unsupported number of image channels: {nchannels}. "
                     "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                    + hint
                 )
         else:
             raise ValueError(
@@ -2818,6 +2830,20 @@ class Visdom(object):
             if tensor.shape[0] == 1:  # if single-channel, convert to 3-channel
                 tensor = np.repeat(tensor, 3, 0)
             return self.image(tensor, win, env, opts)
+        if (
+            tensor.ndim == 4
+            and tensor.shape[1] > 4  # both sides look like an image's,
+            and tensor.shape[2] > 4  # as in image()
+            and tensor.shape[3] in (1, 3, 4)
+            and tensor.size
+        ):
+            raise ValueError(
+                f"Unsupported number of image channels: {tensor.shape[1]}."
+                f" Shape {tensor.shape} looks like NxHxWxC (channels last), but"
+                " vis.images expects NxCxHxW: use batch.transpose(0, 3, 1, 2)"
+                " (numpy) or batch.permute(0, 3, 1, 2) (torch) first, or for a"
+                " list pass [img.transpose(2, 0, 1) for img in images]."
+            )
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
 
@@ -2827,6 +2853,12 @@ class Visdom(object):
         ymaps = int(math.ceil(float(nmaps) / xmaps))
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
+        if tensor.shape[1] not in (3, 4):
+            # Checked here so image()'s layout hint never describes the grid.
+            raise ValueError(
+                f"Unsupported number of image channels: {tensor.shape[1]}. "
+                "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+            )
 
         # The tile has always been inset one extra pixel into its cell, which
         # leaves one pixel less padding below and to the right of it. That
