@@ -510,6 +510,47 @@ def test_embeddings_rejects_bad_features_before_sending_anything(
     send.assert_not_called()
 
 
+def test_embeddings_converts_an_object_with_array_protocol(offline_client):
+    """A tensor-like (ndim/shape/dtype, a dtype with no .kind, and __array__)
+    must be converted, not rejected for its dtype or passed through raw."""
+
+    class _TensorLike:
+        ndim = 2
+        shape = (3, 2)
+        dtype = object()  # like torch.float32: has no ``.kind``
+
+        def __array__(self, dtype=None, copy=None):
+            return FEATURES
+
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            _TensorLike(), LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_embeddings_accepts_a_torch_tensor(offline_client, requires_grad):
+    """The real-torch case; a requires_grad tensor makes bare np.asarray raise."""
+    torch = pytest.importorskip("torch")
+    tensor = torch.tensor(FEATURES, requires_grad=requires_grad)
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            tensor, LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
 def test_embeddings_passes_an_array_like_through_without_converting(offline_client):
     """A scipy-sparse-like object with ndim/shape/dtype reaches do_tsne intact."""
 
