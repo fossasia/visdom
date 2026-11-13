@@ -27,6 +27,7 @@ from unittest import mock
 import pytest
 
 from visdom.server.app import Application
+from visdom.data_model.json_store import JSONStore
 from visdom.utils.server_utils import purge_env as purge
 
 pytestmark = pytest.mark.unit
@@ -96,6 +97,32 @@ class TestRetention(unittest.TestCase):
         answer = self.app.retire_workspace(self.workspace, 7, dry_run=True)
 
         self.assertEqual(answer["envs"], [eid])
+
+    def test_retention_removes_new_hash_fallback(self):
+        store = JSONStore(self.directory)
+        eid = "e" * 300
+        store.save_env(eid, {"jsons": {}, "reload": {}})
+        path = store._hash_path(eid)
+        when = time.time() - 30 * DAY
+        os.utime(path, (when, when))
+        answer = self.app.retire_workspace(self.workspace, 7, dry_run=False)
+        self.assertEqual(answer["envs"], [eid])
+        self.assertEqual(answer["removed"], 1)
+        self.assertTrue(self.settle(path))
+
+    def test_old_legacy_copy_does_not_expire_an_updated_environment(self):
+        store = JSONStore(self.directory)
+        eid = "e" * 300
+        legacy = store._hash_path(eid)[:-5]
+        with open(legacy, "w") as handle:
+            json.dump({"jsons": {}, "reload": {}, "name": eid}, handle)
+        when = time.time() - 30 * DAY
+        os.utime(legacy, (when, when))
+        store.save_env(eid, {"jsons": {}, "reload": {}})
+        answer = self.app.retire_workspace(self.workspace, 7, dry_run=False)
+        self.assertEqual(answer["envs"], [])
+        self.assertEqual(answer["removed"], 0)
+        self.assertTrue(store.env_exists(eid))
 
     def test_an_env_with_unsaved_writes_is_kept(self):
         path = self.write_env("january", days_old=30)

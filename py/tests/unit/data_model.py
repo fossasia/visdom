@@ -17,7 +17,9 @@ import errno
 import hashlib
 import json
 import os
+import ntpath
 import sys
+import types
 
 import pytest
 
@@ -508,7 +510,7 @@ def test_interrupted_undo_save_keeps_the_previous_stack(store, monkeypatch):
 def _hashed_name(eid):
     """The hash-fallback filename JSONStore would pick for ``eid``."""
     digest = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-    return "hash_{0}.json".format(digest)
+    return "hash_{0}.json.hash".format(digest)
 
 
 def test_env_named_like_a_hash_file_is_still_listed(store):
@@ -1269,3 +1271,106 @@ def test_a_forked_store_starts_cold(store):
     assert fork.env_path == store.env_path
     assert fork._meta_cache == {}
     assert fork.load_experiment("run") == _experiment_env()["experiment"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_long_env_and_literal_hash_id_do_not_overwrite_each_other(store, reverse):
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    entries = [(literal_id, _env("literal")), (long_id, _env("long"))]
+    for eid, data in reversed(entries) if reverse else entries:
+        store.save_env(eid, data)
+        store.save_undo(eid, [[eid, data]])
+    reopened = JSONStore(store.env_path)
+    assert reopened.list_envs() == sorted([literal_id, long_id])
+    for eid, data in entries:
+        assert reopened.load_env(eid) == data
+        assert reopened.load_undo(eid) == [[eid, data]]
+    reopened.delete_env(long_id)
+    reopened.clear_undo(long_id)
+    assert reopened.load_env(literal_id) == _env("literal")
+    assert reopened.load_undo(literal_id) == [[literal_id, _env("literal")]]
+    assert not reopened.env_exists(long_id)
+    assert reopened.load_undo(long_id) == []
+
+
+def test_legacy_fallback_survives_saving_a_literal_hash_id(store):
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    legacy = store._hash_path(long_id)[:-5]
+    data = dict(_env("long"), name=long_id)
+    store._atomic_write(legacy, json.dumps(data))
+    undo_dir, _, hashed = store._undo_paths(long_id)
+    os.makedirs(undo_dir, exist_ok=True)
+    store._atomic_write(hashed[:-5], json.dumps([["long", {}]]))
+    assert store.load_env(long_id) == _env("long")
+    assert store.load_undo(long_id) == [["long", {}]]
+    assert not store.env_exists(literal_id)
+    assert store.load_undo(literal_id) == []
+    store.save_env(literal_id, _env("literal"))
+    store.save_undo(literal_id, [["literal", {}]])
+    assert store.load_env(long_id) == _env("long")
+    assert store.load_undo(long_id) == [["long", {}]]
+    assert store.load_env(literal_id) == _env("literal")
+    assert store.load_undo(literal_id) == [["literal", {}]]
+    store.save_env(long_id, _env("updated"))
+    store.save_undo(long_id, [["updated", {}]])
+    assert store.list_envs() == sorted([literal_id, long_id])
+    store.delete_env(long_id)
+    store.clear_undo(long_id)
+    assert not store.env_exists(long_id)
+    assert not os.path.exists(hashed[:-5])
+    assert store.load_undo(long_id) == []
+    assert store.load_env(literal_id) == _env("literal")
+    assert store.load_undo(literal_id) == [["literal", {}]]
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("C:\\" + "r" * 100 + "\\" + "e" * 160 + ".json", True),
+        ("C:\\" + "r" * 100 + "\\" + "e" * 100 + ".json", False),
+        ("\\\\?\\C:\\" + "r" * 100 + "\\" + "e" * 160 + ".json", False),
+        ("C:\\" + "e" * 300 + ".json", True),
+    ],
+)
+def test_windows_einval_path_limits(monkeypatch, path, expected):
+    windows_os = types.SimpleNamespace(**vars(os))
+    windows_os.name = "nt"
+    windows_os.path = ntpath
+    monkeypatch.setattr(json_store_module, "os", windows_os)
+    assert (
+        json_store_module._filename_too_long(OSError(errno.EINVAL, "invalid"), path)
+        is expected
+    )
+    assert not json_store_module._filename_too_long(
+        OSError(errno.EACCES, "denied"), path
+    )
+
+
+@pytest.mark.parametrize("undo", [False, True])
+def test_full_path_einval_uses_shorter_fallback(tmp_path, monkeypatch, undo):
+    directory = tmp_path / ("r" * max(1, 145 - len(str(tmp_path))))
+    store = JSONStore(str(directory))
+    native_os = types.SimpleNamespace(**vars(os))
+    native_os.name = "nt"
+    monkeypatch.setattr(json_store_module, "os", native_os)
+    original_write = store._atomic_write
+    attempts = []
+
+    def limited_write(path, payload):
+        attempts.append(path)
+        if len((os.path.abspath(path) + ".tmp").encode("utf-16-le")) >= 260 * 2:
+            raise OSError(errno.EINVAL, "Invalid argument")
+        original_write(path, payload)
+
+    monkeypatch.setattr(store, "_atomic_write", limited_write)
+    eid = "e" * 180
+    if undo:
+        store.save_undo(eid, [["window", {}]])
+        assert store.load_undo(eid) == [["window", {}]]
+    else:
+        store.save_env(eid, _env())
+        assert store.load_env(eid) == _env()
+    assert len(attempts) == 2
+    assert len(attempts[1]) < len(attempts[0])
