@@ -425,7 +425,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
-- [`vis.show`](#visshow): embed the dashboard in a Jupyter, Colab, VS Code or Kaggle notebook cell
+- [`vis.show`](#visshow): embed the dashboard in a Jupyter or VS Code notebook cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1664,9 +1664,10 @@ Also available as `POST /restore_run` (body: `{"path": ..., "eid": ..., "delay":
 #### vis.show
 
 Embeds the dashboard in a notebook cell, so the plots show up next to the code
-that drew them instead of in a separate browser tab. Works in Jupyter, Colab,
-VS Code and Kaggle, and needs no extra dependency: notebooks render any object
-that has a `_repr_html_`, and this adds one rather than importing IPython.
+that drew them instead of in a separate browser tab. Works in Jupyter, VS Code
+and any other notebook frontend, and needs no extra dependency: notebooks
+render any object that has a `_repr_html_`, and this adds one rather than
+importing IPython.
 
 ```python
 from visdom import Visdom
@@ -1693,8 +1694,7 @@ has to be an address the **browser** can reach — which is not always the
 address the client uses:
 
 - **Kernel and browser on the same machine** (the usual local case): nothing to do.
-- **Colab**: the notebook is served from a different origin than the kernel, so an iframe pointing at `localhost` would resolve against the browser and load nothing. For a server on the kernel's own machine, Colab's port proxy is asked for a reachable URL instead; a server on a real host is embedded as-is. If that request fails, the plain URL is still returned and a warning says the frame is likely to stay blank.
-- **Remote kernel** (a GPU box, a cluster node): the browser cannot reach the kernel's `localhost`. Forward the port, or put the server behind a reverse proxy, and point the client at that address — the embed follows the client.
+- **Remote kernel** (a GPU box, a cluster node, or a hosted notebook such as Colab or Kaggle): the browser cannot reach the kernel's `localhost`, so the frame stays blank. Forward the port (`ssh -L 8097:localhost:8097 <host>`), or put the server behind a reverse proxy, and point the client at that address — the embed follows the client.
 - **JupyterLab over HTTPS**: the browser blocks a plain-HTTP frame to another port. Serve visdom from the notebook's own origin, for example with [`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/), and construct the client for that address — `Visdom(server="https://lab.example.com", port=443, base_url="/proxy/8097")`. Pointing only `base_url` at the proxy prefix does not help: the URL would still name the visdom port.
 
 Two more limits: a server started with `-enable_login` serves its login form

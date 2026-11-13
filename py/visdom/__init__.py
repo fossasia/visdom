@@ -167,10 +167,6 @@ logger = logging.getLogger(__name__)
 REFUSED_STATUSES = (401, 402, 403)
 REFUSALS_REMEMBERED = 100
 
-# Seconds to wait for Colab's frontend to answer a port-proxy request. It is a
-# round trip to the browser, so it is either prompt or not coming.
-COLAB_PROXY_TIMEOUT = 10
-
 
 def _one_line(text):
     return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
@@ -964,64 +960,6 @@ def _decode_binary_arrays(obj):
     return obj
 
 
-def _colab_output():
-    """The ``google.colab.output`` module when running in Colab, else ``None``.
-
-    Colab's kernel imports ``google.colab`` at startup, so a miss in
-    ``sys.modules`` settles it without importing anything: a plain Jupyter
-    kernel must not acquire the module as a side effect of displaying a
-    dashboard.
-    """
-    if "google.colab" not in sys.modules:
-        return None
-    try:
-        from google.colab import output  # type: ignore
-    except ImportError:
-        return None
-    return output
-
-
-def _colab_proxy_url(port):
-    """Colab's externally reachable URL for a port on the kernel's machine.
-
-    Colab serves the notebook from a different origin than the kernel, so an
-    iframe pointing at ``localhost`` resolves against the browser and loads
-    nothing. ``proxyPort`` answers with a URL that reaches the kernel instead.
-    Returns ``None`` when that cannot be asked for -- outside Colab, or with no
-    frontend attached to evaluate the JavaScript in.
-    """
-    output = _colab_output()
-    if output is None:
-        return None
-    try:
-        # eval_js defaults to waiting for the frontend forever; a frontend that
-        # went away between cells would hang the display call rather than fail
-        # it, and the fallback below would never be reached.
-        proxied = output.eval_js(
-            "google.colab.kernel.proxyPort({0})".format(int(port)),
-            timeout_sec=COLAB_PROXY_TIMEOUT,
-        )
-    except Exception as error:
-        logger.warning(
-            "Could not ask Colab to proxy port %s (%s). The dashboard will be "
-            "embedded at the kernel's own address, which the notebook's "
-            "browser cannot reach, so the frame is likely to stay blank.",
-            port,
-            error,
-        )
-        return None
-    if not isinstance(proxied, str) or not proxied:
-        logger.warning(
-            "Colab answered the proxy request for port %s with %r. The "
-            "dashboard will be embedded at the kernel's own address, which "
-            "the notebook's browser cannot reach.",
-            port,
-            proxied,
-        )
-        return None
-    return proxied.rstrip("/")
-
-
 def _without_userinfo(url):
     """``url`` with any ``user:password@`` dropped from its host.
 
@@ -1085,8 +1023,9 @@ def _embed_size(value):
 class _NotebookEmbed:
     """A dashboard URL that renders as an iframe in a notebook cell.
 
-    Jupyter, Colab, VS Code and Kaggle all call ``_repr_html_`` when the
-    displayed object has one, so nothing here imports IPython. A terminal has
+    Jupyter, VS Code and every other notebook frontend call ``_repr_html_``
+    when the displayed object has one, so nothing here imports IPython. A
+    terminal has
     no such hook and falls back to ``__repr__``, which is the URL itself rather
     than a wall of markup.
     """
@@ -2271,10 +2210,6 @@ class Visdom(object):
         base = "{0}:{1}{2}".format(
             _without_userinfo(self.server), self.port, self.base_url
         )
-        if _is_loopback(urlparse(self.server).hostname):
-            proxied = _colab_proxy_url(self.port)
-            if proxied is not None:
-                base = "{0}{1}".format(proxied, self.base_url)
         eid = _url_eid(self.env if env is None else env)
         return "{0}/env/{1}".format(base, quote(eid, safe=""))
 
@@ -2285,9 +2220,9 @@ class Visdom(object):
         """Embed the dashboard in a notebook cell.
 
         Returns an object that renders as an iframe pointing at this client's
-        server, so displaying it in Jupyter, Colab, VS Code or Kaggle shows the
-        live dashboard where the plotting code is. A bare ``vis`` in a cell
-        does the same thing, by way of ``_repr_html_``.
+        server, so displaying it in Jupyter or VS Code shows the live
+        dashboard where the plotting code is. A bare ``vis`` in a cell does
+        the same thing, by way of ``_repr_html_``.
 
         Args:
             env : str, optional
@@ -2307,11 +2242,13 @@ class Visdom(object):
         and that is what the frame would show.
 
         The URL is built from this client's own ``server``, ``port`` and
-        ``base_url``, so it has to be an address the *browser* can reach. That
-        is the kernel's own machine in the usual case, and Colab's port proxy
-        when the kernel is Colab's; a kernel on a remote host needs a port
-        forward or a reverse proxy, and the client pointed at that address,
-        or the frame stays blank.
+        ``base_url``, so it has to be an address the *browser* can reach --
+        which is the kernel's own machine when the notebook runs where you
+        are. A kernel somewhere else (a remote host, or a hosted notebook
+        such as Colab or Kaggle) serves its frontend from another origin, so
+        ``localhost`` there names the browser's machine and the frame stays
+        blank; that needs a port forward or a reverse proxy, and the client
+        pointed at that address.
 
         Three things the embed cannot do anything about: a server started with
         ``-enable_login`` serves the login form inside the frame, a JupyterLab
