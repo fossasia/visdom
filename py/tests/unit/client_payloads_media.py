@@ -327,7 +327,7 @@ def test_images_scales_a_float_tile_next_to_a_pil_tile(
 
 
 def test_images_normalizes_a_list_of_16_bit_pngs_together(capture_send, tmp_path):
-    """All-float tiles keep one scale, so opts.normalize spans the whole grid."""
+    """16-bit tiles share one scale, so opts.normalize spans the whole grid."""
     path = tmp_path / "depth.png"
     Image.fromarray(np.linspace(500, 60000, 54).reshape(6, 9).astype(np.uint16)).save(
         path
@@ -338,6 +338,76 @@ def test_images_normalizes_a_list_of_16_bit_pngs_together(capture_send, tmp_path
     )[1]
     assert shown.min() == 0 and shown.max() == 255
     np.testing.assert_array_equal(shown[:, :9], shown[:, 9:])
+
+
+def _grid_tiles(grid, count, size, padding):
+    """The image tiles of a one-row grid, without the padding between them."""
+    offset = padding + 1 if padding > 0 else 0
+    cell = size + 2 * padding
+    return np.stack(
+        [
+            grid[offset : offset + size, k * cell + offset : k * cell + offset + size]
+            for k in range(count)
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "batch",
+    [
+        np.linspace(0, 4095, 2 * 36).reshape(2, 1, 6, 6).astype(np.uint16),
+        np.linspace(0.2, 0.5, 2 * 36).reshape(2, 1, 6, 6),
+        np.linspace(-3.0, -1.0, 2 * 36).reshape(2, 1, 6, 6),
+        np.linspace(1000, 5000, 2 * 36).reshape(2, 1, 6, 6).astype(np.int64),
+        np.linspace(100, 200, 2 * 36).reshape(2, 1, 6, 6).astype(np.uint8),
+    ],
+    ids=["uint16_12_bit", "float_inside_0_1", "float_negative", "int_wide", "uint8"],
+)
+@pytest.mark.parametrize("padding", [1, 2, 5])
+def test_images_normalizes_by_the_images_not_the_padding(capture_send, batch, padding):
+    """The padding is filled with 1; it set the grid's min or max before."""
+    opts = {"normalize": True}
+    plain = _shown(capture_send, lambda v: v.images(batch, padding=0, opts=opts))
+    padded = _shown(capture_send, lambda v: v.images(batch, padding=padding, opts=opts))
+    tiles = _grid_tiles(padded, 2, 6, padding)
+    np.testing.assert_array_equal(tiles, _grid_tiles(plain, 2, 6, 0))
+    assert tiles.min() == 0 and tiles.max() == 255
+
+
+def test_images_normalize_ignores_the_empty_cells_of_a_short_last_row(
+    capture_send,
+):
+    """Three images in rows of two leave one empty cell, filled like padding."""
+    batch = np.linspace(0.2, 0.5, 3 * 36).reshape(3, 1, 6, 6)
+    opts = {"normalize": True}
+    short = _shown(
+        capture_send, lambda v: v.images(batch, padding=0, nrow=2, opts=opts)
+    )
+    flat = _shown(capture_send, lambda v: v.images(batch, padding=0, nrow=3, opts=opts))
+    np.testing.assert_array_equal(short[:6, :12], flat[:, :12])
+    np.testing.assert_array_equal(short[6:, :6], flat[:, 12:])
+    assert flat.min() == 0 and flat.max() == 255
+
+
+def test_images_normalizes_padded_16_bit_pngs_to_full_range(capture_send, tmp_path):
+    """The reported case: 16-bit PNGs in a grid with the default padding."""
+    paths = []
+    for k, top in enumerate((2000, 4095)):
+        paths.append(tmp_path / "depth{}.png".format(k))
+        depth = np.linspace(0, top, 36).reshape(6, 6).astype(np.uint16)
+        Image.fromarray(depth).save(paths[-1])
+    tiles = [Image.open(path) for path in paths]
+    grid = _shown(capture_send, lambda v: v.images(tiles, opts={"normalize": True}))
+    shown = _grid_tiles(grid, 2, 6, 2)
+    assert shown.min() == 0 and shown.max() == 255
+    assert shown[0].max() == np.uint8(2000 / 4095 * 255)  # one scale for the grid
+
+
+def test_images_normalizes_a_constant_batch_like_image_does(capture_send):
+    batch = np.full((2, 1, 6, 6), 7.0)
+    grid = _shown(capture_send, lambda v: v.images(batch, opts={"normalize": True}))
+    alone = _shown(capture_send, lambda v: v.image(batch[0], opts={"normalize": True}))
+    assert (alone == 0).all() and (_grid_tiles(grid, 2, 6, 2) == 0).all()
 
 
 def test_images_scales_a_16_bit_tile_next_to_an_8_bit_one(capture_send, tmp_path):
@@ -915,16 +985,26 @@ def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client
     assert _grid_dtype(offline_client, batch) == np.float64
 
 
-def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
-    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+def test_images_hands_image_a_stretched_grid_when_normalize_is_requested(
+    offline_client,
+):
+    """``opts.normalize`` is applied in ``images()``, by the images' own range.
 
-    A uint8 grid never reaches that branch, so taking the dtype shortcut under
-    ``normalize=True`` would accept the option and silently do nothing. The
-    batch here is uint8 with a maximum above 1, which is exactly what the
-    shortcut is for -- so the float grid can only be coming from the option.
+    Left to ``image()``, the stretch would also take in the padding's fill of 1,
+    so the grid arrives already stretched, as bytes. The option still can't be
+    skipped by the uint8 shortcut: the batch here spans 100..200, and the grid
+    ``image()`` gets spans 0..255. Without the option it keeps its uint8 grid.
     """
     batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
-    assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
+    batch[:, :, 0, 0] = 100
+    grids = []
+    with patch.object(
+        offline_client, "image", side_effect=lambda g, *a, **k: grids.append(g)
+    ):
+        offline_client.images(batch, opts={"normalize": True})
+    stretched = grids[0]
+    assert stretched.dtype == np.uint8
+    assert (stretched[:, 3:7, 3:7].min(), stretched[:, 3:7, 3:7].max()) == (0, 255)
     assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
 
 

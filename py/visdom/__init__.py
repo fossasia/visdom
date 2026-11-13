@@ -746,19 +746,31 @@ def _image_to_bytes(img, normalize=False):
     elif not np.issubdtype(img.dtype, np.floating):
         img = img.astype(np.float64) if normalize else _fit_integers(img)
     finite_range = _finite_range(img)
+    if normalize:
+        return _stretch_to_bytes(img, finite_range)
     if finite_range is not None:
         img_min, img_max = finite_range
     else:
         img_min, img_max = 0.0, 0.0
-    if normalize:
-        if img_max > img_min:
-            img = (img - img_min) / (img_max - img_min) * 255.0
-        else:
-            img = np.zeros_like(img)
-    elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+    if img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
         img = img * 255.0
     elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
         img = (img + 1.0) / 2.0 * 255.0
+    img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+    return np.uint8(np.clip(img, 0, 255))
+
+
+def _stretch_to_bytes(img, value_range):
+    """``img`` min-max scaled so ``value_range`` fills [0, 255], as uint8.
+
+    ``value_range`` is ``_finite_range`` of the values to stretch; None, or a
+    single value, gives all zeros.
+    """
+    lo, hi = value_range if value_range is not None else (0.0, 0.0)
+    if hi > lo:
+        img = (img - lo) / (hi - lo) * 255.0
+    else:
+        img = np.zeros_like(img)
     img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
     return np.uint8(np.clip(img, 0, 255))
 
@@ -2981,6 +2993,10 @@ class Visdom(object):
         if remainder:
             slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
+        if normalize and not is_bytes:
+            # By the images' own range: the padding is filled with 1, which
+            # would otherwise set the grid's min or max and squash the images.
+            grid = _stretch_to_bytes(grid, _finite_range(tensor))
         return self.image(grid, win, env, opts)
 
     @pytorch_wrap
