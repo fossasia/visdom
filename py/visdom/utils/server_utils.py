@@ -141,11 +141,14 @@ def set_cookie(value=None):
     # fresh machine the directory is not there yet.
     ensure_dir_exists(DEFAULT_ENV_PATH)
     # Anyone who can read the secret can sign a login cookie, so keep it
-    # owner-only. chmod covers a file left behind by an older version, which
-    # keeps its old mode when -force_new_cookie overwrites it.
+    # owner-only. fchmod covers a file left behind by an older version, which
+    # keeps its old mode when -force_new_cookie overwrites it. It changes the
+    # file we opened rather than whatever the path points to by then. Windows
+    # only has os.fchmod from Python 3.13.
     path = DEFAULT_ENV_PATH + "COOKIE_SECRET"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.chmod(path, 0o600)
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as cookie_file:
         cookie_file.write(cookie_secret)
 
