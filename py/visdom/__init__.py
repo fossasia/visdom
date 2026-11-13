@@ -2110,17 +2110,18 @@ class Visdom(object):
     def text(self, text, win=None, env=None, opts=None, append=False):
         """
         This function prints text in a box. ``text`` is a string, or a value
-        that can be rendered as one: bytes are decoded as UTF-8 and everything
-        else goes through ``str()``, so a numpy array or any other repr-able
-        object is shown as its ``str(...)`` form instead of a cryptic
+        that can be rendered as one: bytes, bytearray and memoryview are
+        decoded as UTF-8 and everything else goes through ``str()``, so a
+        numpy array or any other repr-able object is shown as its
+        ``str(...)`` form instead of a cryptic
         ``Object of type ... is not JSON serializable`` from the JSON encoder.
         No specific `opts` are currently supported.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        if isinstance(text, bytes):
-            text = text.decode("utf-8", errors="replace")
+        if isinstance(text, (bytes, bytearray, memoryview)):
+            text = bytes(text).decode("utf-8", errors="replace")
         elif not isinstance(text, str):
             text = str(text)
         data = [{"content": text, "type": "text"}]
