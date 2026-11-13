@@ -2452,11 +2452,17 @@ class Visdom(object):
         # The t-SNE backends read ``features.shape`` and crunch the values as
         # floats, so the input has to be a rectangular numeric matrix before
         # the loading pane goes out: a failure after that leaves the browser
-        # on a spinner. Leave array-likes alone so scipy sparse matrices still
-        # reach the backend intact, and only convert plain sequences; even
-        # then ``np.asarray`` is not enough on its own, because a ragged list
-        # becomes a 1-D object array and a mixed-type list becomes strings.
-        if not (
+        # on a spinner. Torch tensors go through ``_to_numpy`` first, which
+        # detaches and moves them to the CPU (a ``requires_grad`` or CUDA
+        # tensor makes a bare ``np.asarray`` raise). After that everything is
+        # converted except an object that looks like a matrix (ndim, shape,
+        # dtype) but offers no ``__array__``: that is a scipy sparse matrix,
+        # which the backend reads natively and ``np.asarray`` would collapse
+        # into a 0-d object array. Even converted, ``np.asarray`` is not
+        # enough on its own, because a ragged list becomes a 1-D object array
+        # and a mixed-type list becomes strings, so the check below stays.
+        features = _to_numpy(features)
+        if hasattr(features, "__array__") or not (
             hasattr(features, "ndim")
             and hasattr(features, "dtype")
             and hasattr(features, "shape")
