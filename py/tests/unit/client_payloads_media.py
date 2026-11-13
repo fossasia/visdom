@@ -948,9 +948,10 @@ def test_svg_file_preserves_text(capture_send, tmp_path, text):
     assert content(sent) == markup
 
 
-def test_svg_accepts_bytes_svgstr(capture_send):
-    """bytes svgstr decodes as UTF-8, same as the svgfile path does."""
-    sent = capture_send(lambda v: v.svg(svgstr=b"<svg a='1'><g/></svg>"))
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_svg_accepts_buffer_svgstr(capture_send, wrap):
+    """bytes, bytearray and memoryview decode as UTF-8, like the svgfile path."""
+    sent = capture_send(lambda v: v.svg(svgstr=wrap(b"<svg a='1'><g/></svg>")))
     assert content(sent) == "<svg a='1'><g/></svg>"
 
 
