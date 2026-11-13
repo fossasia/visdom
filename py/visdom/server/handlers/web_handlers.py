@@ -80,6 +80,63 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def _reject_json_constant(value):
+    """Reject non-standard JSON constants (NaN, Infinity, -Infinity) per RFC 8259."""
+    raise ValueError("invalid JSON constant: {}".format(value))
+
+
+def _validate_win(win):
+    """Validate that win is a string or finite number (and not a bool)."""
+    if (
+        win is None
+        or isinstance(win, bool)
+        or not isinstance(win, (str, int, float))
+        or (isinstance(win, float) and (win != win or abs(win) == float("inf")))
+    ):
+        raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
+
+
+def _resolve_win_key(env_jsons, win):
+    """Return the key in env_jsons matching win (string or numeric), or win itself."""
+    if win is None:
+        return None
+    _validate_win(win)
+    if win in env_jsons:
+        return win
+    win_str = str(win)
+    if win_str in env_jsons:
+        return win_str
+    if isinstance(win, float) and win.is_integer():
+        win_int_str = str(int(win))
+        if win_int_str in env_jsons:
+            return win_int_str
+    return win
+
+
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = json.loads(text, parse_constant=_reject_json_constant)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
@@ -108,19 +165,25 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Check if a window exists within the specified environment."""
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
+        win = args["win"]
+        _validate_win(win)
         eid = extract_eid(args)
-        if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
-            handler.write("true")
-        else:
-            handler.write("false")
+        if eid in handler.state:
+            env_jsons = handler.state[eid]["jsons"]
+            if _resolve_win_key(env_jsons, win) in env_jsons:
+                handler.write("true")
+                return
+        handler.write("false")
 
     @check_auth
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Handle POST request to check window existence."""
+        args = _decode_json_body(self.request.body)
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
@@ -802,7 +865,9 @@ class UpdateHandler(BaseHandler):
         if eid not in handler.state:
             handler.state[eid] = {"jsons": {}, "reload": {}}
 
-        if args["win"] not in handler.state[eid]["jsons"]:
+        win = args["win"]
+        win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
+        if win_key not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
             # that window
             append = args.get("append")
@@ -813,7 +878,7 @@ class UpdateHandler(BaseHandler):
                 handler.write("win does not exist")
             return
 
-        p = handler.state[eid]["jsons"][args["win"]]
+        p = handler.state[eid]["jsons"][win_key]
         data = args.get("data")
         is_image_slider_update = isinstance(data, list) and any(
             isinstance(entry, dict) and entry.get("type") == "image_update_selected"
@@ -956,7 +1021,11 @@ class CloseHandler(BaseHandler):
         win = args.get("win")
 
         env = handler.state[eid]
-        keys = list(env["jsons"].keys()) if win is None else [win]
+        if win is None:
+            keys = list(env["jsons"].keys())
+        else:
+            win_key = _resolve_win_key(env["jsons"], win)
+            keys = [win_key] if win_key in env["jsons"] else [win]
         closed = []
         for key in keys:
             p_data = env["jsons"].pop(key, None)
@@ -1040,10 +1109,12 @@ class DeleteEnvHandler(BaseHandler):
         request handler below, and tests -- await what comes back. ``None``
         means there was nothing to delete.
         """
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         eid = args.get("eid")
         if eid is None:
             return None
-        eid = escape_eid(eid)
+        eid = extract_eid(args)
         if eid == "main":
             return None
         handler.state.pop(eid, None)
@@ -1054,9 +1125,8 @@ class DeleteEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Handle POST request to delete an environment."""
+        args = _decode_json_body(self.request.body)
         removal = self.wrap_func(self, args)
         if removal is not None:
             await removal
@@ -1065,26 +1135,28 @@ class DeleteEnvHandler(BaseHandler):
 class EnvStateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Handle request for environment state or list of environments."""
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         eid = args.get("eid")
         if eid is not None:
-            eid = escape_eid(str(eid))
+            eid = extract_eid(args)
             if eid not in handler.state:
                 handler.set_status(404)
-                handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
+                handler.write_json({"error": "env '{}' not found".format(eid)})
                 return
-            handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
+            handler.write_json(handler.state[eid]["jsons"])
         else:
             all_eids = list(handler.state.keys())
-            handler.write(json.dumps(all_eids))
+            handler.write_json(all_eids)
 
     @check_auth
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Handle POST request for environment state."""
+        args = _decode_json_body(self.request.body)
         eid = args.get("eid")
         if eid is not None:
-            await ensure_env_loaded(self, escape_eid(str(eid)))
+            await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -1261,30 +1333,6 @@ class CompareHandler(BaseHandler):
                 return
 
 
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by handlers whose bodies are JSON objects, so an empty body is read
-    as an empty object and each handler decides on its own whether the arguments
-    it needs are missing. Anything else that is not a JSON object is the caller's
-    error: without this check, malformed JSON or a bare list would surface as an
-    unhandled exception and a 500 rather than a 400 naming what was wrong with
-    the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError as error:
-        raise tornado.web.HTTPError(
-            400, reason="request body must be valid JSON"
-        ) from error
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
-
-
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
@@ -1349,14 +1397,14 @@ class DataHandler(BaseHandler):
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                if args["win"] not in handler.state[eid]["jsons"]:
+                win = args["win"]
+                win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
+                if win_key not in handler.state[eid]["jsons"]:
                     raise tornado.web.HTTPError(
                         400, reason="window doesn't exist in this env"
                     )
                 handler.write(
-                    json.dumps(
-                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
-                    )
+                    json.dumps(handler.state[eid]["jsons"][win_key], cls=NanSafeEncoder)
                 )
 
     @check_auth
