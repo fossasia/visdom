@@ -170,9 +170,9 @@ def test_env_named_like_hash_is_not_misread(store):
     assert store.list_envs() == ["hash_results"]
 
 
-def test_long_name_hash_fallback_round_trips(store):
+@pytest.mark.parametrize("long_eid", ["e" * 300, "e" * 5000, "\U0001f600" * 130])
+def test_long_name_hash_fallback_round_trips(store, long_eid):
     """An over-long env name uses the hash_<sha256>.json fallback and round-trips."""
-    long_eid = "e" * 5000
     store.save_env(long_eid, _env())
     assert store.list_envs() == [long_eid]
     assert store.env_exists(long_eid)
@@ -225,12 +225,35 @@ def test_clear_undo_removes_history(store):
     assert store.load_undo("expt") == []
 
 
-def test_undo_long_name_hash_fallback_round_trips(store):
+@pytest.mark.parametrize("long_eid", ["e" * 300, "e" * 5000, "\U0001f600" * 130])
+def test_undo_long_name_hash_fallback_round_trips(store, long_eid):
     """An over-long env name uses the hash_<sha256>.json undo fallback."""
-    long_eid = "e" * 5000
     stack = [["win_0", {"id": "win_0"}]]
     store.save_undo(long_eid, stack)
     assert store.load_undo(long_eid) == stack
+
+
+@pytest.mark.parametrize("save_undo", [False, True])
+@pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EACCES, errno.EIO])
+def test_save_preserves_unrelated_os_errors(
+    store, monkeypatch, save_undo, error_number
+):
+    error = OSError(error_number, "write failed")
+    attempts = []
+
+    def fail_write(path, payload):
+        attempts.append(path)
+        raise error
+
+    monkeypatch.setattr(store, "_atomic_write", fail_write)
+    with pytest.raises(OSError) as caught:
+        if save_undo:
+            store.save_undo("short-name", [])
+        else:
+            store.save_env("short-name", _env())
+    assert caught.value is error
+    assert len(attempts) == 1
+    assert store.list_envs() == []
 
 
 @pytest.mark.parametrize("eid", ["../evil", "subdir/../evil", "/etc/evil"])

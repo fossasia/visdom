@@ -23,6 +23,17 @@ from visdom.utils.shared_utils import copy_json_data, ensure_dir_exists, NanSafe
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 
+
+def _filename_too_long(error, path):
+    if error.errno == errno.ENAMETOOLONG or getattr(error, "winerror", None) == 206:
+        return True
+    return (
+        os.name == "nt"
+        and error.errno == errno.EINVAL
+        and len(os.path.basename(path + ".tmp").encode("utf-16-le")) > 255 * 2
+    )
+
+
 #: The small facts an env file holds outside its windows: the experiment
 #: metadata blob and, for a ``hash_<sha256>.json`` fallback, the real env id.
 #: ``readable`` is ``False`` for a file that could not be opened or parsed --
@@ -322,7 +333,7 @@ class JSONStore(DataStore):
                 raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
             self._atomic_write(primary, json.dumps(payload, cls=NanSafeEncoder))
         except OSError as e:
-            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            if not _filename_too_long(e, primary):
                 raise
             data_to_save = copy_json_data(payload)
             data_to_save["name"] = self._safe_eid(eid)
@@ -686,7 +697,7 @@ class JSONStore(DataStore):
             target = plain
             self._atomic_write(plain, payload)
         except OSError as e:
-            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            if not _filename_too_long(e, plain):
                 raise
             target = hashed
             self._atomic_write(hashed, payload)
