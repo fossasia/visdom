@@ -16,9 +16,11 @@ Visdom dependency just for this optional adapter.
 
 from __future__ import annotations
 
+import atexit
 import functools
 import html
 import json
+import os
 import threading
 import time
 import warnings
@@ -40,6 +42,43 @@ _OPTUNA_TAG_NAMES = {
     "optuna_direction",
     _DASHBOARD_TAG_NAME,
 }
+
+
+# Callbacks still holding set-aside trials. Held strongly, so a callback
+# passed inline to study.optimize() is still flushed when the program exits.
+_WAITING: set = set()
+_WAITING_LOCK = threading.Lock()
+
+
+# How long the exit flush waits for a worker still sending, so a thread
+# stuck on the network can't hang the program's exit.
+_EXIT_WAIT = 30.0
+
+
+@atexit.register
+def _flush_waiting_callbacks() -> None:
+    """Send what outages left set aside, once, before the program exits."""
+    with _WAITING_LOCK:
+        callbacks = list(_WAITING)
+    for callback in callbacks:
+        callback._flush_at_exit()
+
+
+def _forget_parent_trials() -> None:
+    """In a forked child: the queued trials are the parent's to send."""
+    global _WAITING_LOCK
+    _WAITING_LOCK = threading.Lock()
+    for callback in list(_WAITING):
+        callback._pending.clear()
+        callback._sending = False
+        # A parent thread may have held these at the fork.
+        callback._pending_lock = threading.Lock()
+        callback._retry_lock = threading.Lock()
+    _WAITING.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_parent_trials)
 
 
 class _WriteRejected(RuntimeError):
@@ -70,7 +109,8 @@ class OptunaCallback:
     :meth:`flush` or :meth:`update_dashboard`; a write whose reply was lost is
     checked against what the server stored before it is sent again. Up to 1000
     trials are held this way; a trial beyond that is not kept and its warning
-    says so. Supplying
+    says so. Set-aside trials are sent in order, one worker at a time, and any
+    still waiting when the program exits are sent then. Supplying
     ``contour_params`` adds one Optuna contour pane per objective. The HParams
     pane selects trials through stable experiment tags rather than
     callback-local state, so a new callback can rebuild a persisted study
@@ -162,6 +202,9 @@ class OptunaCallback:
         # sharing dashboard_env give two trials the same env.
         self._pending: deque[tuple[str, Any, list, int, bool]] = deque()
         self._pending_lock = threading.Lock()
+        # One worker sends the queue at a time, so trials keep their order.
+        self._retry_lock = threading.Lock()
+        self._sending = False  # trials are out of the queue, being sent
         self._retry_wait = 0.0
         self._retry_at = 0.0
         self._dashboard_lock = threading.RLock()
@@ -566,12 +609,28 @@ class OptunaCallback:
         return self._write_dashboard(study)
 
     def flush(self) -> bool:
-        """Log the trials a server outage set aside, without waiting.
+        """Log the trials a server outage set aside, without backing off.
 
-        Returns whether none are left. Call it after ``Study.optimize`` when no
-        dashboard is kept, so the last trials are not left out.
+        Returns whether none are left. A retry already running in another
+        worker is waited for. Trials still waiting when the program exits are
+        sent then, but calling this after ``Study.optimize`` reports the result.
         """
-        return self._retry_pending(force=True)
+        return self._retry_pending(force=True, wait=True) is True
+
+    def _flush_at_exit(self) -> None:
+        try:
+            self._retry_pending(force=True, wait=_EXIT_WAIT)
+        except Exception:
+            pass  # warned about below, with whatever is still waiting
+        with self._pending_lock:
+            left = len(self._pending)
+        if left:
+            warnings.warn(
+                "OptunaCallback could not log {} trial(s) before exit: the "
+                "visdom server could not be reached".format(left),
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def _write_dashboard(self, study: Any) -> bool:
         with self._dashboard_lock:
@@ -808,6 +867,8 @@ class OptunaCallback:
             if len(self._pending) >= self._max_pending:
                 return False
             self._pending.append(item)
+            with _WAITING_LOCK:
+                _WAITING.add(self)
             return True
 
     def _server_failed(self) -> None:
@@ -819,18 +880,45 @@ class OptunaCallback:
             )
             self._retry_at = time.monotonic() + self._retry_wait
 
-    def _retry_pending(self, force: bool = False) -> bool:
-        """Log set-aside trials, oldest first. Returns whether none are left.
+    def _retry_pending(
+        self, force: bool = False, wait: bool | float = False
+    ) -> bool | None:
+        """Log set-aside trials, oldest first, one worker at a time.
 
-        Unless ``force`` is set, nothing is sent while backing off.
+        Returns True when none are left and False when some are: the server
+        is down, or, unless ``force``, still being backed off from. Returns
+        None when another worker is sending them; ``wait`` waits for it
+        instead, for that many seconds when it is a number.
         """
+        while True:
+            with self._pending_lock:
+                if not self._pending and not self._sending:
+                    with _WAITING_LOCK:
+                        _WAITING.discard(self)
+                    return True
+                if not force and time.monotonic() < self._retry_at:
+                    return False
+            if wait is True:
+                got = self._retry_lock.acquire()
+            elif wait:
+                got = self._retry_lock.acquire(timeout=wait)
+            else:
+                got = self._retry_lock.acquire(blocking=False)
+            if not got:
+                return None
+            try:
+                if not self._send_pending():
+                    return False
+            finally:
+                self._retry_lock.release()
+            # Trials queued while this one held the lock go round again.
+
+    def _send_pending(self) -> bool:
+        """Send the queue as it stands. Returns whether nothing failed to send."""
         with self._pending_lock:
-            if not self._pending:
-                return True
-            if not force and time.monotonic() < self._retry_at:
-                return False
             pending = list(self._pending)
             self._pending.clear()
+            self._sending = True
         done = 0
         try:
             for env, trial, writes, start, maybe_stored in pending:
@@ -854,7 +942,7 @@ class OptunaCallback:
                             trial.number, error
                         ),
                         RuntimeWarning,
-                        stacklevel=3,
+                        stacklevel=4,
                     )
                 else:
                     done += 1
@@ -865,13 +953,15 @@ class OptunaCallback:
             # stops early (an outage, a raise, an interrupt) loses no trial.
             with self._pending_lock:
                 self._pending.extendleft(reversed(pending[done:]))
+                self._sending = False
         with self._pending_lock:
             self._retry_wait = 0.0
         return True
 
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
-        server_down = not self._retry_pending()
+        state = self._retry_pending()
+        server_down = state is not True
         env = None
         logged = False
         kept = True
@@ -880,17 +970,24 @@ class OptunaCallback:
             env = payload["env"]
             writes = self._trial_writes(payload)
             if server_down:
-                # Earlier trials are still waiting on the server; don't block.
+                # Older trials are waiting, or being sent by another worker:
+                # queue behind them, so the server gets trials in order.
                 kept = self._set_aside((env, trial, writes, 0, False))
-                raise _WriteFailed("the visdom server could not be reached")
-            try:
-                self._run_writes(trial, env, writes, 0)
-            except (_WriteFailed, OSError) as error:
-                server_down = True
-                self._server_failed()
-                kept = self._set_aside((env, trial, writes, error.resume_at, True))
-                raise
-            logged = True
+                if kept and state is None:
+                    # Sent by whichever worker drains the queue next, maybe us.
+                    state = self._retry_pending()
+                    server_down = state is not True
+                if not kept or state is False:
+                    raise _WriteFailed("the visdom server could not be reached")
+            else:
+                try:
+                    self._run_writes(trial, env, writes, 0)
+                except (_WriteFailed, OSError) as error:
+                    server_down = True
+                    self._server_failed()
+                    kept = self._set_aside((env, trial, writes, error.resume_at, True))
+                    raise
+                logged = True
         except Exception as error:
             if self.raise_on_error:
                 raise
