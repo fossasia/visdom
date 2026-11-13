@@ -426,6 +426,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
 - [`vis.show`](#visshow): embed the dashboard in a Jupyter, Colab, VS Code or Kaggle notebook cell
+- [`%visdom`](#visdom-notebook-magic): notebook magic that embeds a dashboard, starting a local server if one is not running
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1702,6 +1703,42 @@ inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
 the server's default view, because a browser frame cannot send the
 `X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
 is the case.
+
+#### %visdom (notebook magic)
+
+`vis.show` embeds a dashboard you already have a client for. The `%visdom`
+magic is for the other order: it embeds a dashboard first, and starts a server
+on the kernel's own machine if nothing is answering on the port.
+
+```
+%load_ext visdom.notebook
+%visdom --env run-7
+```
+
+```
+%visdom --port 9000 --height 400 --no-start
+```
+
+Flags:
+- `--port`: server port. Default `8097`.
+- `--server`: server url without the port. Default `http://localhost`. A server on another host is embedded if it is up, and never started from here.
+- `--base_url`: the server's base url, for a proxied deployment. Typed with or without the surrounding slashes.
+- `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with.
+- `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels, anything else is CSS.
+- `--no-start`: embed whatever is already running and never start a server.
+- `--timeout`: seconds to wait for a server the magic started. Default `20`.
+
+The server runs as a child process of the kernel, because it needs an asyncio
+loop of its own and the notebook's loop is taken. Its output goes to a log file
+named in the line the magic prints, which is also where a failed start is
+explained. A server the magic started is asked to shut down — and so saves its
+environments — when the kernel exits; a server that was already running is left
+alone. Re-running the cell embeds the same server rather than starting a second.
+
+IPython is not a visdom dependency: the magic is registered against the shell
+IPython hands `%load_ext`, and nothing in `visdom` imports IPython. For
+convenience `pip install visdom[notebook]` installs it alongside visdom, and
+`example/notebook_demo.ipynb` is a notebook to run the above in.
 
 ### Experiments
 
