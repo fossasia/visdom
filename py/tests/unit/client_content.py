@@ -134,8 +134,10 @@ def test_text_rejects_a_mistyped_known_opt(capture_send):
         capture_send(lambda v: v.text("hi", opts={"colormap": 7}))
 
 
-def test_text_decodes_utf8_bytes_to_a_string(capture_send):
-    sent = capture_send(lambda v: v.text("café".encode("utf-8")))
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_text_decodes_utf8_buffers_to_a_string(capture_send, wrap):
+    """bytes, bytearray and memoryview all decode, none renders as its repr."""
+    sent = capture_send(lambda v: v.text(wrap("café".encode("utf-8"))))
     assert block(sent) == {"content": "café", "type": "text"}
 
 
