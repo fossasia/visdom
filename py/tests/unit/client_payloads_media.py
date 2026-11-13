@@ -283,7 +283,9 @@ def test_image_rejects_unsupported_shapes(offline_client, img, message):
 
 
 @pytest.mark.parametrize(
-    "shape", [(224, 224, 3), (64, 64, 4), (28, 28, 1)], ids=["rgb", "rgba", "gray"]
+    "shape",
+    [(224, 224, 3), (64, 64, 4), (28, 28, 1), (5, 5, 3)],
+    ids=["rgb", "rgba", "gray", "smallest"],
 )
 def test_image_points_a_channels_last_array_to_transpose(offline_client, shape):
     """PIL, OpenCV and matplotlib give HxWxC; say so instead of '224 channels'."""
@@ -309,7 +311,18 @@ def test_image_suggested_fixes_render(capture_send):
 
 @pytest.mark.parametrize(
     "shape",
-    [(5, 8, 8), (2, 8, 3), (2, 8, 4), (2, 8, 1), (0, 8, 3), (32, 0, 3)],
+    [
+        (5, 8, 8),
+        (2, 8, 3),
+        (2, 8, 4),
+        (2, 8, 1),
+        (0, 8, 3),
+        (32, 0, 3),
+        (8, 3, 3),
+        (16, 4, 1),
+        (6, 1, 3),
+        (64, 4, 4),
+    ],
     ids=[
         "no_channel_side",
         "2ch_width3",
@@ -317,6 +330,10 @@ def test_image_suggested_fixes_render(capture_send):
         "2ch_width1",
         "empty",
         "no_pixels",
+        "8ch_3_rows",
+        "16ch_4_rows",
+        "6ch_1_row",
+        "64ch_4_rows",
     ],
 )
 def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client, shape):
@@ -328,8 +345,8 @@ def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client, 
 
 @pytest.mark.parametrize(
     "batch",
-    [np.zeros((8, 32, 32, 3)), [np.zeros((32, 32, 3))] * 2],
-    ids=["array", "list"],
+    [np.zeros((8, 32, 32, 3)), [np.zeros((32, 32, 3))] * 2, np.zeros((2, 5, 5, 1))],
+    ids=["array", "list", "smallest"],
 )
 def test_images_points_a_channels_last_batch_to_transpose(offline_client, batch):
     """The hint covers both an array and a list, since a list has no transpose."""
@@ -353,12 +370,14 @@ def test_images_suggested_fixes_render(capture_send):
 
 
 @pytest.mark.parametrize(
-    "shape", [(4, 2, 16, 3), (4, 2, 16, 4), (4, 2, 16, 1)], ids=["w3", "w4", "w1"]
+    "shape",
+    [(4, 2, 16, 3), (4, 2, 16, 4), (4, 2, 16, 1), (4, 16, 3, 3), (2, 8, 1, 4)],
+    ids=["w3", "w4", "w1", "16ch_3_rows", "8ch_1_row"],
 )
 def test_images_gives_no_channels_last_hint_for_a_2_channel_batch(
     offline_client, shape
 ):
-    """NxCxHxW with C=2 and a small width is not NxHxWxC."""
+    """NxCxHxW with 2 channels, or many channels and a few rows, isn't NxHxWxC."""
     with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
         offline_client.images(np.zeros(shape))
     assert "NxHxWxC" not in str(e.value) and "HxWxC" not in str(e.value)

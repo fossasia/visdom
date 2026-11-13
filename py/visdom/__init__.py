@@ -2563,9 +2563,10 @@ class Visdom(object):
                 im = Image.fromarray(img, mode="RGBA")
             else:
                 hint = ""
-                # Only when the first side can't be channels: CxHxW with 2
-                # channels and a width of 3 is not channels last.
-                if img.shape[0] > 4 and img.shape[2] in (1, 3, 4) and img.size:
+                # Only when the first two sides look like an image's and the
+                # last like its channels: CxHxW with 2 channels, or many channels
+                # and only a few rows (a feature map), is not channels last.
+                if img.shape[0] > 4 and img.shape[1] > 4 and img.shape[2] in (1, 3, 4):
                     hint = (
                         f" Shape {img.shape} looks like HxWxC (channels last), but"
                         " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
@@ -2831,7 +2832,8 @@ class Visdom(object):
             return self.image(tensor, win, env, opts)
         if (
             tensor.ndim == 4
-            and tensor.shape[1] > 4  # too many to be channels, as in image()
+            and tensor.shape[1] > 4  # both sides look like an image's,
+            and tensor.shape[2] > 4  # as in image()
             and tensor.shape[3] in (1, 3, 4)
             and tensor.size
         ):
