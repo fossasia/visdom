@@ -14,6 +14,7 @@ the URL inside it. The Colab branch is the only part that reaches outside the
 client, and it reaches through ``_colab_output``, which these tests replace.
 """
 
+import logging
 import sys
 from types import SimpleNamespace
 
@@ -32,6 +33,7 @@ def _client(env="main", server="http://localhost", port=8097, base_url="", **kwa
     client.port = port
     client.base_url = base_url
     client.offline = False
+    client.workspace = None
     for name, value in kwargs.items():
         setattr(client, name, value)
     return client
@@ -44,9 +46,11 @@ class _ColabOutput:
         self.result = result
         self.error = error
         self.calls = []
+        self.timeouts = []
 
-    def eval_js(self, script):
+    def eval_js(self, script, timeout_sec=None):
         self.calls.append(script)
+        self.timeouts.append(timeout_sec)
         if self.error is not None:
             raise self.error
         return self.result
@@ -106,14 +110,18 @@ class TestShow:
     def test_the_default_size_is_600px_tall_and_full_width(self, no_colab):
         html = _client().show()._repr_html_()
 
-        assert 'height="600"' in html
-        assert 'width="100%"' in html
+        assert "width:100%" in html
+        assert "height:600px" in html
 
-    def test_a_number_is_pixels_and_a_string_is_css(self, no_colab):
+    def test_the_sizes_are_css_and_not_html_dimension_attributes(self, no_colab):
+        # The HTML width=/height= attributes are a legacy length: they read
+        # '40vh' as 40 pixels and drop the unit, so a documented CSS dimension
+        # would silently come out the wrong size.
         html = _client().show(height="40vh", width=480)._repr_html_()
 
-        assert 'height="40vh"' in html
-        assert 'width="480"' in html
+        assert 'style="width:480px;height:40vh;border:0"' in html
+        assert "height=" not in html
+        assert "width=" not in html
 
     def test_a_dimension_is_escaped_before_it_reaches_the_attribute(self, no_colab):
         # Dimensions are interpolated into markup, so a string one is untrusted
@@ -122,6 +130,16 @@ class TestShow:
 
         assert 'onload="alert(1)' not in html
         assert "&quot;" in html
+
+    def test_a_second_css_declaration_is_refused(self, no_colab):
+        # A dimension is a length. Anything past a semicolon would be styling
+        # the notebook rather than sizing the frame.
+        with pytest.raises(ValueError):
+            _client().show(height="600px;position:fixed;top:0")
+
+    def test_an_empty_dimension_is_refused(self, no_colab):
+        with pytest.raises(ValueError):
+            _client().show(width="   ")
 
     def test_a_nonpositive_dimension_is_refused(self, no_colab):
         # From the show() call, not from whatever displays its result later.
@@ -151,6 +169,59 @@ class TestOffline:
         assert repr(embed) == embed.note
 
 
+class TestCredentials:
+    def test_a_password_in_the_server_url_never_reaches_the_markup(self, no_colab):
+        # show()'s output is saved in the notebook and shared with it.
+        client = _client(server="https://user:hunter2@visdom.example.com", port=443)
+
+        html = client.show()._repr_html_()
+
+        assert client._dashboard_url() == "https://visdom.example.com:443/env/main"
+        assert "hunter2" not in html
+        assert "hunter2" not in repr(client.show())
+
+    def test_a_host_without_credentials_is_left_exactly_as_it_is(self, no_colab):
+        client = _client(server="https://visdom.example.com", port=443)
+
+        assert client._dashboard_url() == "https://visdom.example.com:443/env/main"
+
+    @pytest.mark.parametrize(
+        "given,expected",
+        [
+            ("https://user:pw@host.example.com", "https://host.example.com"),
+            ("https://user@host.example.com", "https://host.example.com"),
+            ("http://host.example.com:9000", "http://host.example.com:9000"),
+            ("http://user:pw@host.example.com:9000", "http://host.example.com:9000"),
+            ("http://user:pw@[::1]", "http://[::1]"),
+            ("http://localhost", "http://localhost"),
+        ],
+    )
+    def test_only_the_credentials_are_dropped(self, given, expected):
+        assert visdom._without_userinfo(given) == expected
+
+
+class TestWorkspace:
+    def test_a_workspace_client_is_told_the_frame_will_not_be_scoped(
+        self, no_colab, caplog
+    ):
+        # The browser cannot send X-Visdom-Workspace, so the frame shows the
+        # server's default view. Silently showing the wrong data is the thing
+        # to avoid; the URL itself is still the best one available.
+        client = _client(workspace="team-7")
+
+        with caplog.at_level(logging.WARNING, logger="visdom"):
+            embed = client.show()
+
+        assert "team-7" in caplog.text
+        assert embed.url == "http://localhost:8097/env/main"
+
+    def test_an_unscoped_client_says_nothing(self, no_colab, caplog):
+        with caplog.at_level(logging.WARNING, logger="visdom"):
+            _client().show()
+
+        assert caplog.text == ""
+
+
 class TestColab:
     def test_a_loopback_server_is_reached_through_the_proxy(self, monkeypatch):
         # Colab serves the notebook from another origin, so 'localhost' in the
@@ -172,18 +243,43 @@ class TestColab:
         assert client._dashboard_url() == "https://visdom.example.com:443/env/main"
         assert output.calls == []
 
-    def test_a_failed_proxy_lookup_falls_back_to_the_plain_url(self, monkeypatch):
+    def test_the_frontend_is_not_waited_on_forever(self, monkeypatch):
+        # eval_js defaults to no deadline. A frontend that went away between
+        # cells would hang the display call instead of failing it, and the
+        # fallback below would never be reached.
+        output = _ColabOutput(result="https://abc-8097.colab.googleusercontent.com/")
+        monkeypatch.setattr(visdom, "_colab_output", lambda: output)
+
+        _client()._dashboard_url()
+
+        assert output.timeouts == [visdom.COLAB_PROXY_TIMEOUT]
+        assert visdom.COLAB_PROXY_TIMEOUT > 0
+
+    def test_a_failed_proxy_lookup_falls_back_to_the_plain_url(
+        self, monkeypatch, caplog
+    ):
         # eval_js raises for everything from a detached frontend to a timeout,
-        # and none of that should cost the caller an iframe.
+        # and none of that should cost the caller an iframe. The fallback URL
+        # cannot work from Colab's browser, though, so it is said out loud
+        # rather than left as a blank frame with no explanation.
         output = _ColabOutput(error=RuntimeError("no frontend"))
         monkeypatch.setattr(visdom, "_colab_output", lambda: output)
 
-        assert _client()._dashboard_url() == "http://localhost:8097/env/main"
+        with caplog.at_level(logging.WARNING, logger="visdom"):
+            url = _client()._dashboard_url()
 
-    def test_a_proxy_that_answers_with_junk_is_ignored(self, monkeypatch):
+        assert url == "http://localhost:8097/env/main"
+        assert "no frontend" in caplog.text
+        assert "blank" in caplog.text
+
+    def test_a_proxy_that_answers_with_junk_is_ignored(self, monkeypatch, caplog):
         monkeypatch.setattr(visdom, "_colab_output", lambda: _ColabOutput(result=""))
 
-        assert _client()._dashboard_url() == "http://localhost:8097/env/main"
+        with caplog.at_level(logging.WARNING, logger="visdom"):
+            url = _client()._dashboard_url()
+
+        assert url == "http://localhost:8097/env/main"
+        assert "cannot reach" in caplog.text
 
 
 class TestColabDetection:

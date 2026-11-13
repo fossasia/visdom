@@ -167,6 +167,10 @@ logger = logging.getLogger(__name__)
 REFUSED_STATUSES = (401, 402, 403)
 REFUSALS_REMEMBERED = 100
 
+# Seconds to wait for Colab's frontend to answer a port-proxy request. It is a
+# round trip to the browser, so it is either prompt or not coming.
+COLAB_PROXY_TIMEOUT = 10
+
 
 def _one_line(text):
     return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
@@ -990,14 +994,50 @@ def _colab_proxy_url(port):
     if output is None:
         return None
     try:
-        proxied = output.eval_js("google.colab.kernel.proxyPort({0})".format(int(port)))
-    except Exception:
-        # eval_js raises for anything from a detached frontend to a timeout,
-        # none of which should stop a plain iframe from being offered.
+        # eval_js defaults to waiting for the frontend forever; a frontend that
+        # went away between cells would hang the display call rather than fail
+        # it, and the fallback below would never be reached.
+        proxied = output.eval_js(
+            "google.colab.kernel.proxyPort({0})".format(int(port)),
+            timeout_sec=COLAB_PROXY_TIMEOUT,
+        )
+    except Exception as error:
+        logger.warning(
+            "Could not ask Colab to proxy port %s (%s). The dashboard will be "
+            "embedded at the kernel's own address, which the notebook's "
+            "browser cannot reach, so the frame is likely to stay blank.",
+            port,
+            error,
+        )
         return None
     if not isinstance(proxied, str) or not proxied:
+        logger.warning(
+            "Colab answered the proxy request for port %s with %r. The "
+            "dashboard will be embedded at the kernel's own address, which "
+            "the notebook's browser cannot reach.",
+            port,
+            proxied,
+        )
         return None
     return proxied.rstrip("/")
+
+
+def _without_userinfo(url):
+    """``url`` with any ``user:password@`` dropped from its host.
+
+    ``show()`` puts the server URL in markup a notebook saves and people
+    share, and ``__repr__`` prints it. A password typed into ``server=`` has
+    no business in either.
+    """
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = "[{0}]".format(host)
+    if parsed.port is not None:
+        host = "{0}:{1}".format(host, parsed.port)
+    return urlunparse((parsed.scheme, host, "", "", "", ""))
 
 
 def _url_eid(eid):
@@ -1020,18 +1060,26 @@ def _url_eid(eid):
 
 
 def _embed_size(value):
-    """An iframe dimension as an HTML attribute value.
+    """An iframe dimension as a CSS length.
 
-    A number is pixels, matching the ``height=600`` default; a string is
-    whatever CSS the caller wants, such as ``"100%"``.
+    A number is pixels, matching the ``height=600`` default; a string is the
+    CSS the caller wants, such as ``"100%"`` or ``"40vh"``. It has to be a
+    length and nothing else -- these end up in a ``style`` attribute, and a
+    second declaration smuggled in after a semicolon would be styling the
+    notebook rather than sizing the frame.
     """
     if isinstance(value, bool) or not isinstance(value, numbers.Number):
-        return html.escape(str(value), quote=True)
+        text = str(value).strip()
+        if not text or ";" in text:
+            raise ValueError(
+                "iframe dimensions must be a CSS length, got {0!r}".format(value)
+            )
+        return text
     if value <= 0:
         raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
     if isinstance(value, numbers.Integral):
-        return str(int(value))
-    return str(value)
+        return "{0}px".format(int(value))
+    return "{0}px".format(value)
 
 
 class _NotebookEmbed:
@@ -1057,10 +1105,12 @@ class _NotebookEmbed:
     def _repr_html_(self):
         if self.url is None:
             return "<p>{0}</p>".format(html.escape(self.note))
-        return (
-            '<iframe src="{0}" width="{1}" height="{2}" frameborder="0" '
-            'style="border:0"></iframe>'
-        ).format(html.escape(self.url, quote=True), self.width, self.height)
+        # The sizes go in the style, not in width=/height=: the HTML attributes
+        # are a legacy length that reads '40vh' as 40 pixels and drops the unit.
+        style = "width:{0};height:{1};border:0".format(self.width, self.height)
+        return '<iframe src="{0}" style="{1}" frameborder="0"></iframe>'.format(
+            html.escape(self.url, quote=True), html.escape(style, quote=True)
+        )
 
 
 class Visdom(object):
@@ -2218,7 +2268,9 @@ class Visdom(object):
         ``/env/<eid>`` as well as at its root, so the URL deep-links straight
         to that environment.
         """
-        base = "{0}:{1}{2}".format(self.server, self.port, self.base_url)
+        base = "{0}:{1}{2}".format(
+            _without_userinfo(self.server), self.port, self.base_url
+        )
         if _is_loopback(urlparse(self.server).hostname):
             proxied = _colab_proxy_url(self.port)
             if proxied is not None:
@@ -2241,7 +2293,8 @@ class Visdom(object):
             env : str, optional
                 Environment to open; defaults to this client's own.
             height : number or str, optional
-                Iframe height. A number is pixels; a string is CSS.
+                Iframe height. A number is pixels; a string is a CSS length
+                such as ``"40vh"``. Both are applied as CSS.
             width : number or str, optional
                 Iframe width. Defaults to the full cell width.
 
@@ -2253,10 +2306,18 @@ class Visdom(object):
         what does: the dashboard answers ``404`` for an env it has never seen,
         and that is what the frame would show.
 
-        Two further things the embed cannot do anything about: a server started
-        with ``-enable_login`` serves the login form inside the frame, and a
-        JupyterLab reached over HTTPS blocks a plain-HTTP frame to another port
-        unless something like ``jupyter-server-proxy`` fronts it.
+        The URL is built from this client's own ``server``, ``port`` and
+        ``base_url``, so it has to be an address the *browser* can reach. That
+        is the kernel's own machine in the usual case, and Colab's port proxy
+        when the kernel is Colab's; a kernel on a remote host needs a port
+        forward or a reverse proxy, and the client pointed at that address,
+        or the frame stays blank.
+
+        Three things the embed cannot do anything about: a server started with
+        ``-enable_login`` serves the login form inside the frame, a JupyterLab
+        reached over HTTPS blocks a plain-HTTP frame to another port, and a
+        workspace-scoped client gets the server's default view because a
+        browser frame cannot send the header that selects a workspace.
         """
         if self.offline:
             return _NotebookEmbed(
@@ -2268,6 +2329,14 @@ class Visdom(object):
                     "embed. Point a client at a running server to see its "
                     "dashboard here."
                 ),
+            )
+        if self.workspace:
+            logger.warning(
+                "This client is scoped to workspace %r, but a browser frame "
+                "cannot carry the X-Visdom-Workspace header that scoping "
+                "needs. The embedded dashboard shows the server's default "
+                "view, not this workspace.",
+                self.workspace,
             )
         return _NotebookEmbed(self._dashboard_url(env), height, width)
 

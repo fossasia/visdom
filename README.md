@@ -1680,7 +1680,7 @@ vis.show(env="baseline", height=400)
 
 Arguments:
 - `env`: environment to open. Defaults to the client's own env, as elsewhere in the API. The embedded dashboard keeps its environment selector, so this is the starting point rather than a restriction.
-- `height`: iframe height. A number is pixels (default `600`); a string is CSS, e.g. `"40vh"`.
+- `height`: iframe height. A number is pixels (default `600`); a string is a CSS length, e.g. `"40vh"`. Both are applied as CSS — the HTML `height` attribute is a legacy length that would read `40vh` as 40 pixels — so a dimension has to be a length and nothing else.
 - `width`: iframe width. Defaults to `"100%"`, the full width of the cell.
 
 Returns an object that renders as the iframe in a notebook and prints as the
@@ -1688,17 +1688,20 @@ plain dashboard URL anywhere else, so it is also a quick way to get a link to
 the right environment from a script. An offline client (`offline=True`) has no
 server to embed and says so instead.
 
-In Colab the notebook is served from a different origin than the kernel, so an
-iframe pointing at `localhost` would resolve against the browser and load
-nothing. For a server on the kernel's own machine, Colab's port proxy is asked
-for a reachable URL instead; a server on a real host is embedded as-is.
+The URL is built from the client's own `server`, `port` and `base_url`, so it
+has to be an address the **browser** can reach — which is not always the
+address the client uses:
 
-Two limits worth knowing about: a server started with `-enable_login` serves
-its login form inside the frame, and a JupyterLab reached over HTTPS blocks a
-plain-HTTP frame to another port unless something like
-[`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/) fronts
-the server — pass that prefix as `base_url` and it is carried into the embedded
-URL.
+- **Kernel and browser on the same machine** (the usual local case): nothing to do.
+- **Colab**: the notebook is served from a different origin than the kernel, so an iframe pointing at `localhost` would resolve against the browser and load nothing. For a server on the kernel's own machine, Colab's port proxy is asked for a reachable URL instead; a server on a real host is embedded as-is. If that request fails, the plain URL is still returned and a warning says the frame is likely to stay blank.
+- **Remote kernel** (a GPU box, a cluster node): the browser cannot reach the kernel's `localhost`. Forward the port, or put the server behind a reverse proxy, and point the client at that address — the embed follows the client.
+- **JupyterLab over HTTPS**: the browser blocks a plain-HTTP frame to another port. Serve visdom from the notebook's own origin, for example with [`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/), and construct the client for that address — `Visdom(server="https://lab.example.com", port=443, base_url="/proxy/8097")`. Pointing only `base_url` at the proxy prefix does not help: the URL would still name the visdom port.
+
+Two more limits: a server started with `-enable_login` serves its login form
+inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
+the server's default view, because a browser frame cannot send the
+`X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
+is the case.
 
 ### Experiments
 

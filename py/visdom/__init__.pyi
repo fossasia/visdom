@@ -54,8 +54,8 @@ class _NotebookEmbed:
     # What 'show' hands back: a URL that renders as an iframe in a notebook and
     # prints as the URL itself anywhere else. 'url' is None for an offline
     # client, which has no server to embed and carries a 'note' instead. The
-    # dimensions are normalized to attribute values on the way in, so they are
-    # Text here whatever the constructor was handed.
+    # dimensions are normalized to CSS lengths on the way in, so they are Text
+    # here whatever the constructor was handed.
     url: _OptStr
     height: Text
     width: Text
