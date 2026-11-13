@@ -1294,9 +1294,14 @@ def test_long_env_and_literal_hash_id_do_not_overwrite_each_other(store, reverse
     assert reopened.load_undo(long_id) == []
 
 
-def test_legacy_fallback_survives_saving_a_literal_hash_id(store):
+@pytest.mark.parametrize("uppercase", [False, True])
+def test_legacy_fallback_survives_saving_a_literal_hash_id(store, uppercase):
+    if uppercase and os.name != "nt":
+        pytest.skip("requires Windows case-insensitive paths")
     long_id = "e" * 300
     literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    if uppercase:
+        literal_id = literal_id.upper()
     legacy = store._hash_path(long_id)[:-5]
     data = dict(_env("long"), name=long_id)
     store._atomic_write(legacy, json.dumps(data))
@@ -1323,6 +1328,65 @@ def test_legacy_fallback_survives_saving_a_literal_hash_id(store):
     assert store.load_undo(long_id) == []
     assert store.load_env(literal_id) == _env("literal")
     assert store.load_undo(literal_id) == [["literal", {}]]
+
+
+@pytest.mark.parametrize("failure", ["read", "stat"])
+def test_unreadable_legacy_owner_is_not_overwritten(store, monkeypatch, failure):
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    legacy = store._hash_path(long_id)[:-5]
+    store._atomic_write(legacy, json.dumps(dict(_env("long"), name=long_id)))
+    with open(legacy) as handle:
+        original = handle.read()
+    cold = JSONStore(store.env_path)
+    with monkeypatch.context() as patch:
+        if failure == "read":
+            patch.setattr(
+                json_store_module, "read_json_file", lambda *a, **k: UNREADABLE_JSON
+            )
+        else:
+            native_stat = os.stat
+
+            def failed_stat(path, *args, **kwargs):
+                if os.path.normcase(os.fspath(path)) == os.path.normcase(legacy):
+                    raise PermissionError(errno.EACCES, "temporarily unreadable")
+                return native_stat(path, *args, **kwargs)
+
+            patch.setattr(json_store_module.os, "stat", failed_stat)
+        cold.save_env(literal_id, _env("literal"))
+        cold.save_undo(literal_id, [["literal", {}]])
+        assert cold.delete_env(literal_id)
+        cold.save_env(literal_id, _env("literal"))
+    with open(legacy) as handle:
+        assert handle.read() == original
+    reopened = JSONStore(store.env_path)
+    assert reopened.load_env(long_id) == _env("long")
+    assert reopened.load_env(literal_id) == _env("literal")
+    assert reopened.load_undo(literal_id) == [["literal", {}]]
+    reopened.delete_env(literal_id)
+    assert reopened.load_env(long_id) == _env("long")
+
+
+@pytest.mark.parametrize("literal", [False, True])
+def test_deleting_fallback_removes_obsolete_primary(store, monkeypatch, literal):
+    eid = "hash_" + "a" * 64 if literal else "old-environment"
+    store.save_env(eid, _env("old"))
+    primary = store._primary_path(eid)
+    original_write = store._atomic_write
+
+    def limited_write(path, payload):
+        if path == primary:
+            raise OSError(errno.ENAMETOOLONG, "staged path too long")
+        original_write(path, payload)
+
+    monkeypatch.setattr(store, "_atomic_write", limited_write)
+    store.save_env(eid, _env("new"))
+    assert store.load_env(eid) == _env("new")
+    assert store.delete_env(eid)
+    reopened = JSONStore(store.env_path)
+    assert not reopened.env_exists(eid)
+    assert eid not in reopened.list_envs()
+    assert reopened.load_env(eid) == {}
 
 
 @pytest.mark.parametrize(

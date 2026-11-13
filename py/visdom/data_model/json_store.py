@@ -253,8 +253,19 @@ class JSONStore(DataStore):
     def _legacy_hash_owner(self, path):
         if path is None or not HASHED_ENV_RE.fullmatch(os.path.basename(path)):
             return None
-        name = self._read_meta(path).name
-        if name is not None and self._hash_path(name)[:-5] == os.path.abspath(path):
+        record = self._read_meta(path)
+        if not record.readable:
+            try:
+                os.stat(path)
+            except FileNotFoundError:
+                return None
+            except OSError:
+                pass
+            return UNREADABLE_META
+        name = record.name
+        if name is not None and os.path.normcase(
+            self._hash_path(name)[:-5]
+        ) == os.path.normcase(os.path.abspath(path)):
             return name
         return None
 
@@ -648,6 +659,8 @@ class JSONStore(DataStore):
         try:
             legacy = self._hash_path(eid)[:-5]
             owns_legacy = self._legacy_hash_owner(legacy) == self._safe_eid(eid)
+            primary = self._primary_path(eid)
+            owner = self._legacy_hash_owner(primary)
             if owns_legacy:
                 _, _, undo = self._undo_paths(eid)
                 if os.path.exists(undo[:-5]):
@@ -658,6 +671,14 @@ class JSONStore(DataStore):
             os.remove(path)
             if legacy != path and owns_legacy:
                 os.remove(legacy)
+            if (
+                primary is not None
+                and os.path.normcase(primary) != os.path.normcase(path)
+                and (owner is None or owner == self._safe_eid(eid))
+                and os.path.exists(primary)
+            ):
+                os.remove(primary)
+                self._forget_meta(primary)
         except FileNotFoundError:
             return False
         except OSError as e:
