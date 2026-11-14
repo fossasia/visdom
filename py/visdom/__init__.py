@@ -2461,22 +2461,46 @@ class Visdom(object):
         # into a 0-d object array. Even converted, ``np.asarray`` is not
         # enough on its own, because a ragged list becomes a 1-D object array
         # and a mixed-type list becomes strings, so the check below stays.
-        features = _to_numpy(features)
-        if hasattr(features, "__array__") or not (
-            hasattr(features, "ndim")
-            and hasattr(features, "dtype")
-            and hasattr(features, "shape")
-        ):
-            features = np.asarray(features)
-        if (
-            features.ndim != 2
-            or 0 in features.shape
-            or getattr(features.dtype, "kind", "O") not in "biufc"
-        ):
+        invalid = (
+            "features must be a 2-D numeric matrix or a list of equal-length "
+            "numeric rows"
+        )
+        try:
+            features = _to_numpy(features)
+            if hasattr(features, "__array__") or not (
+                hasattr(features, "ndim")
+                and hasattr(features, "dtype")
+                and hasattr(features, "shape")
+            ):
+                features = np.asarray(features)
+        except (ValueError, TypeError, RuntimeError) as error:
+            # numpy's own message for a ragged list names an "inhomogeneous
+            # shape", not what the caller has to fix.
             raise ValueError(
-                "features must be a non-empty 2-D numeric matrix or a list "
-                "of equal-length numeric rows; got shape %r with dtype %r."
-                % (features.shape, features.dtype)
+                "%s; could not convert them (%s)" % (invalid, error)
+            ) from error
+        # ``complex`` is out: the backends refuse it, but only after the
+        # loading pane has been sent.
+        if features.ndim != 2 or getattr(features.dtype, "kind", "O") not in "biuf":
+            raise ValueError(
+                "%s; got shape %r with dtype %r"
+                % (invalid, features.shape, features.dtype)
+            )
+        if features.shape[0] < 2 or features.shape[1] < 1:
+            raise ValueError(
+                "features must have at least two rows and one column to embed; "
+                "got shape %r" % (features.shape,)
+            )
+        if isinstance(features, np.ndarray) and not np.isfinite(features).all():
+            raise ValueError("features must be finite: found NaN or infinity")
+        try:
+            n_labels = len(labels)
+        except TypeError:
+            n_labels = None
+        if n_labels != features.shape[0]:
+            raise ValueError(
+                "labels must have one entry per row of features; got %s labels "
+                "for %d rows" % (n_labels, features.shape[0])
             )
 
         loading_message = {
