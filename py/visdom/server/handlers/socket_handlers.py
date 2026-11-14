@@ -236,12 +236,18 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     # the env being saved under a new id was deleted while it
                     # was being read; there is nothing left to copy.
                     return
+                is_new_env = msg["eid"] not in self.state
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 await save_env_off_loop(self, self.eid)
+                if is_new_env:
+                    # The browser that forked adds the env to its own list;
+                    # every other one only learns of it from this. Sent once
+                    # the copy is saved, in the order /fork_env uses.
+                    broadcast_envs(self)
 
         elif cmd == "save_all":
             fire_and_forget_save_all(self)

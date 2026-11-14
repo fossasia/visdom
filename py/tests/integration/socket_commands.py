@@ -312,6 +312,34 @@ def test_save_repoints_the_socket_at_the_new_environment(env):
     assert sub.eid == "copy"
 
 
+def test_save_announces_a_forked_environment(env):
+    """A fork made in one browser reaches the others too.
+
+    The browser that forks adds the new environment to its own list, so the
+    missing announcement only showed in every other one: their environment
+    selectors kept the old list until the page was reloaded.
+    """
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "copy"]
+
+
+def test_save_onto_an_existing_environment_announces_nothing(env):
+    """Saving an environment under its own name leaves the list as it was."""
+    sub = open_sub(env)
+    announced = commands(sub).count("env_update")
+
+    send(sub, cmd="save", eid="expt", prev_eid="expt", data={})
+
+    assert commands(sub).count("env_update") == announced
+
+
 def test_save_without_a_known_source_is_a_noop(env):
     sub = open_sub(env)
 
