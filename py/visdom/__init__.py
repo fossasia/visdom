@@ -2501,6 +2501,21 @@ class Visdom(object):
                 "labels must have one entry per row of features; got %s labels "
                 "for %d rows" % (n_labels, features.shape[0])
             )
+        # Normalize here, not after t-SNE: a NaN or infinite label used to
+        # pass the length check, send the loading pane, and only then fail
+        # inside ``_normalize_labels``. The explicit check also holds under
+        # ``python -O``, where that function's assert is stripped.
+        label_array = np.asarray(labels)
+        if label_array.ndim != 1:
+            raise ValueError(
+                "labels must be one-dimensional; got shape %r" % (label_array.shape,)
+            )
+        if (
+            np.issubdtype(label_array.dtype, np.number)
+            and not np.isfinite(label_array).all()
+        ):
+            raise ValueError("labels must be finite: found NaN or infinity")
+        labels_normalized, _, _ = _normalize_labels(label_array)
 
         loading_message = {
             "content": {"isLoading": True},
@@ -2518,7 +2533,6 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
                 "group": int(labels_normalized[i] - 1),
