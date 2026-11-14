@@ -383,6 +383,9 @@ class JSONStore(DataStore):
 
         primary = self._primary_path(eid)
         hashed = self._hash_path(eid)
+        recovered = self._recovered_path(eid)
+        if recovered is not None and self._resolve_existing(eid) != recovered:
+            recovered = None
         owner = self._legacy_hash_owner(primary)
         if os.path.exists(hashed) or (
             owner is not None and owner != self._safe_eid(eid)
@@ -398,6 +401,10 @@ class JSONStore(DataStore):
             data_to_save = copy_json_data(payload)
             data_to_save["name"] = self._safe_eid(eid)
             self._atomic_write(hashed, json.dumps(data_to_save, cls=NanSafeEncoder))
+        if recovered is not None:
+            self._migrate_recovered_undo(eid, recovered)
+            os.remove(recovered)
+            self._forget_meta(recovered)
         return True
 
     def save_all(self, state):
@@ -682,6 +689,8 @@ class JSONStore(DataStore):
             owns_legacy = self._legacy_hash_owner(legacy) == self._safe_eid(eid)
             primary = self._primary_path(eid)
             owner = self._legacy_hash_owner(primary)
+            if path == self._recovered_path(eid):
+                self._migrate_recovered_undo(eid, path)
             if owns_legacy:
                 _, _, undo = self._undo_paths(eid)
                 if os.path.exists(undo[:-5]):
@@ -754,14 +763,33 @@ class JSONStore(DataStore):
         return undo_dir, plain, hashed
 
     def _undo_candidates(self, eid):
-        _, plain, hashed = self._undo_paths(eid)
+        undo_dir, plain, hashed = self._undo_paths(eid)
         candidates = [hashed]
         owner = self._legacy_hash_owner(self._primary_path(eid))
         if owner is None or owner == self._safe_eid(eid):
             candidates.append(plain)
         if self._legacy_hash_owner(self._hash_path(eid)[:-5]) == self._safe_eid(eid):
             candidates.append(hashed[:-5])
+        recovered = self._recovered_path(eid)
+        if recovered is not None and self._resolve_existing(eid) == recovered:
+            candidates.append(os.path.join(undo_dir, os.path.basename(recovered)))
         return candidates
+
+    def _migrate_recovered_undo(self, eid, recovered):
+        undo_dir, _, hashed = self._undo_paths(eid)
+        source = os.path.join(undo_dir, os.path.basename(recovered))
+        try:
+            os.stat(source)
+        except FileNotFoundError:
+            return
+        if any(
+            os.path.exists(path)
+            for path in self._undo_candidates(eid)
+            if os.path.normcase(path) != os.path.normcase(source)
+        ):
+            os.remove(source)
+        else:
+            os.replace(source, hashed)
 
     def load_undo(self, eid):
         """Return ``eid``'s undo stack (a list), or ``[]`` if missing/corrupt."""
