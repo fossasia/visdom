@@ -537,6 +537,18 @@ def test_embeddings_rejects_labels_that_do_not_match_the_rows(offline_client, la
     send.assert_not_called()
 
 
+def test_embeddings_leaves_the_callers_opts_untouched(offline_client):
+    """A numeric title is cast to a string in the payload, not in the caller's dict."""
+    opts = {"title": 5, "register_embedding_events": False}
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client, "_send", return_value="w"
+    ) as send:
+        offline_client.embeddings(FEATURES, LABELS, opts=opts)
+
+    assert opts == {"title": 5, "register_embedding_events": False}
+    assert send.call_args_list[0][0][0]["opts"]["title"] == "5"
+
+
 def test_embeddings_converts_an_object_with_array_protocol(offline_client):
     """A tensor-like (ndim/shape/dtype, a dtype with no .kind, and __array__)
     must be converted, not rejected for its dtype or passed through raw."""
