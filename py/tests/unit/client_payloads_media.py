@@ -984,6 +984,14 @@ def test_svg_accepts_utf8_bytes_with_non_ascii_text(capture_send):
     assert content(sent) == markup
 
 
+def test_svg_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string in the payload, not in the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.svg(svgstr="<svg a='1'><g/></svg>", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_svg_passes_opts_through(capture_send):
     sent = capture_send(
         lambda v: v.svg(svgstr="<svg a='1'><g/></svg>", opts=dict(title="diagram"))
