@@ -2446,7 +2446,7 @@ class Visdom(object):
         in an index into features that is currently selected and returns
         the html for what you'd like to display.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         # The t-SNE backends read ``features.shape`` and crunch the values as
