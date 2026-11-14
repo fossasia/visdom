@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
-_OptPath = Optional[Union[Text, os.PathLike[str]]]
+_OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -196,7 +196,10 @@ class Visdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     def save_plotly_figure(
-        self, figure: Any, filepath: Union[Text, os.PathLike[str]], **kwargs: Any
+        self,
+        figure: Any,
+        filepath: Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]],
+        **kwargs: Any
     ) -> None: ...
     def plotlyplot(
         self,

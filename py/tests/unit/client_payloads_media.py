@@ -34,6 +34,7 @@ asserted here.
 
 import base64
 import io
+import os
 import sys
 from unittest.mock import patch
 
@@ -868,6 +869,21 @@ def test_audio_accepts_pathlib_path(capture_send, tmp_path):
     assert 'type="audio/wav"' in content(sent)
 
 
+class _BytesPath:
+    def __init__(self, path):
+        self._path = os.fsencode(path)
+
+    def __fspath__(self):
+        return self._path
+
+
+def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=_BytesPath(path)))
+    assert 'type="audio/wav"' in content(sent)
+
+
 def test_audio_escapes_the_caption(capture_send):
     """The caption is interpolated into markup, so it has to be escaped."""
     sent = capture_send(
@@ -914,6 +930,13 @@ def test_video_accepts_pathlib_path(capture_send, tmp_path):
     path = tmp_path / "clip.mp4"
     path.write_bytes(b"not really video")
     sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=_BytesPath(path)))
     assert 'type="video/mp4"' in content(sent)
 
 

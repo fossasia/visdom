@@ -237,7 +237,7 @@ from visdom.utils.shared_utils import NanSafeEncoder
 
 
 def loadfile(filename):
-    filename = os.fspath(filename)
+    filename = os.fsdecode(filename)
     assert os.path.isfile(filename), "could not find file %s" % filename
     with open(filename, "rb") as fileobj:
         return fileobj.read()
@@ -2273,6 +2273,8 @@ class Visdom(object):
                 "Plotly must be installed to save Plotly figures. "
                 "Install with: pip install plotly"
             )
+        if isinstance(filepath, os.PathLike):
+            filepath = os.fspath(filepath)
         try:
             figure.write_image(filepath, **kwargs)
         except ValueError as e:
@@ -2922,7 +2924,7 @@ class Visdom(object):
                 tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
-        audiofile = os.fspath(audiofile)
+        audiofile = os.fsdecode(audiofile)
         extension = audiofile.split(".")[-1].lower()
         mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
         mimetype = mimetypes.get(extension)
@@ -3016,7 +3018,7 @@ class Visdom(object):
         ), "should specify video tensor or file"
 
         if tensor is None:
-            videofile = os.fspath(videofile)
+            videofile = os.fsdecode(videofile)
             extension = videofile.split(".")[-1].lower()
             mimetypes = {"mp4": "mp4", "ogv": "ogg", "avi": "avi", "webm": "webm"}
             mimetype = mimetypes.get(extension)

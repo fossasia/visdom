@@ -348,7 +348,10 @@ class AsyncVisdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     async def save_plotly_figure(
-        self, figure: Any, filepath: Union[Text, os.PathLike[str]], **kwargs: Any
+        self,
+        figure: Any,
+        filepath: Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]],
+        **kwargs: Any
     ) -> None: ...
     async def plotlyplot(
         self,
