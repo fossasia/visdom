@@ -2446,9 +2446,76 @@ class Visdom(object):
         in an index into features that is currently selected and returns
         the html for what you'd like to display.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        # The t-SNE backends read ``features.shape`` and crunch the values as
+        # floats, so the input has to be a rectangular numeric matrix before
+        # the loading pane goes out: a failure after that leaves the browser
+        # on a spinner. Torch tensors go through ``_to_numpy`` first, which
+        # detaches and moves them to the CPU (a ``requires_grad`` or CUDA
+        # tensor makes a bare ``np.asarray`` raise). A scipy sparse matrix is
+        # densified with ``toarray()``: neither backend takes sparse input
+        # (both call ``len(X)``, which scipy refuses), and ``np.asarray`` would
+        # collapse it into a 0-d object array. Densifying also puts its stored
+        # values under the finite check below. Even converted, ``np.asarray``
+        # is not enough on its own, because a ragged list becomes a 1-D object
+        # array and a mixed-type list becomes strings, so the checks stay.
+        invalid = (
+            "features must be a 2-D numeric matrix or a list of equal-length "
+            "numeric rows"
+        )
+        try:
+            features = _to_numpy(features)
+            if not isinstance(features, np.ndarray) and callable(
+                getattr(features, "toarray", None)
+            ):
+                features = features.toarray()
+            features = np.asarray(features)
+        except (ValueError, TypeError, RuntimeError) as error:
+            # numpy's own message for a ragged list names an "inhomogeneous
+            # shape", not what the caller has to fix.
+            raise ValueError(
+                "%s; could not convert them (%s)" % (invalid, error)
+            ) from error
+        # ``complex`` is out: the backends refuse it, but only after the
+        # loading pane has been sent.
+        if features.ndim != 2 or getattr(features.dtype, "kind", "O") not in "biuf":
+            raise ValueError(
+                "%s; got shape %r with dtype %r"
+                % (invalid, features.shape, features.dtype)
+            )
+        if features.shape[0] < 2 or features.shape[1] < 1:
+            raise ValueError(
+                "features must have at least two rows and one column to embed; "
+                "got shape %r" % (features.shape,)
+            )
+        if not np.isfinite(features).all():
+            raise ValueError("features must be finite: found NaN or infinity")
+        try:
+            n_labels = len(labels)
+        except TypeError:
+            n_labels = None
+        if n_labels != features.shape[0]:
+            raise ValueError(
+                "labels must have one entry per row of features; got %s labels "
+                "for %d rows" % (n_labels, features.shape[0])
+            )
+        # Normalize here, not after t-SNE: a NaN or infinite label used to
+        # pass the length check, send the loading pane, and only then fail
+        # inside ``_normalize_labels``. The explicit check also holds under
+        # ``python -O``, where that function's assert is stripped.
+        label_array = np.asarray(labels)
+        if label_array.ndim != 1:
+            raise ValueError(
+                "labels must be one-dimensional; got shape %r" % (label_array.shape,)
+            )
+        if (
+            np.issubdtype(label_array.dtype, np.number)
+            and not np.isfinite(label_array).all()
+        ):
+            raise ValueError("labels must be finite: found NaN or infinity")
+        labels_normalized, _, _ = _normalize_labels(label_array)
 
         loading_message = {
             "content": {"isLoading": True},
@@ -2466,7 +2533,6 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
                 "group": int(labels_normalized[i] - 1),
