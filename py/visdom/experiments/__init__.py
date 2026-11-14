@@ -13,6 +13,7 @@ from visdom.experiments.compare import (
 )
 from visdom.experiments.models import (
     Experiment,
+    LazyMetricList,
     ExperimentFinishedError,
     Metric,
     Param,
@@ -59,6 +60,7 @@ __all__ = [
     "DEFAULT_DEBOUNCE_SECONDS",
     "DEFAULT_SORT_FIELD",
     "Experiment",
+    "LazyMetricList",
     "ExperimentFinishedError",
     "ExperimentLike",
     "ExperimentStore",

@@ -11,20 +11,27 @@ Unit tests for server utility functions.
 No server needed — these test pure functions directly.
 """
 
+from unittest import mock
+
 import pytest
 
 from visdom.data_model.json_store import JSONStore
+from visdom.utils import server_utils, shared_utils
 from visdom.utils.server_utils import (
     LazyEnvData,
+    broadcast_envs,
     create_args_for_append,
     escape_eid,
     extract_eid,
     hash_password,
+    send_to_sources,
     snapshot_env,
     snapshot_state,
     stringify,
     recursive_order,
 )
+
+from testutils import FakeHandler, FakeSocket
 
 pytestmark = pytest.mark.unit
 
@@ -258,6 +265,44 @@ def test_snapshot_env_copies_a_primed_lazy_env(tmp_path):
     assert copied["jsons"] is not lazy["jsons"]
 
 
+def test_snapshot_env_does_not_walk_the_env_with_copy_deepcopy(monkeypatch):
+    """The shape of the saving: an env is JSON, so it is copied as JSON.
+
+    ``copy.deepcopy`` reaches a dispatch table and a memo write for every
+    element it visits, which for an env means for every plotted point, every
+    save interval. Asserting the call never happens pins that down where a
+    wall-clock assertion would only be flaky on CI.
+    """
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a JSON env must not need copy.deepcopy")
+
+    monkeypatch.setattr(shared_utils.copy, "deepcopy", forbidden)
+
+    copied = snapshot_env(env_dict())
+
+    assert copied == env_dict()
+
+
+def test_snapshot_env_shares_no_container_with_the_live_env():
+    """Anything shared could be rewritten by the loop mid-serialization."""
+    live = env_dict()
+    live["jsons"]["win_0"]["content"] = {"data": [{"x": [1.0], "y": [2.0]}]}
+
+    copied = snapshot_env(live)
+
+    def containers(value):
+        found = [value] if isinstance(value, (dict, list)) else []
+        items = value.values() if isinstance(value, dict) else value
+        if isinstance(value, (dict, list)):
+            for item in items:
+                found.extend(containers(item))
+        return found
+
+    live_ids = {id(c) for c in containers(live)}
+    assert not live_ids & {id(c) for c in containers(copied)}
+
+
 def test_snapshot_state_drops_cold_envs_and_copies_the_rest(tmp_path):
     store = JSONStore(str(tmp_path))
     warm = LazyEnvData(store, "warm")
@@ -310,3 +355,124 @@ def test_prime_rejects_a_malformed_env():
     lazy = LazyEnvData(None, "broken")
     with pytest.raises(ValueError):
         lazy.prime({"jsons": {}})
+
+
+# ------------------------------------------------------ broadcast fan-out ----
+#
+# Every recipient of one broadcast gets identical bytes, so the encode belongs
+# above the ``for sub in ...`` loop, not inside it. These count ``json.dumps``
+# calls rather than timing anything: the win is the shape, and a call count is
+# what CI can assert on a shared runner.
+
+
+def _counting_dumps():
+    """``json.dumps`` wrapper that records how many times it was called."""
+    calls = []
+    real = server_utils.json.dumps
+
+    def counted(*args, **kwargs):
+        calls.append(args[0] if args else None)
+        return real(*args, **kwargs)
+
+    return counted, calls
+
+
+def _subscribed_handler(count, state=None):
+    """Handler with ``count`` subscriber sockets registered."""
+    socks = [FakeSocket(sid=f"sid_{i}") for i in range(count)]
+    handler = FakeHandler(state=state, subs={s.sid: s for s in socks})
+    return handler, socks
+
+
+def test_broadcast_envs_encodes_once_for_every_subscriber():
+    """Three subscribers, one encode -- not one per subscriber."""
+    handler, socks = _subscribed_handler(3, state={"main": {}, "other": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler)
+
+    assert len(calls) == 1
+    assert all(len(s.messages) == 1 for s in socks)
+
+
+def test_broadcast_envs_sends_every_subscriber_the_same_payload():
+    """The shared string is safe to hand out, and still says what it said."""
+    handler, socks = _subscribed_handler(3, state={"main": {}, "other": {}})
+
+    broadcast_envs(handler)
+
+    first = socks[0].messages[0]
+    assert all(s.messages[0] == first for s in socks)
+    assert socks[0].sent[0]["command"] == "env_update"
+    assert sorted(socks[0].sent[0]["data"]) == ["main", "other"]
+
+
+def test_broadcast_envs_to_an_explicit_subscriber_list_reaches_only_it():
+    """``open`` hands in ``[self]``; that must stay a single-recipient send."""
+    handler, socks = _subscribed_handler(3, state={"main": {}})
+
+    broadcast_envs(handler, [socks[1]])
+
+    assert socks[1].messages
+    assert socks[0].messages == []
+    assert socks[2].messages == []
+
+
+def test_broadcast_envs_with_no_subscribers_does_not_encode():
+    """Hoisting the encode must not start charging an empty room for it."""
+    handler, _ = _subscribed_handler(0, state={"main": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler)
+
+    assert calls == []
+
+
+def test_broadcast_envs_with_an_empty_generator_does_not_encode():
+    """A generator is truthy even when it yields nothing, so it is drained first."""
+    handler, _ = _subscribed_handler(0, state={"main": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler, (s for s in []))
+
+    assert calls == []
+
+
+def test_broadcast_envs_to_a_generator_of_subscribers_still_sends():
+    """Draining it for the emptiness check must not consume the recipients."""
+    handler, socks = _subscribed_handler(3, state={"main": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler, (s for s in socks[:2]))
+
+    assert len(calls) == 1
+    assert [len(s.messages) for s in socks] == [1, 1, 0]
+
+
+def test_send_to_sources_encodes_once_for_every_source():
+    """A pane close ships the whole pane through here, so once is the point."""
+    sources = [FakeSocket(sid="src_0"), FakeSocket(sid="src_1")]
+    handler = FakeHandler(sources={s.sid: s for s in sources})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        send_to_sources(handler, {"event_type": "close", "target": "win_0"})
+
+    assert len(calls) == 1
+    assert [s.sent[0]["event_type"] for s in sources] == ["close", "close"]
+    assert sources[0].messages[0] == sources[1].messages[0]
+
+
+def test_send_to_sources_with_no_sources_does_not_encode():
+    """An unattended server must not pay the pane encode for nobody."""
+    handler = FakeHandler()
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        send_to_sources(handler, {"event_type": "close", "pane_data": list(range(100))})
+
+    assert calls == []

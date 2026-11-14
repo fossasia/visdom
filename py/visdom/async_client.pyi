@@ -47,6 +47,7 @@ from visdom import (
     _Event,
     _EventHandler,
     _ExperimentQueryReply,
+    _ExperimentReply,
     _OptOps,
     _OptStr,
     _SendReturn,
@@ -97,6 +98,8 @@ class _AsyncTransport:
     password: _OptStr
     ssl_verify: Union[bool, Text]
     max_clients: int
+    api_key: _OptStr
+    workspace: _OptStr
     cookie: _OptStr
     def __init__(
         self,
@@ -107,6 +110,8 @@ class _AsyncTransport:
         password: _OptStr = ...,
         ssl_verify: Union[bool, Text] = ...,
         max_clients: int = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
     ) -> None: ...
     @property
     def client(self) -> AsyncHTTPClient: ...
@@ -194,6 +199,8 @@ class AsyncVisdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         offline: bool = ...,
         use_polling: bool = ...,
         session_idle_timeout: Union[int, float] = ...,
@@ -316,6 +323,9 @@ class AsyncVisdom:
         self, timeout_seconds: Union[int, float] = ...
     ) -> bool: ...
     async def replay_log(self, log_filename: Text) -> None: ...
+    async def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
     async def text(
         self,
         text: Text,
@@ -374,7 +384,7 @@ class AsyncVisdom:
     ) -> _SendReturn: ...
     async def audio(
         self,
-        tensor: Tensor,
+        tensor: Tensor = ...,
         audiofile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
