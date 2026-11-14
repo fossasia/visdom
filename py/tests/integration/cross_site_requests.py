@@ -90,9 +90,24 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
             "/delete_env",
             {"eid": "victim"},
             Origin="https://visdom.example.org",
-            **{"X-Forwarded-Host": "visdom.example.org"},
+            **{
+                "X-Forwarded-Host": "visdom.example.org",
+                "X-Forwarded-Proto": "https",
+            },
         )
         self.assertEqual(resp.code, 200)
+
+    def test_same_host_on_another_scheme_is_refused(self):
+        # http://host and https://host are different origins, even though the
+        # host part matches.
+        resp = self.post_from(
+            "/delete_env",
+            {"eid": "victim"},
+            Origin="https://localhost:%d" % self.get_http_port(),
+            Host="localhost:%d" % self.get_http_port(),
+        )
+        self.assertEqual(resp.code, 403)
+        self.assertTrue(self.env_exists("victim"))
 
     def test_clients_without_browser_headers_are_unaffected(self):
         # What the python client and curl send: no Origin, no Sec-Fetch-Site.

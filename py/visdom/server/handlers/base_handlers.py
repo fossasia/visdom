@@ -67,12 +67,19 @@ def is_cross_site_request(request):
         return False
     if origin == "null":
         return True
-    # Older browsers send Origin but not Sec-Fetch-Site. A proxy may rewrite
-    # Host, so the host the browser used may arrive as X-Forwarded-Host.
-    origin_host = urlsplit(origin).netloc.lower()
-    forwarded = request.headers.get("X-Forwarded-Host", "")
-    allowed = {request.host.lower(), forwarded.split(",")[0].strip().lower()}
-    return origin_host not in allowed
+    # Older browsers send Origin but not Sec-Fetch-Site, so compare it with
+    # this server's own origin: scheme as well as host, since http://host and
+    # https://host are different origins. A proxy may rewrite both, so the
+    # ones the browser used may arrive as X-Forwarded-Proto/-Host.
+    parts = urlsplit(origin)
+    scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
+    hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
+    return parts.scheme.lower() != scheme.lower() or parts.netloc.lower() not in hosts
+
+
+def _first_forwarded(request, header):
+    """First value of a proxy header, which may list one entry per hop."""
+    return request.headers.get(header, "").split(",")[0].strip().lower()
 
 
 def build_cloud_context(slug, role):
