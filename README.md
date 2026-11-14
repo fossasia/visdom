@@ -930,6 +930,8 @@ The following `opts` are supported:
 
 This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
 
+Non-`uint8` integer and boolean batches keep their dtype while the grid is built and use the same conversion as `vis.image`, including clipping warnings and `opts.normalize`. `uint8` batches keep their existing scaling behavior. Padding and `opts.normalize` apply to the whole grid, so a tile can render differently than it would on its own.
+
 The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
@@ -937,6 +939,7 @@ The following arguments and `opts` are supported:
 - `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `opts.compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `opts.caption`: Caption for the image
+- `opts.normalize`: Stretch the grid's own range onto `[0, 255]` (`boolean`; default = `False`). Applies to the whole grid, including padding.
 
 #### vis.text
 This function prints text in a  box. You can use this to embed arbitrary HTML.

@@ -528,28 +528,56 @@ def test_images_keeps_a_uint8_batch_in_uint8(offline_client):
 
 
 def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client):
-    """The dtype shortcut is only taken where it cannot change a pixel.
+    """Only a uint8 mask needs the float grid for its [0, 1] stretch.
 
     ``image()`` stretches anything whose whole range fits in [0, 1] -- and the
     grid's fill value of 1 means a uint8 batch holding only 0s and 1s is such a
-    grid. Keeping that case in float64 preserves the stretch pinned by
-    ``test_images_padding_colour_follows_the_input_dtype``.
+    grid. uint16 takes the integer path, which applies the same stretch without
+    widening the grid.
     """
     batch = np.ones((2, 3, 2, 2), dtype=np.uint8)
     assert _grid_dtype(offline_client, batch) == np.float64
+    assert _grid_dtype(offline_client, batch.astype(np.uint16)) == np.uint16
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [np.int16, np.int32, np.int64, np.uint16, np.uint32, np.uint64, bool],
+)
+def test_images_keeps_other_integer_and_bool_batches_in_their_dtype(
+    offline_client, dtype
+):
+    """The grid must not widen values that ``image()`` converts losslessly."""
+    batch = np.full((2, 3, 2, 2), True if dtype is bool else 200, dtype=dtype)
+    assert _grid_dtype(offline_client, batch) == np.dtype(dtype)
+
+
+def test_images_uint16_list_keeps_the_integer_grid(offline_client):
+    """The public list call must not widen uint16 tiles before the grid."""
+    tiles = [
+        np.full((3, 2, 2), 1000, dtype=np.uint16),
+        np.full((3, 2, 2), 2000, dtype=np.uint16),
+    ]
+    assert _grid_dtype(offline_client, tiles) == np.uint16
 
 
 def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
-    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+    """For uint8, ``opts.normalize`` is implemented only inside the float branch.
 
     A uint8 grid never reaches that branch, so taking the dtype shortcut under
     ``normalize=True`` would accept the option and silently do nothing. The
     batch here is uint8 with a maximum above 1, which is exactly what the
     shortcut is for -- so the float grid can only be coming from the option.
+    Other integer dtypes normalize on the integer path, so they keep their
+    dtype.
     """
     batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
     assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
     assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
+    assert (
+        _grid_dtype(offline_client, batch.astype(np.uint16), opts={"normalize": True})
+        == np.uint16
+    )
 
 
 def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
@@ -567,6 +595,107 @@ def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
     plain = decode(capture_send(lambda v: v.images(batch)))[1]
     assert (stretched.min(), stretched.max()) == (0, 255)
     assert (plain.min(), plain.max()) == (1, 200)
+
+
+def test_images_uint16_batch_draws_like_a_single_image(capture_send):
+    """A one-tile batch must reach the same integer path as ``image()``."""
+    tile = np.array(
+        [
+            [[0, 1000], [2000, 3000]],
+            [[255, 256], [257, 258]],
+            [[65535, 40000], [30000, 20000]],
+        ],
+        dtype=np.uint16,
+    )
+    batch = tile[np.newaxis]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        for opts in (None, {"normalize": True}):
+            _, batch_pixels = decode(
+                capture_send(
+                    lambda v, o=opts: v.images(batch, nrow=1, padding=0, opts=o)
+                )
+            )
+            _, image_pixels = decode(
+                capture_send(lambda v, o=opts: v.image(tile, opts=o))
+            )
+            np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+def test_images_bool_batch_draws_like_a_single_image(capture_send):
+    tile = np.array(
+        [
+            [[True, False], [False, True]],
+            [[False, True], [True, False]],
+            [[True, True], [False, False]],
+        ],
+        dtype=bool,
+    )
+    batch = tile[np.newaxis]
+    for opts in (None, {"normalize": True}):
+        _, batch_pixels = decode(
+            capture_send(lambda v, o=opts: v.images(batch, nrow=1, padding=0, opts=o))
+        )
+        _, image_pixels = decode(capture_send(lambda v, o=opts: v.image(tile, opts=o)))
+        np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+@pytest.mark.parametrize("dtype", [np.int64, np.uint64])
+def test_images_wide_integer_batch_draws_like_a_single_image(capture_send, dtype):
+    """A float64 grid used to round 64-bit values that the integer path keeps."""
+    low = 2**53
+    tile = np.array(
+        [
+            [[low, low + 1], [low + 2, low + 3]],
+            [[low + 4, low + 5], [low + 6, low + 7]],
+            [[low + 8, low + 9], [low + 10, low + 11]],
+        ],
+        dtype=dtype,
+    )
+    batch = tile[np.newaxis]
+    _, batch_pixels = decode(
+        capture_send(
+            lambda v: v.images(batch, nrow=1, padding=0, opts={"normalize": True})
+        )
+    )
+    _, image_pixels = decode(
+        capture_send(lambda v: v.image(tile, opts={"normalize": True}))
+    )
+    np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+def test_images_uint16_batch_warns_like_a_single_image(capture_send):
+    tile = np.array(
+        [
+            [[0, 1000], [2000, 3000]],
+            [[65535, 1], [2, 3]],
+            [[256, 257], [258, 259]],
+        ],
+        dtype=np.uint16,
+    )
+    batch = tile[np.newaxis]
+    with warnings.catch_warnings(record=True) as batch_warnings:
+        warnings.simplefilter("always")
+        _, batch_pixels = decode(
+            capture_send(lambda v: v.images(batch, nrow=1, padding=0))
+        )
+    with warnings.catch_warnings(record=True) as image_warnings:
+        warnings.simplefilter("always")
+        _, image_pixels = decode(capture_send(lambda v: v.image(tile)))
+
+    assert [str(w.message) for w in batch_warnings] == [
+        str(w.message) for w in image_warnings
+    ]
+    assert [w.category for w in batch_warnings] == [UserWarning]
+    assert "uint16 image values outside" in str(batch_warnings[0].message)
+    np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+    with warnings.catch_warnings(record=True) as normalized:
+        warnings.simplefilter("always")
+        capture_send(
+            lambda v: v.images(batch, nrow=1, padding=0, opts={"normalize": True})
+        )
+    assert not normalized
 
 
 def test_images_forwards_the_compress_level(capture_send):

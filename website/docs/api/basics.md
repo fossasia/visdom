@@ -49,6 +49,8 @@ vis.images(tensor, nrow=8, padding=2, win=None, env=None, opts=None)
 
 This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
 
+Non-`uint8` integer and boolean batches keep their dtype while the grid is built and use the same conversion as `vis.image`, including clipping warnings and `opts.normalize`. `uint8` batches keep their existing scaling behavior. Padding and `opts.normalize` apply to the whole grid, so a tile can render differently than it would on its own.
+
 ```python
 # Display a grid of 16 random images
 vis.images(np.random.rand(16, 3, 64, 64), nrow=4, opts=dict(title='Image Grid'))
@@ -62,6 +64,7 @@ vis.images(np.random.rand(16, 3, 64, 64), nrow=4, opts=dict(title='Image Grid'))
 | `padding` | Padding around the image, equal padding around all 4 sides |
 | `opts.jpgquality` | JPG quality (`number` 0-100) |
 | `opts.caption` | Caption for the image |
+| `opts.normalize` | Stretch the grid's own range onto `[0, 255]` (`boolean`; default = `False`); applies to the whole grid, including padding |
 
 ## vis.text
 

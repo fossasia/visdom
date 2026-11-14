@@ -145,6 +145,42 @@ def test_uint8_is_returned_untouched():
     assert image_to_uint8(img) is img
 
 
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        "<u2",
+        ">u2",
+        "<i2",
+        ">i2",
+        "<u4",
+        ">u4",
+        "<i4",
+        ">i4",
+        "<u8",
+        ">u8",
+        "<i8",
+        ">i8",
+    ],
+)
+@pytest.mark.parametrize(
+    "values",
+    [
+        [[0, 1], [1, 0]],
+        [[0, 1], [2, 3]],
+    ],
+    ids=["mask", "table"],
+)
+def test_non_native_byte_order_draws_the_same_as_native(dtype, values):
+    """``_offsets`` must not reinterpret the bytes of a big-endian array."""
+    img = np.array(values, dtype=dtype)
+    native = img.astype(np.dtype(dtype).newbyteorder("="))
+    for normalize in (False, True):
+        np.testing.assert_array_equal(
+            image_to_uint8(img, normalize=normalize),
+            image_to_uint8(native, normalize=normalize),
+        )
+
+
 def test_an_empty_integer_image_converts_to_an_empty_one():
     out = image_to_uint8(np.zeros((0, 4), dtype=np.int64))
     assert out.dtype == np.uint8 and out.shape == (0, 4)

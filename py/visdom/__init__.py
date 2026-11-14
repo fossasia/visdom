@@ -2756,6 +2756,9 @@ class Visdom(object):
         or a list of images all of the same size,
         makes a grid of images of size (B / nrow, nrow).
 
+        Non-uint8 integer and bool batches use the same conversion and warnings
+        as a single image and keep their dtype while the grid is built. Padding
+        and ``opts.normalize`` apply to the whole grid.
 
         This is a modified from `make_grid()`
         https://github.com/pytorch/vision/blob/master/torchvision/utils.py
@@ -2788,25 +2791,19 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        # The grid has always been float64, which `image()` then takes through
-        # its float branch: eight bytes a pixel for what is usually a uint8
-        # batch, plus that branch's full-size temporaries. Staying in uint8 is
-        # only *identical* while that branch does no scaling, and it has two
-        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
-        # which includes the fill value of 1 itself -- so a uint8 batch holding
-        # nothing above 1 keeps the float grid, and with it the stretch pinned
-        # by `test_images_padding_colour_follows_the_input_dtype`. And
-        # `opts.normalize` asks for the min-max stretch explicitly, which the
-        # branch is the only thing that implements: a uint8 grid never reaches
-        # it, so the option would silently do nothing. Deciding this costs one
-        # C-speed pass over the batch and saves a copy of it at eight times the
-        # width.
+        # `image()` draws uint8 bytes unchanged, so a uint8 batch that needs
+        # [0, 1] scaling or `normalize` keeps the float grid. Every other
+        # integer and bool batch keeps its dtype so `image_to_uint8()` sees the
+        # values and can warn, normalize exactly, and avoid a float64 copy.
         normalize = opts is not None and opts.get("normalize", False)
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
-            grid = np.ones(grid_shape, dtype=np.uint8)
+        if tensor.dtype == np.uint8:
+            grid_dtype = np.uint8 if tensor.max() > 1 and not normalize else np.float64
+        elif tensor.dtype.kind in "biu":
+            grid_dtype = tensor.dtype
         else:
-            grid = np.ones(grid_shape)
+            grid_dtype = np.float64
+        grid = np.ones(grid_shape, dtype=grid_dtype)
 
         # One strided write per row of cells instead of one per tile: the grid
         # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
