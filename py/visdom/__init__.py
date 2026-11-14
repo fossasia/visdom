@@ -1046,6 +1046,8 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self.use_preflight_checks = use_preflight_checks
+        # Optional hook used by tracked clients to capture replay messages.
+        self._on_send = None
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1526,6 +1528,9 @@ class Visdom(object):
 
         if not from_log:
             self._log(msg, endpoint)
+
+        if self._on_send is not None:
+            self._on_send(msg, endpoint)
 
         if self.offline:
             # If offline, don't even try to post
@@ -2098,6 +2103,22 @@ class Visdom(object):
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
             self._send(msg, endpoint, from_log=True)
+
+    def restore_run(self, json_path, env=None, delay=None):
+        """Replay plots from a run recorded with ``record_data=True``.
+
+        ``json_path`` names the run's metadata file; its sibling
+        ``.events.jsonl`` file must also exist. Plots are sent in order to
+        ``env`` (or the recorded environment by default). Set ``delay`` to
+        wait between calls.
+
+        Returns a summary with the run details and replay results. Raises
+        ``RunRestoreError`` if the files contain no replayable calls and
+        ``ValueError`` if ``delay`` is invalid.
+        """
+        from visdom.tracking.restore import restore_run
+
+        return restore_run(json_path, self, env=env, delay=delay)
 
     # Content
 
@@ -2875,7 +2896,9 @@ class Visdom(object):
         """
         This function plays audio. It takes as input the filename of the audio
         file or an `N` tensor containing the waveform (use an `Nx2` matrix for
-        stereo audio). The function does not support any plot-specific `opts`.
+        stereo audio). The `(channels, N)` layout that torchaudio and librosa
+        return (`1xN` or `2xN`) is accepted too. The function does not support
+        any plot-specific `opts`.
 
         The following `opts` are supported:
 
@@ -2890,9 +2913,16 @@ class Visdom(object):
             tensor is not None or audiofile is not None
         ), "should specify audio tensor or file"
         if tensor is not None:
+            # torchaudio and librosa give (channels, N); scipy writes (N, channels).
+            # (N, 2) already is stereo, so only other shapes are turned around.
+            if tensor.ndim == 2 and tensor.shape[1] != 2:
+                if tensor.shape[0] == 2:
+                    tensor = tensor.T
+                elif 1 in tensor.shape:
+                    tensor = tensor.reshape(-1)
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
-            ), "tensor should be 1D vector or 2D matrix with 2 columns"
+            ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
