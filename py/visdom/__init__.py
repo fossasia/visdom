@@ -2183,7 +2183,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
