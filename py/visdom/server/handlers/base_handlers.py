@@ -15,7 +15,6 @@ import logging
 import traceback
 import http.client
 import time
-from urllib.parse import urlsplit
 
 import tornado.web
 import tornado.websocket
@@ -46,7 +45,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 TRUSTED_FETCH_SITES = {"same-origin", "none"}
 
 
-def is_cross_site_request(request):
+def is_cross_site_request(request, get_changes_state=False):
     """Return True when a browser sent this request from another site's page.
 
     A page on any site can make the user's browser POST to a visdom server,
@@ -55,8 +54,11 @@ def is_cross_site_request(request):
     the visdom UI only ever talks to its own origin, so anything else is
     refused. The python client, curl and other non-browser callers send
     neither header and are unaffected.
+
+    Reads are let through, except on handlers whose GET allocates server-side
+    state (``get_changes_state``), such as the polling handshake.
     """
-    if request.method in SAFE_METHODS:
+    if request.method in SAFE_METHODS and not get_changes_state:
         return False
     fetch_site = request.headers.get("Sec-Fetch-Site")
     if fetch_site is not None:
@@ -67,14 +69,18 @@ def is_cross_site_request(request):
         return False
     if origin == "null":
         return True
-    # Older browsers send Origin but not Sec-Fetch-Site, so compare it with
-    # this server's own origin: scheme as well as host, since http://host and
-    # https://host are different origins. A proxy may rewrite both, so the
-    # ones the browser used may arrive as X-Forwarded-Proto/-Host.
-    parts = urlsplit(origin)
+    # Older browsers send Origin but not Sec-Fetch-Site, so it must equal this
+    # server's own origin exactly: a browser serializes it as scheme://host
+    # with no path, query or credentials, so anything else is refused too.
+    # A proxy may rewrite the scheme and host, so the ones the browser used
+    # may arrive as X-Forwarded-Proto/-Host. These are trusted without a
+    # proxy allow-list: a page cannot set them on a cross-site request without
+    # a CORS preflight, which visdom does not grant, and callers that can set
+    # them freely (curl, scripts) are not stopped by this check anyway.
     scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
     hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
-    return parts.scheme.lower() != scheme.lower() or parts.netloc.lower() not in hosts
+    allowed = {"{0}://{1}".format(scheme, host) for host in hosts if host}
+    return origin.lower() not in allowed
 
 
 def _first_forwarded(request, header):
@@ -300,6 +306,10 @@ class BaseHandler(
             return False
         return True
 
+    # Set on handlers whose GET creates server-side state, so a cross-site
+    # page cannot trigger it either.
+    get_changes_state = False
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -317,7 +327,7 @@ class BaseHandler(
         handler's state/storage/subs/sources at that workspace's isolated space so
         all subsequent handler logic operates on that workspace's environments.
         """
-        if is_cross_site_request(self.request):
+        if is_cross_site_request(self.request, self.get_changes_state):
             self.set_status(403)
             self.finish({"error": "Cross-site requests are not allowed."})
             return

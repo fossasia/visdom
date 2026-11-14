@@ -116,3 +116,31 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
     def test_reads_are_not_checked(self):
         resp = self.fetch("/", headers={"Sec-Fetch-Site": "cross-site"})
         self.assertEqual(resp.code, 200)
+
+    def test_origin_must_be_exactly_scheme_and_host(self):
+        # A browser sends Origin as scheme://host only; a path, query, missing
+        # host or credentials means it is not a real Origin, so it is refused.
+        here = "localhost:%d" % self.get_http_port()
+        for origin in (
+            "http://%s/path" % here,
+            "http://%s/?q=1" % here,
+            "http://user@%s" % here,
+            "http://",
+        ):
+            resp = self.post_from(
+                "/delete_env", {"eid": "victim"}, Origin=origin, Host=here
+            )
+            self.assertEqual(resp.code, 403, origin)
+        self.assertTrue(self.env_exists("victim"))
+
+    def test_cross_site_polling_handshake_is_refused(self):
+        # GET /socket_wrap registers a subscriber, so it counts as a write.
+        subs_before = len(self._app.server_state.subs)
+        resp = self.fetch("/socket_wrap", headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(resp.code, 403)
+        self.assertEqual(len(self._app.server_state.subs), subs_before)
+
+    def test_own_polling_handshake_is_allowed(self):
+        resp = self.fetch("/socket_wrap", headers={"Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(json.loads(resp.body)["success"])

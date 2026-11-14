@@ -950,6 +950,8 @@ def WrapSocketWrapper(BaseWrapper):
             self.write(json.dumps(_spawned(new_sub)))
 
         WrappedSocketWrap.get = _get
+        # Each GET registers a new polling subscriber.
+        WrappedSocketWrap.get_changes_state = True
 
     return WrappedSocketWrap
 
