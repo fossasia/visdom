@@ -495,16 +495,43 @@ def test_embeddings_accepts_a_list_of_feature_rows(offline_client):
         pytest.param(np.empty((0, 3)), id="zero_rows"),
         pytest.param(np.empty((3, 0)), id="zero_cols"),
         pytest.param(np.zeros((3, 2, 2)), id="three_dimensional"),
+        pytest.param(np.ones((1, 2)), id="single_row"),
+        pytest.param(np.array([[np.nan, 1.0], [2.0, 3.0], [4.0, 5.0]]), id="nan"),
+        pytest.param(np.array([[np.inf, 1.0], [2.0, 3.0], [4.0, 5.0]]), id="inf"),
+        pytest.param(np.ones((3, 2), dtype=complex), id="complex"),
+        pytest.param([[0.0, 1.0], [1.0, 2.0], None], id="none_row"),
+        pytest.param(None, id="none"),
     ],
 )
 def test_embeddings_rejects_bad_features_before_sending_anything(
     offline_client, bad_features
 ):
-    """A failure must not leave a loading pane behind."""
+    """A failure must not leave a loading pane behind, and every features
+    problem reports the same way instead of surfacing numpy's own message."""
     with patch.object(offline_client, "_send", return_value="w") as send:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="features must"):
             offline_client.embeddings(
                 bad_features, LABELS, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        pytest.param([1, 2], id="fewer_labels_than_rows"),
+        pytest.param([1, 2, 1, 2], id="more_labels_than_rows"),
+        pytest.param(None, id="no_labels"),
+    ],
+)
+def test_embeddings_rejects_labels_that_do_not_match_the_rows(offline_client, labels):
+    """Too few labels used to raise IndexError after the loading pane was sent;
+    too many were silently dropped."""
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError, match="labels must have one entry per row"):
+            offline_client.embeddings(
+                FEATURES, labels, opts={"register_embedding_events": False}
             )
 
     send.assert_not_called()
