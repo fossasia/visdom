@@ -467,26 +467,33 @@ def test_overlapping_retry_succeeds_while_first_retry_fails(env):
 
     async def run_overlapping():
         with mock.patch.object(env.storage, "save_env", side_effect=controlled_save):
-            t_a = asyncio.create_task(sub1.on_message(save_msg))
-            deadline = asyncio.get_running_loop().time() + 2.0
-            while not a_in_save.is_set():
-                if asyncio.get_running_loop().time() > deadline:
-                    raise AssertionError("Retry A never entered save_env")
-                await asyncio.sleep(0.001)
-            t_b = asyncio.create_task(sub2.on_message(save_msg))
-            deadline = asyncio.get_running_loop().time() + 2.0
-            while (
-                getattr(env.storage_executor, "_work_queue", None) is not None
-                and env.storage_executor._work_queue.empty()
-            ):
-                if asyncio.get_running_loop().time() > deadline:
-                    raise AssertionError("Retry B failed to queue in storage executor")
-                await asyncio.sleep(0.001)
+            t_a = None
+            t_b = None
             try:
+                t_a = asyncio.create_task(sub1.on_message(save_msg))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not a_in_save.is_set():
+                    if asyncio.get_running_loop().time() > deadline:
+                        raise AssertionError("Retry A never entered save_env")
+                    await asyncio.sleep(0.001)
+                t_b = asyncio.create_task(sub2.on_message(save_msg))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while (
+                    getattr(env.storage_executor, "_work_queue", None) is not None
+                    and env.storage_executor._work_queue.empty()
+                ):
+                    if asyncio.get_running_loop().time() > deadline:
+                        raise AssertionError(
+                            "Retry B failed to queue in storage executor"
+                        )
+                    await asyncio.sleep(0.001)
                 b_submitted.set()
                 await asyncio.gather(t_a, t_b)
             finally:
                 b_submitted.set()
+                for t in (t_a, t_b):
+                    if t is not None and not t.done():
+                        t.cancel()
 
     asyncio.run(run_overlapping())
 
