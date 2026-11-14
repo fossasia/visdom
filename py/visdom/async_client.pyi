@@ -328,7 +328,7 @@ class AsyncVisdom:
     ) -> _ExperimentReply: ...
     async def text(
         self,
-        text: Text,
+        text: object,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

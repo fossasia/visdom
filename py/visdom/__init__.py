@@ -2109,12 +2109,32 @@ class Visdom(object):
 
     def text(self, text, win=None, env=None, opts=None, append=False):
         """
-        This function prints text in a box. It takes as input an `text` string.
+        This function prints text in a box. ``text`` is a string, or a value
+        that can be rendered as one: bytes, bytearray and a byte-typed
+        one-dimensional memoryview are decoded as UTF-8 and everything else
+        goes through ``str()``, so a numpy array or any other repr-able
+        object is shown as its ``str(...)`` form instead of a cryptic
+        ``Object of type ... is not JSON serializable`` from the JSON encoder.
+        A memoryview over anything but bytes (an int64 array, a 2-D view) has
+        no text to decode, so it raises ``TypeError`` rather than printing
+        raw memory.
         No specific `opts` are currently supported.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        if isinstance(text, memoryview) and (
+            text.ndim != 1 or text.format not in ("B", "b", "c")
+        ):
+            raise TypeError(
+                "text() can only decode a one-dimensional byte memoryview; "
+                "got a memoryview with format %r and %d dimension(s)"
+                % (text.format, text.ndim)
+            )
+        if isinstance(text, (bytes, bytearray, memoryview)):
+            text = bytes(text).decode("utf-8", errors="replace")
+        elif not isinstance(text, str):
+            text = str(text)
         data = [{"content": text, "type": "text"}]
 
         if append:

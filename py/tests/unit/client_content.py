@@ -122,6 +122,14 @@ def test_text_defaults_opts_to_an_empty_dict(capture_send):
     assert sent["payload"]["eid"] is None
 
 
+def test_text_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string; that must not rewrite the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.text("hi", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_text_passes_an_unrecognized_opt_through(capture_send):
     """``_assert_opts`` type-checks the opts it knows; it does not gate keys."""
     sent = capture_send(lambda v: v.text("hi", opts={"not_an_opt": 1}))
@@ -132,6 +140,68 @@ def test_text_passes_an_unrecognized_opt_through(capture_send):
 def test_text_rejects_a_mistyped_known_opt(capture_send):
     with pytest.raises(AssertionError):
         capture_send(lambda v: v.text("hi", opts={"colormap": 7}))
+
+
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_text_decodes_utf8_buffers_to_a_string(capture_send, wrap):
+    """bytes, bytearray and memoryview all decode, none renders as its repr."""
+    sent = capture_send(lambda v: v.text(wrap("café".encode("utf-8"))))
+    assert block(sent) == {"content": "café", "type": "text"}
+
+
+def test_text_decodes_a_strided_byte_memoryview(capture_send):
+    """A non-contiguous one-dimensional byte view still decodes its content."""
+    view = memoryview(np.frombuffer(b"h.i.", dtype=np.uint8))[::2]
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_cast_to_bytes(capture_send):
+    view = memoryview(np.array([104, 105], dtype=np.uint8)).cast("B")
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_over_a_bytearray(capture_send):
+    sent = capture_send(lambda v: v.text(memoryview(bytearray(b"hi"))))
+    assert block(sent)["content"] == "hi"
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.array([1, 2], dtype=np.int16)), id="int16"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_text_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    """Decoding raw memory would print control characters, so it is refused."""
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.text(make_view())
+
+
+def test_text_coerces_a_numpy_array_to_its_str_form(capture_send):
+    sent = capture_send(lambda v: v.text(np.array([1, 2, 3])))
+    assert block(sent)["content"] == "[1 2 3]"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        pytest.param(42, "42", id="int"),
+        pytest.param(3.5, "3.5", id="float"),
+        pytest.param(True, "True", id="bool"),
+        pytest.param(None, "None", id="none"),
+        pytest.param([1, 2, 3], "[1, 2, 3]", id="list"),
+    ],
+)
+def test_text_coerces_non_string_input_to_str(capture_send, value, expected):
+    """Values that happen to JSON-serialize still go through str() for a
+    stable content type on the wire."""
+    sent = capture_send(lambda v: v.text(value))
+    assert block(sent)["content"] == expected
 
 
 # ------------------------------------------------------------ properties ----

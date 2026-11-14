@@ -176,7 +176,7 @@ class Visdom:
     ) -> _ExperimentReply: ...
     def text(
         self,
-        text: Text,
+        text: object,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
