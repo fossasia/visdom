@@ -229,6 +229,59 @@ def test_undo_of_an_unknown_environment_is_a_noop(env):
     assert commands(sub) == ["register", "layout_update", "env_update"]
 
 
+def reopen(env):
+    """A window created under ``win_0`` after it was closed, as an append does."""
+    reopened = pane(content={"data": [{"x": [3], "y": [3]}], "layout": {}})
+    env.state["expt"]["jsons"]["win_0"] = reopened
+    return reopened
+
+
+def test_undo_leaves_a_reopened_pane_alone(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopened = reopen(env)
+
+    send(sub, cmd="undo", eid="expt")
+
+    assert env.state["expt"]["jsons"]["win_0"] is reopened
+
+
+def test_undo_warns_when_the_pane_is_already_open(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopen(env)
+
+    send(sub, cmd="undo", eid="expt")
+
+    notification = last(sub, "notification")
+    assert notification["data"]["type"] == "warning"
+    assert "win_0" in notification["data"]["message"]
+
+
+def test_undo_reports_the_depth_when_the_pane_is_already_open(env):
+    sub = open_sub(env)
+    sub.eid = "expt"
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopen(env)
+    sub.messages.clear()
+
+    send(sub, cmd="undo", eid="expt")
+
+    assert last(sub, "undo_state")["count"] == 1
+
+
+def test_undo_restores_the_pane_once_its_id_is_free(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopen(env)
+    send(sub, cmd="undo", eid="expt")
+    del env.state["expt"]["jsons"]["win_0"]
+
+    send(sub, cmd="undo", eid="expt")
+
+    assert env.state["expt"]["jsons"]["win_0"]["content"] == pane()["content"]
+
+
 # -- delete_env --------------------------------------------------------------
 
 
