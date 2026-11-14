@@ -247,6 +247,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 pending = _get_pending_broadcasts(self)
                 is_new_env = msg["eid"] not in self.state or msg["eid"] in pending
+                pending.discard(msg["eid"])
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
@@ -259,9 +260,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 except OSError as e:
                     logging.error(f"failed to save environment {self.eid}: {e}")
                     saved = False
+                if msg["eid"] not in self.state:
+                    # Dropped or deleted while the save was in flight.
+                    pending.discard(msg["eid"])
+                    return
                 if is_new_env:
                     if saved:
-                        pending.discard(msg["eid"])
                         # The browser that forked adds the env to its own list;
                         # every other one only learns of it from this. Sent once
                         # the copy is saved, in the order /fork_env uses.

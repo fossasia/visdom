@@ -26,6 +26,7 @@ race a thread pool.
 
 import asyncio
 import json
+import threading
 from unittest import mock
 
 import pytest
@@ -405,6 +406,71 @@ def test_save_in_memory_mode_announces_fork(app_factory):
     send(forker, cmd="save", eid="memcopy", prev_eid="memcopy", data={})
     for sub in (forker, other):
         assert commands(sub).count("env_update") == heard[sub] + 1
+
+
+def test_overlapping_saves_of_pending_env_announce_once(env):
+    """Concurrent saves for a pending environment announce exactly once."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (sub1, sub2)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(sub1, cmd="save", eid="concurrent", prev_eid="expt", data={})
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "concurrent", "prev_eid": "expt", "data": {}}
+    )
+
+    async def run_concurrent():
+        await asyncio.gather(
+            sub1.on_message(save_msg),
+            sub2.on_message(save_msg),
+        )
+
+    asyncio.run(run_concurrent())
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "concurrent",
+        ]
+
+
+def test_in_flight_save_dropped_when_environment_deleted(env):
+    """An environment deleted while its save is in flight is not reannounced."""
+    sub = open_sub(env)
+    heard = commands(sub).count("env_update")
+
+    save_started = threading.Event()
+    delete_done = threading.Event()
+    orig_save = env.storage.save_env
+
+    def slow_save(eid, env_data):
+        save_started.set()
+        delete_done.wait(timeout=2.0)
+        return orig_save(eid, env_data)
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "raced", "prev_eid": "expt", "data": {}}
+    )
+    delete_msg = json.dumps({"cmd": "delete_env", "eid": "raced"})
+
+    async def run_race():
+        with mock.patch.object(env.storage, "save_env", side_effect=slow_save):
+            t1 = asyncio.create_task(sub.on_message(save_msg))
+            while not save_started.is_set():
+                await asyncio.sleep(0.005)
+            await sub.on_message(delete_msg)
+            delete_done.set()
+            await t1
+
+    asyncio.run(run_race())
+
+    assert "raced" not in env.state
+    assert last(sub, "env_update")["data"] == ["main", "expt"]
+    assert commands(sub).count("env_update") == heard + 1
 
 
 def test_save_without_a_known_source_is_a_noop(env):
