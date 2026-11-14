@@ -2273,8 +2273,8 @@ class Visdom(object):
                 "Plotly must be installed to save Plotly figures. "
                 "Install with: pip install plotly"
             )
-        if isinstance(filepath, os.PathLike):
-            filepath = os.fspath(filepath)
+        if isinstance(filepath, (os.PathLike, bytes)):
+            filepath = os.fsdecode(filepath)
         try:
             figure.write_image(filepath, **kwargs)
         except ValueError as e:

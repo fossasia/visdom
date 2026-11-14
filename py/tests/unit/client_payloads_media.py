@@ -884,6 +884,25 @@ def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
     assert 'type="audio/wav"' in content(sent)
 
 
+def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client):
+    class DummyFigure:
+        def __init__(self):
+            self.saved_to = None
+
+        def write_image(self, filepath, **kwargs):
+            self.saved_to = filepath
+
+    fig = DummyFigure()
+    with patch.dict(sys.modules, {"plotly": object()}):
+        offline_client.save_plotly_figure(fig, b"plot.png")
+        assert fig.saved_to == "plot.png"
+        assert isinstance(fig.saved_to, str)
+
+        offline_client.save_plotly_figure(fig, _BytesPath("figure.svg"))
+        assert fig.saved_to == "figure.svg"
+        assert isinstance(fig.saved_to, str)
+
+
 def test_audio_escapes_the_caption(capture_send):
     """The caption is interpolated into markup, so it has to be escaped."""
     sent = capture_send(
