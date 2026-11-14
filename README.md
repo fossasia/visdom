@@ -1045,8 +1045,8 @@ environment). If you've also registered an event handler via
    "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
-This function plays audio. It takes as input the filename of the audio
-file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
+This function plays audio. It takes as input the filename or `pathlib.Path` of the audio
+file (`audiofile` accepts string or `os.PathLike`) or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
 audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or
 `2xN`) is accepted too. The function does not support any plot-specific `opts`.
 
@@ -1058,8 +1058,8 @@ Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
 
 #### vis.video
-This function plays a video. It takes as input the filename of the video
-`videofile` or a `LxHxWxC`-sized
+This function plays a video. It takes as input the filename or `pathlib.Path` of the video
+`videofile` (`videofile` accepts string or `os.PathLike`) or a `LxHxWxC`-sized
 `tensor` containing all the frames of the video as input. The
 function does not support any plot-specific `opts`.
 
@@ -1073,8 +1073,8 @@ to support the Theano codec in an OGG container (Chrome supports this).
 
 #### vis.svg
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
-the name of an SVG file `svgfile`. The function does not support any specific
-`opts`.
+the filename or `pathlib.Path` of an SVG file `svgfile` (`svgfile` accepts string or `os.PathLike`).
+The function does not support any specific `opts`.
 
 #### vis.matplot
 This function draws a Matplotlib `plot`. The function supports

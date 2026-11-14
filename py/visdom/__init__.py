@@ -2178,8 +2178,8 @@ class Visdom(object):
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
         This function draws an SVG object. It takes as input an SVG string or
-        the name of an SVG file. The function does not support any
-        plot-specific `opts`.
+        the filename or `pathlib.Path` of an SVG file (`os.PathLike` supported).
+        The function does not support any plot-specific `opts`.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -2877,8 +2877,8 @@ class Visdom(object):
     @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
-        This function plays audio. It takes as input the filename of the audio
-        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        This function plays audio. It takes as input the filename or `pathlib.Path`
+        of the audio file (`os.PathLike` supported) or an `N` tensor containing the waveform (use an `Nx2` matrix for
         stereo audio). The `(channels, N)` layout that torchaudio and librosa
         return (`1xN` or `2xN`) is accepted too. The function does not support
         any plot-specific `opts`.
@@ -2988,8 +2988,8 @@ class Visdom(object):
         self, tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None
     ):
         """
-        This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        This function plays a video. It takes as input the filename or `pathlib.Path`
+        of the video `videofile` (`os.PathLike` supported) or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
         the frames of the video as input, as specified in `dim`. The color
         channels must be in BGR order.
 

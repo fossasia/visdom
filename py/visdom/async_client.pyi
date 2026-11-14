@@ -20,6 +20,7 @@ import asyncio
 import contextvars
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
+import os
 from types import TracebackType
 from typing import (
     Any,
@@ -49,6 +50,7 @@ from visdom import (
     _ExperimentQueryReply,
     _ExperimentReply,
     _OptOps,
+    _OptPath,
     _OptStr,
     _SendReturn,
     _TagMap,
@@ -337,7 +339,7 @@ class AsyncVisdom:
     async def svg(
         self,
         svgstr: _OptStr = ...,
-        svgfile: _OptStr = ...,
+        svgfile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -346,14 +348,14 @@ class AsyncVisdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     async def save_plotly_figure(
-        self, figure: Any, filepath: Text, **kwargs: Any
+        self, figure: Any, filepath: Union[Text, os.PathLike[str]], **kwargs: Any
     ) -> None: ...
     async def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptStr = ...,
+        save_path: _OptPath = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     async def image(
@@ -385,7 +387,7 @@ class AsyncVisdom:
     async def audio(
         self,
         tensor: Tensor = ...,
-        audiofile: _OptStr = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -394,7 +396,7 @@ class AsyncVisdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
