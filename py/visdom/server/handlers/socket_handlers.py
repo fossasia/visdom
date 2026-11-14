@@ -246,8 +246,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     # was being read; there is nothing left to copy.
                     return
                 pending = _get_pending_broadcasts(self)
-                is_new_env = msg["eid"] not in self.state or msg["eid"] in pending
-                pending.discard(msg["eid"])
+                if msg["eid"] not in self.state:
+                    pending.add(msg["eid"])
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
@@ -264,14 +264,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     # Dropped or deleted while the save was in flight.
                     pending.discard(msg["eid"])
                     return
-                if is_new_env:
-                    if saved:
-                        # The browser that forked adds the env to its own list;
-                        # every other one only learns of it from this. Sent once
-                        # the copy is saved, in the order /fork_env uses.
-                        broadcast_envs(self)
-                    else:
-                        pending.add(msg["eid"])
+                if saved and msg["eid"] in pending:
+                    # The browser that forked adds the env to its own list;
+                    # every other one only learns of it from this. Sent once
+                    # the copy is saved, in the order /fork_env uses.
+                    pending.discard(msg["eid"])
+                    broadcast_envs(self)
 
         elif cmd == "save_all":
             fire_and_forget_save_all(self)

@@ -438,6 +438,60 @@ def test_overlapping_saves_of_pending_env_announce_once(env):
         ]
 
 
+def test_overlapping_retry_succeeds_while_first_retry_fails(env):
+    """If retry A fails while overlapping retry B succeeds, B must announce."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (sub1, sub2)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(sub1, cmd="save", eid="raced_retry", prev_eid="expt", data={})
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub]
+
+    a_in_save = threading.Event()
+    b_submitted = threading.Event()
+    orig_save = env.storage.save_env
+
+    def controlled_save(eid, env_data):
+        if not a_in_save.is_set():
+            a_in_save.set()
+            assert b_submitted.wait(timeout=2.0), "Retry B failed to submit"
+            raise OSError("disk full on A")
+        return orig_save(eid, env_data)
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "raced_retry", "prev_eid": "expt", "data": {}}
+    )
+
+    async def run_overlapping():
+        with mock.patch.object(env.storage, "save_env", side_effect=controlled_save):
+            t_a = asyncio.create_task(sub1.on_message(save_msg))
+            while not a_in_save.is_set():
+                await asyncio.sleep(0.001)
+            t_b = asyncio.create_task(sub2.on_message(save_msg))
+            while (
+                getattr(env.storage_executor, "_work_queue", None) is not None
+                and env.storage_executor._work_queue.empty()
+            ):
+                await asyncio.sleep(0.001)
+            b_submitted.set()
+            await asyncio.gather(t_a, t_b)
+
+    asyncio.run(run_overlapping())
+
+    assert env.storage.env_exists("raced_retry")
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "raced_retry",
+        ]
+
+
 def test_in_flight_save_dropped_when_environment_deleted(env):
     """An environment deleted while its save is in flight is not reannounced."""
     sub = open_sub(env)
