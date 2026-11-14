@@ -394,6 +394,8 @@ class BaseHandler(
             except Exception as e:
                 logging.error(e)
             self.set_status(status_code)
-            self.write(f"""
+            self.write(
+                f"""
                 <h1>{status_code} - {title}</h1>
-                """)
+                """
+            )
