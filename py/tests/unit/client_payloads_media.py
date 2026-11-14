@@ -938,7 +938,9 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
-@pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
+@pytest.mark.parametrize(
+    "text", ["line one\nline two", "研究 café", r"literal \n path"]
+)
 def test_svg_file_preserves_text(capture_send, tmp_path, text):
     """File input must produce the same SVG text as the string API."""
     markup = "<svg width='2'>\n<text>{}</text>\n</svg>".format(text)
@@ -953,6 +955,27 @@ def test_svg_accepts_buffer_svgstr(capture_send, wrap):
     """bytes, bytearray and memoryview decode as UTF-8, like the svgfile path."""
     sent = capture_send(lambda v: v.svg(svgstr=wrap(b"<svg a='1'><g/></svg>")))
     assert content(sent) == "<svg a='1'><g/></svg>"
+
+
+def test_svg_accepts_a_strided_byte_memoryview(capture_send):
+    markup = b"<svg a='1'><g/></svg>"
+    padded = bytes(b for byte in markup for b in (byte, 0))
+    view = memoryview(padded)[::2]
+    sent = capture_send(lambda v: v.svg(svgstr=view))
+    assert content(sent) == markup.decode()
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_svg_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.svg(svgstr=make_view())
 
 
 def test_svg_accepts_utf8_bytes_with_non_ascii_text(capture_send):
