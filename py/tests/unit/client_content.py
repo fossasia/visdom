@@ -590,23 +590,38 @@ def test_embeddings_accepts_a_torch_tensor(offline_client, requires_grad):
     np.testing.assert_array_equal(received, FEATURES)
 
 
-def test_embeddings_passes_an_array_like_through_without_converting(offline_client):
-    """A scipy-sparse-like object with ndim/shape/dtype reaches do_tsne intact."""
-
-    class _ArrayLike:
-        ndim = 2
-        shape = (3, 4)
-        dtype = np.dtype("float64")
-
-    array_like = _ArrayLike()
+def test_embeddings_densifies_a_sparse_matrix(offline_client):
+    """The backends call len(X), which scipy refuses, so sparse input is
+    densified before it reaches do_tsne."""
+    sparse = pytest.importorskip("scipy.sparse")
     with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
         offline_client, "_send", return_value="w"
     ):
         offline_client.embeddings(
-            array_like, LABELS, opts={"register_embedding_events": False}
+            sparse.csr_matrix(FEATURES),
+            LABELS,
+            opts={"register_embedding_events": False},
         )
 
-    assert tsne.call_args[0][0] is array_like
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf])
+def test_embeddings_rejects_a_sparse_matrix_with_a_non_finite_value(
+    offline_client, bad_value
+):
+    sparse = pytest.importorskip("scipy.sparse")
+    matrix = sparse.csr_matrix(FEATURES)
+    matrix.data[0] = bad_value
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError, match="features must be finite"):
+            offline_client.embeddings(
+                matrix, LABELS, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
 
 
 def test_embeddings_point_carries_group_label_and_index(offline_client):
