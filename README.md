@@ -910,7 +910,7 @@ viz = Visdom()
 viz.image_heatmap(img, heatmap, opts=dict(title="Saliency", alpha=0.6, colormap="jet"))
 ```
 
-Any attribution method that produces an `HxW` numpy array works — gradient saliency, GradCAM, SHAP, or a hand-computed attention map.
+Any attribution method that produces a 2D numpy array works — gradient saliency, GradCAM, SHAP, or a hand-computed attention map. The heatmap does not have to match the image size: a map at the model's resolution, such as a 7x7 GradCAM map for a 224x224 image, is stretched over the image with bilinear interpolation.
 
 The following `opts` are supported:
 

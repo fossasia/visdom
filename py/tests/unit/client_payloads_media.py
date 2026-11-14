@@ -660,6 +660,48 @@ def test_image_heatmap_replaces_non_finite_heatmap_values(capture_send):
     assert pixels[0, 1].tolist() == pixels[1, 1].tolist()
 
 
+@pytest.mark.parametrize(
+    "shape",
+    [(1, 1), (7, 7), (2, 9), (16, 16)],
+    ids=["1x1", "gradcam_7x7", "wide_2x9", "larger_16x16"],
+)
+def test_image_heatmap_stretches_a_grid_of_another_size(capture_send, shape):
+    """A 7x7 GradCAM map covers the whole image, like a full-size one."""
+    img = np.random.default_rng(0).random((3, 8, 12))
+    full = capture_send(lambda v: v.image_heatmap(img, np.full((8, 12), 0.6)))
+    sent = capture_send(lambda v: v.image_heatmap(img, np.full(shape, 0.6)))
+    assert sent["payload"] == full["payload"]
+
+
+def test_image_heatmap_interpolates_a_coarse_grid_bilinearly(capture_send):
+    """Half-pixel centres, as torch's bilinear interpolate and OpenCV use."""
+    img = np.zeros((4, 4), dtype=np.uint8)
+    with patch.dict(sys.modules, {"matplotlib": None}):
+        coarse = capture_send(lambda v: v.image_heatmap(img, [[0.0, 1.0]] * 2))
+        full = capture_send(
+            lambda v: v.image_heatmap(img, [[0.0, 0.25, 0.75, 1.0]] * 4)
+        )
+    assert decode(coarse)[1].tolist() == decode(full)[1].tolist()
+
+
+def test_image_heatmap_cleans_a_coarse_grid_before_stretching_it(capture_send):
+    """A NaN cell reads as cold; it must not spread over its neighbours."""
+    img = np.zeros((4, 4), dtype=np.uint8)
+    with patch.dict(sys.modules, {"matplotlib": None}):
+        nan = capture_send(lambda v: v.image_heatmap(img, [[np.nan, 1.0], [1.0, 1.0]]))
+        cold = capture_send(lambda v: v.image_heatmap(img, [[0.0, 1.0], [1.0, 1.0]]))
+    assert decode(nan)[1].tolist() == decode(cold)[1].tolist()
+
+
+def test_image_heatmap_sizes_the_pane_from_the_image_not_the_heatmap(capture_send):
+    sent = capture_send(
+        lambda v: v.image_heatmap(np.zeros((3, 224, 160)), np.ones((7, 5)))
+    )
+    assert decode(sent)[1].shape == (224, 160, 3)
+    assert sent["payload"]["opts"]["width"] == 160
+    assert sent["payload"]["opts"]["height"] == 224
+
+
 def test_image_heatmap_encodes_as_jpeg_when_a_quality_is_given(capture_send):
     sent = capture_send(
         lambda v: v.image_heatmap(
@@ -693,9 +735,19 @@ def test_image_heatmap_does_not_mutate_the_callers_opts(capture_send):
     "args, kwargs, message",
     [
         (
-            (np.zeros((2, 2), dtype=np.uint8), np.ones((3, 3))),
+            (np.zeros((2, 2), dtype=np.uint8), np.ones((1, 2, 2))),
             {},
-            r"heatmap shape \(3, 3\) does not match image \(2,2\)",
+            r"heatmap must be a non-empty 2D array; got shape \(1, 2, 2\)",
+        ),
+        (
+            (np.zeros((2, 2), dtype=np.uint8), np.ones(4)),
+            {},
+            r"heatmap must be a non-empty 2D array; got shape \(4,\)",
+        ),
+        (
+            (np.zeros((2, 2), dtype=np.uint8), np.ones((0, 2))),
+            {},
+            r"heatmap must be a non-empty 2D array; got shape \(0, 2\)",
         ),
         (
             (np.zeros((5, 2, 2), dtype=np.uint8), np.ones((2, 2))),
