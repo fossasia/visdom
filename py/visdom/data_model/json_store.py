@@ -22,6 +22,24 @@ from visdom.utils.server_utils import escape_eid, LazyEnvData
 from visdom.utils.shared_utils import copy_json_data, ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
+HASHED_STORAGE_RE = re.compile(r"^hash_[a-f0-9]{64}\.json\.hash$", re.IGNORECASE)
+
+
+def _filename_too_long(error, path):
+    if error.errno == errno.ENAMETOOLONG or getattr(error, "winerror", None) == 206:
+        return True
+    return (
+        os.name == "nt"
+        and error.errno == errno.EINVAL
+        and (
+            len(os.path.basename(path + ".tmp").encode("utf-16-le")) > 255 * 2
+            or (
+                not os.path.abspath(path).startswith("\\\\?\\")
+                and len((os.path.abspath(path) + ".tmp").encode("utf-16-le")) >= 260 * 2
+            )
+        )
+    )
+
 
 #: The small facts an env file holds outside its windows: the experiment
 #: metadata blob and, for a ``hash_<sha256>.json`` fallback, the real env id.
@@ -220,7 +238,7 @@ class JSONStore(DataStore):
         return path
 
     def _hash_path(self, eid):
-        """Return the ``hash_<sha256>.json`` fallback path for ``eid``.
+        """Return the ``hash_<sha256>.json.hash`` fallback path for ``eid``.
 
         No containment check is needed here: the filename is entirely a hex
         digest, so no part of ``eid`` survives into it.
@@ -228,7 +246,48 @@ class JSONStore(DataStore):
         safe_eid = self._safe_eid(eid)
         base = os.path.abspath(self.env_path)
         hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-        return os.path.abspath(os.path.join(base, "hash_{0}.json".format(hashed_id)))
+        return os.path.abspath(
+            os.path.join(base, "hash_{0}.json.hash".format(hashed_id))
+        )
+
+    def _legacy_hash_owner(self, path):
+        if path is None or not HASHED_ENV_RE.fullmatch(os.path.basename(path)):
+            return None
+        record = self._read_meta(path)
+        if not record.readable:
+            try:
+                os.stat(path)
+            except FileNotFoundError:
+                return None
+            except OSError:
+                pass
+            return UNREADABLE_META
+        name = record.name
+        if name is not None and os.path.normcase(
+            self._hash_path(name)[:-5]
+        ) == os.path.normcase(os.path.abspath(path)):
+            return name
+        return None
+
+    def _recovered_path(self, eid):
+        primary = self._primary_path(eid)
+        if primary is None or not HASHED_ENV_RE.fullmatch(os.path.basename(primary)):
+            return None
+        stem = os.path.normcase(self._safe_eid(eid))
+        try:
+            with os.scandir(os.path.abspath(self.env_path)) as entries:
+                for entry in entries:
+                    if (
+                        HASHED_STORAGE_RE.fullmatch(entry.name)
+                        and os.path.normcase(entry.name[: -len(".json.hash")]) == stem
+                        and entry.is_file()
+                    ):
+                        record = self._read_meta(entry.path)
+                        if record.readable and record.name is None:
+                            return entry.path
+        except OSError:
+            return None
+        return None
 
     def _resolve_existing(self, eid):
         """Return the existing file path for ``eid`` (primary or hash), or ``None``.
@@ -238,15 +297,21 @@ class JSONStore(DataStore):
         containment guarantee has to hold at the point the path leaves it.
         """
         base = os.path.abspath(self.env_path)
-        for candidate in (self._primary_path(eid), self._hash_path(eid)):
+        hashed = self._hash_path(eid)
+        for candidate in (hashed, self._primary_path(eid), hashed[:-5]):
             if candidate is None:
                 continue
             path = os.path.abspath(candidate)
             if not path.startswith(os.path.join(base, "")):
                 continue
             if os.path.exists(path):
+                owner = self._legacy_hash_owner(path)
+                if owner is not None and owner != self._safe_eid(eid):
+                    continue
+                if path == hashed[:-5] and owner != self._safe_eid(eid):
+                    continue
                 return path
-        return None
+        return self._recovered_path(eid)
 
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""
@@ -300,7 +365,7 @@ class JSONStore(DataStore):
         already current, so there is nothing to rewrite and no reason to force
         it into memory. The write funnels through :meth:`_primary_path` /
         :meth:`_hash_path` so it agrees with load/delete/exists on the file a
-        given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json``
+        given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json.hash``
         with the real id kept in a ``name`` field.
 
         The write itself is atomic (see :meth:`_atomic_write`), so a crash
@@ -317,18 +382,29 @@ class JSONStore(DataStore):
             payload = env_data
 
         primary = self._primary_path(eid)
+        hashed = self._hash_path(eid)
+        recovered = self._recovered_path(eid)
+        if recovered is not None and self._resolve_existing(eid) != recovered:
+            recovered = None
+        owner = self._legacy_hash_owner(primary)
+        if os.path.exists(hashed) or (
+            owner is not None and owner != self._safe_eid(eid)
+        ):
+            primary = None
         try:
             if primary is None:
                 raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
             self._atomic_write(primary, json.dumps(payload, cls=NanSafeEncoder))
         except OSError as e:
-            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            if not _filename_too_long(e, primary):
                 raise
             data_to_save = copy_json_data(payload)
             data_to_save["name"] = self._safe_eid(eid)
-            self._atomic_write(
-                self._hash_path(eid), json.dumps(data_to_save, cls=NanSafeEncoder)
-            )
+            self._atomic_write(hashed, json.dumps(data_to_save, cls=NanSafeEncoder))
+        if recovered is not None:
+            self._migrate_recovered_undo(eid, recovered)
+            os.remove(recovered)
+            self._forget_meta(recovered)
         return True
 
     def save_all(self, state):
@@ -559,8 +635,8 @@ class JSONStore(DataStore):
     def list_envs(self):
         """Return the ids of all environments stored on disk.
 
-        Hash-fallback files are recognised by their exact ``hash_<64 hex>.json``
-        shape and resolved to the real id kept inside; every other ``.json`` file
+        Hash-fallback files use ``hash_<64 hex>.json.hash``; legacy files use
+        ``hash_<64 hex>.json``. Both resolve to the real id kept inside; other ``.json`` files
         yields its filename stem. Sub-directories (e.g. ``view/``) are skipped.
 
         The ``hash_<64 hex>.json`` shape is only a naming convention, not a
@@ -582,14 +658,16 @@ class JSONStore(DataStore):
         envs = []
         seen = set()
         for name in os.listdir(self.env_path):
-            if not name.endswith(".json"):
+            is_hashed = HASHED_STORAGE_RE.fullmatch(name)
+            if not name.endswith(".json") and not is_hashed:
                 continue
             path = os.path.join(self.env_path, name)
             if not os.path.isfile(path):
                 continue
             seen.add(os.path.abspath(path))
-            stem = name[: -len(".json")]
-            if HASHED_ENV_RE.match(name):
+            suffix = ".json.hash" if is_hashed else ".json"
+            stem = name[: -len(suffix)]
+            if HASHED_ENV_RE.match(name) or is_hashed:
                 record = self._read_meta(path)
                 if not record.readable:
                     continue
@@ -597,7 +675,7 @@ class JSONStore(DataStore):
             else:
                 envs.append(stem)
         self._prune_meta(seen)
-        return sorted(envs)
+        return sorted(set(envs))
 
     def delete_env(self, eid):
         """Remove ``eid`` from disk; return ``True`` if a file was removed."""
@@ -607,7 +685,30 @@ class JSONStore(DataStore):
         if path is None:
             return False
         try:
+            legacy = self._hash_path(eid)[:-5]
+            owns_legacy = self._legacy_hash_owner(legacy) == self._safe_eid(eid)
+            primary = self._primary_path(eid)
+            owner = self._legacy_hash_owner(primary)
+            if path == self._recovered_path(eid):
+                self._migrate_recovered_undo(eid, path)
+            if owns_legacy:
+                _, _, undo = self._undo_paths(eid)
+                if os.path.exists(undo[:-5]):
+                    if os.path.exists(undo):
+                        os.remove(undo[:-5])
+                    else:
+                        os.replace(undo[:-5], undo)
             os.remove(path)
+            if legacy != path and owns_legacy:
+                os.remove(legacy)
+            if (
+                primary is not None
+                and os.path.normcase(primary) != os.path.normcase(path)
+                and (owner is None or owner == self._safe_eid(eid))
+                and os.path.exists(primary)
+            ):
+                os.remove(primary)
+                self._forget_meta(primary)
         except FileNotFoundError:
             return False
         except OSError as e:
@@ -658,16 +759,46 @@ class JSONStore(DataStore):
         undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
         plain = os.path.join(undo_dir, "{0}.json".format(safe_eid))
         hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-        hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
+        hashed = os.path.join(undo_dir, "hash_{0}.json.hash".format(hashed_id))
         return undo_dir, plain, hashed
+
+    def _undo_candidates(self, eid):
+        undo_dir, plain, hashed = self._undo_paths(eid)
+        candidates = [hashed]
+        owner = self._legacy_hash_owner(self._primary_path(eid))
+        if owner is None or owner == self._safe_eid(eid):
+            candidates.append(plain)
+        if self._legacy_hash_owner(self._hash_path(eid)[:-5]) == self._safe_eid(eid):
+            candidates.append(hashed[:-5])
+        recovered = self._recovered_path(eid)
+        if recovered is not None and self._resolve_existing(eid) == recovered:
+            candidates.append(os.path.join(undo_dir, os.path.basename(recovered)))
+        return candidates
+
+    def _migrate_recovered_undo(self, eid, recovered):
+        undo_dir, _, hashed = self._undo_paths(eid)
+        source = os.path.join(undo_dir, os.path.basename(recovered))
+        try:
+            os.stat(source)
+        except FileNotFoundError:
+            return
+        if any(
+            os.path.exists(path)
+            for path in self._undo_candidates(eid)
+            if os.path.normcase(path) != os.path.normcase(source)
+        ):
+            os.remove(source)
+        else:
+            os.replace(source, hashed)
 
     def load_undo(self, eid):
         """Return ``eid``'s undo stack (a list), or ``[]`` if missing/corrupt."""
         if self.env_path is None:
             return []
-        _, plain, hashed = self._undo_paths(eid)
-        path = plain if os.path.exists(plain) else hashed
-        if not os.path.exists(path):
+        path = next(
+            (path for path in self._undo_candidates(eid) if os.path.exists(path)), None
+        )
+        if path is None:
             return []
         data = read_json_file(path)
         if data is UNREADABLE_JSON:
@@ -684,9 +815,13 @@ class JSONStore(DataStore):
         payload = json.dumps(stack, cls=NanSafeEncoder)
         try:
             target = plain
+            if HASHED_ENV_RE.fullmatch(os.path.basename(plain)) or os.path.exists(
+                hashed
+            ):
+                raise OSError(errno.ENAMETOOLONG, "reserved fallback filename")
             self._atomic_write(plain, payload)
         except OSError as e:
-            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            if not _filename_too_long(e, plain):
                 raise
             target = hashed
             self._atomic_write(hashed, payload)
@@ -696,8 +831,7 @@ class JSONStore(DataStore):
         """Remove ``eid``'s on-disk undo history; no-op when persistence is off."""
         if self.env_path is None:
             return
-        _, plain, hashed = self._undo_paths(eid)
-        for path in (plain, hashed):
+        for path in self._undo_candidates(eid):
             if os.path.exists(path):
                 try:
                     os.remove(path)
