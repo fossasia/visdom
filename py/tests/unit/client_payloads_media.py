@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import sys
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -176,6 +177,64 @@ def test_image_normalize_of_a_flat_image_is_black(capture_send):
     assert set(np.unique(pixels)) == {0}
 
 
+BYTE_PIXELS = np.array([[0, 128], [200, 255]])
+
+
+@pytest.mark.parametrize("dtype", [np.int16, np.int32, np.int64, np.uint16, np.uint32])
+@pytest.mark.parametrize("shape", [(2, 2), (3, 2, 2)], ids=["HxW", "CxHxW"])
+def test_image_draws_other_integer_dtypes_as_their_uint8_copy(
+    capture_send, dtype, shape
+):
+    """Regression: Pillow cannot encode these, so every one of them used to raise.
+
+    int64 is what ``np.random.randint`` and ``torch.long`` hand over.
+    """
+    img = np.broadcast_to(BYTE_PIXELS, shape)
+    _, expected = decode(capture_send(lambda v: v.image(img.astype(np.uint8))))
+    _, pixels = decode(capture_send(lambda v: v.image(img.astype(dtype))))
+    np.testing.assert_array_equal(pixels, expected)
+
+
+@pytest.mark.parametrize(
+    "mask",
+    [
+        np.array([[True, False], [False, True]]),
+        np.array([[1, 0], [0, 1]], dtype=np.int64),
+    ],
+    ids=["bool", "int64"],
+)
+def test_image_draws_a_binary_mask_black_and_white(capture_send, mask):
+    _, pixels = decode(capture_send(lambda v: v.image(mask)))
+    assert pixels.tolist() == [[255, 0], [0, 255]]
+
+
+def test_image_clips_integers_outside_the_byte_range(capture_send):
+    img = np.array([[-5, 300], [0, 255]], dtype=np.int16)
+    with pytest.warns(UserWarning, match="int16 image values outside"):
+        _, pixels = decode(capture_send(lambda v: v.image(img)))
+    assert pixels.tolist() == [[0, 255], [0, 255]]
+
+
+def test_image_warns_once_for_a_stream_of_clipped_frames(capture_send):
+    """Each depth frame spans its own range; the warning still shows only once,
+    and against the line that called ``image``, not one inside visdom."""
+    frames = [np.array([[0, 1000 * i]], dtype=np.uint16) for i in range(1, 4)]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default")
+        for frame in frames:
+            capture_send(lambda v: v.image(frame))
+    assert [str(w.message).split()[0] for w in caught] == ["uint16"]
+    assert caught[0].filename == __file__
+
+
+def test_image_normalize_stretches_an_integer_image(capture_send):
+    """A 16-bit depth map spans its own range; normalize fills the bytes with it."""
+    img = np.array([[1000, 2000], [2000, 3000]], dtype=np.uint16)
+    sent = capture_send(lambda v: v.image(img, opts=dict(normalize=True)))
+    _, pixels = decode(sent)
+    assert pixels.tolist() == [[0, 127], [127, 255]]
+
+
 def test_image_encodes_as_jpeg_when_a_quality_is_given(capture_send):
     sent = capture_send(
         lambda v: v.image(np.zeros((3, 4, 4), dtype=np.uint8), opts=dict(jpgquality=80))
@@ -280,6 +339,11 @@ def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
 def test_image_rejects_unsupported_shapes(offline_client, img, message):
     with pytest.raises(ValueError, match=message):
         offline_client.image(img)
+
+
+def test_image_rejects_a_dtype_with_no_pixel_meaning(offline_client):
+    with pytest.raises(TypeError, match="Unsupported image dtype: complex128"):
+        offline_client.image(np.zeros((2, 2), dtype=np.complex128))
 
 
 # ---------------------------------------------------------------- images ----
@@ -464,28 +528,56 @@ def test_images_keeps_a_uint8_batch_in_uint8(offline_client):
 
 
 def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client):
-    """The dtype shortcut is only taken where it cannot change a pixel.
+    """Only a uint8 mask needs the float grid for its [0, 1] stretch.
 
     ``image()`` stretches anything whose whole range fits in [0, 1] -- and the
     grid's fill value of 1 means a uint8 batch holding only 0s and 1s is such a
-    grid. Keeping that case in float64 preserves the stretch pinned by
-    ``test_images_padding_colour_follows_the_input_dtype``.
+    grid. uint16 takes the integer path, which applies the same stretch without
+    widening the grid.
     """
     batch = np.ones((2, 3, 2, 2), dtype=np.uint8)
     assert _grid_dtype(offline_client, batch) == np.float64
+    assert _grid_dtype(offline_client, batch.astype(np.uint16)) == np.uint16
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [np.int16, np.int32, np.int64, np.uint16, np.uint32, np.uint64, bool],
+)
+def test_images_keeps_other_integer_and_bool_batches_in_their_dtype(
+    offline_client, dtype
+):
+    """The grid must not widen values that ``image()`` converts losslessly."""
+    batch = np.full((2, 3, 2, 2), True if dtype is bool else 200, dtype=dtype)
+    assert _grid_dtype(offline_client, batch) == np.dtype(dtype)
+
+
+def test_images_uint16_list_keeps_the_integer_grid(offline_client):
+    """The public list call must not widen uint16 tiles before the grid."""
+    tiles = [
+        np.full((3, 2, 2), 1000, dtype=np.uint16),
+        np.full((3, 2, 2), 2000, dtype=np.uint16),
+    ]
+    assert _grid_dtype(offline_client, tiles) == np.uint16
 
 
 def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
-    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+    """For uint8, ``opts.normalize`` is implemented only inside the float branch.
 
     A uint8 grid never reaches that branch, so taking the dtype shortcut under
     ``normalize=True`` would accept the option and silently do nothing. The
     batch here is uint8 with a maximum above 1, which is exactly what the
     shortcut is for -- so the float grid can only be coming from the option.
+    Other integer dtypes normalize on the integer path, so they keep their
+    dtype.
     """
     batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
     assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
     assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
+    assert (
+        _grid_dtype(offline_client, batch.astype(np.uint16), opts={"normalize": True})
+        == np.uint16
+    )
 
 
 def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
@@ -503,6 +595,107 @@ def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
     plain = decode(capture_send(lambda v: v.images(batch)))[1]
     assert (stretched.min(), stretched.max()) == (0, 255)
     assert (plain.min(), plain.max()) == (1, 200)
+
+
+def test_images_uint16_batch_draws_like_a_single_image(capture_send):
+    """A one-tile batch must reach the same integer path as ``image()``."""
+    tile = np.array(
+        [
+            [[0, 1000], [2000, 3000]],
+            [[255, 256], [257, 258]],
+            [[65535, 40000], [30000, 20000]],
+        ],
+        dtype=np.uint16,
+    )
+    batch = tile[np.newaxis]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        for opts in (None, {"normalize": True}):
+            _, batch_pixels = decode(
+                capture_send(
+                    lambda v, o=opts: v.images(batch, nrow=1, padding=0, opts=o)
+                )
+            )
+            _, image_pixels = decode(
+                capture_send(lambda v, o=opts: v.image(tile, opts=o))
+            )
+            np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+def test_images_bool_batch_draws_like_a_single_image(capture_send):
+    tile = np.array(
+        [
+            [[True, False], [False, True]],
+            [[False, True], [True, False]],
+            [[True, True], [False, False]],
+        ],
+        dtype=bool,
+    )
+    batch = tile[np.newaxis]
+    for opts in (None, {"normalize": True}):
+        _, batch_pixels = decode(
+            capture_send(lambda v, o=opts: v.images(batch, nrow=1, padding=0, opts=o))
+        )
+        _, image_pixels = decode(capture_send(lambda v, o=opts: v.image(tile, opts=o)))
+        np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+@pytest.mark.parametrize("dtype", [np.int64, np.uint64])
+def test_images_wide_integer_batch_draws_like_a_single_image(capture_send, dtype):
+    """A float64 grid used to round 64-bit values that the integer path keeps."""
+    low = 2**53
+    tile = np.array(
+        [
+            [[low, low + 1], [low + 2, low + 3]],
+            [[low + 4, low + 5], [low + 6, low + 7]],
+            [[low + 8, low + 9], [low + 10, low + 11]],
+        ],
+        dtype=dtype,
+    )
+    batch = tile[np.newaxis]
+    _, batch_pixels = decode(
+        capture_send(
+            lambda v: v.images(batch, nrow=1, padding=0, opts={"normalize": True})
+        )
+    )
+    _, image_pixels = decode(
+        capture_send(lambda v: v.image(tile, opts={"normalize": True}))
+    )
+    np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+
+def test_images_uint16_batch_warns_like_a_single_image(capture_send):
+    tile = np.array(
+        [
+            [[0, 1000], [2000, 3000]],
+            [[65535, 1], [2, 3]],
+            [[256, 257], [258, 259]],
+        ],
+        dtype=np.uint16,
+    )
+    batch = tile[np.newaxis]
+    with warnings.catch_warnings(record=True) as batch_warnings:
+        warnings.simplefilter("always")
+        _, batch_pixels = decode(
+            capture_send(lambda v: v.images(batch, nrow=1, padding=0))
+        )
+    with warnings.catch_warnings(record=True) as image_warnings:
+        warnings.simplefilter("always")
+        _, image_pixels = decode(capture_send(lambda v: v.image(tile)))
+
+    assert [str(w.message) for w in batch_warnings] == [
+        str(w.message) for w in image_warnings
+    ]
+    assert [w.category for w in batch_warnings] == [UserWarning]
+    assert "uint16 image values outside" in str(batch_warnings[0].message)
+    np.testing.assert_array_equal(batch_pixels, image_pixels)
+
+    with warnings.catch_warnings(record=True) as normalized:
+        warnings.simplefilter("always")
+        capture_send(
+            lambda v: v.images(batch, nrow=1, padding=0, opts={"normalize": True})
+        )
+    assert not normalized
 
 
 def test_images_forwards_the_compress_level(capture_send):

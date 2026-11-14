@@ -329,6 +329,30 @@ def _is_missing_value(value):
     return False
 
 
+def _finite_range(ar):
+    """Smallest and largest finite value in `ar`, or `None` if it has none.
+
+    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
+    materialise: the fancy index builds a compacted copy of every finite
+    element just to read two numbers off it, which on an image-sized array is
+    a second full array per call. `fmin`/`fmax` skip NaN the same way and
+    reduce in place, so only an infinity -- which they propagate rather than
+    skip -- needs the mask at all.
+    """
+    if ar.size == 0:
+        return None
+    ar_min = np.fmin.reduce(ar, axis=None)
+    ar_max = np.fmax.reduce(ar, axis=None)
+    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
+        return None
+    if np.isneginf(ar_min) or np.isposinf(ar_max):
+        finite = ar[np.isfinite(ar)]
+        if finite.size == 0:
+            return None
+        return float(finite.min()), float(finite.max())
+    return float(ar_min), float(ar_max)
+
+
 class NanSafeEncoder(json.JSONEncoder):
     """JSON encoder that converts NaN and Inf float values to None.
 

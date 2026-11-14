@@ -16,6 +16,8 @@ vis.image(img, win=None, env=None, opts=None)
 
 This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image. Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format. Passing images in that format will raise errors or lead to incorrect rendering.
 
+`img` can hold `uint8` values, which are drawn as they are, or any other integer type, `bool`, or float. Those are converted: an image within `[0, 1]` is scaled to `[0, 255]` (so a 0/1 or boolean mask is drawn black and white), one within `[-1, 1]` is mapped onto `[0, 255]`, and anything else is clipped to `[0, 255]`, with a `UserWarning` when that clip changes an integer image. Pass `opts.normalize=True` to stretch the image's own range onto `[0, 255]` instead, e.g. for a 16-bit depth map.
+
 ```python
 import numpy as np
 
@@ -47,6 +49,8 @@ vis.images(tensor, nrow=8, padding=2, win=None, env=None, opts=None)
 
 This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
 
+Non-`uint8` integer and boolean batches keep their dtype while the grid is built and use the same conversion as `vis.image`, including clipping warnings and `opts.normalize`. `uint8` batches keep their existing scaling behavior. Padding and `opts.normalize` apply to the whole grid, so a tile can render differently than it would on its own.
+
 ```python
 # Display a grid of 16 random images
 vis.images(np.random.rand(16, 3, 64, 64), nrow=4, opts=dict(title='Image Grid'))
@@ -60,6 +64,7 @@ vis.images(np.random.rand(16, 3, 64, 64), nrow=4, opts=dict(title='Image Grid'))
 | `padding` | Padding around the image, equal padding around all 4 sides |
 | `opts.jpgquality` | JPG quality (`number` 0-100) |
 | `opts.caption` | Caption for the image |
+| `opts.normalize` | Stretch the grid's own range onto `[0, 255]` (`boolean`; default = `False`); applies to the whole grid, including padding |
 
 ## vis.text
 

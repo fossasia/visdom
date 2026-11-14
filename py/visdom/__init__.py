@@ -9,8 +9,10 @@
 from visdom.utils.shared_utils import (
     get_new_window_id,
     _coerce_image_slider_index,
+    _finite_range,
     _normalize_table_data,
 )
+from visdom.utils.image_utils import image_to_uint8
 from visdom import server
 import os
 import os.path
@@ -243,30 +245,6 @@ def loadfile(filename):
     str = fileobj.read()
     fileobj.close()
     return str
-
-
-def _finite_range(ar):
-    """Smallest and largest finite value in `ar`, or `None` if it has none.
-
-    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
-    materialise: the fancy index builds a compacted copy of every finite
-    element just to read two numbers off it, which on an image-sized array is
-    a second full array per call. `fmin`/`fmax` skip NaN the same way and
-    reduce in place, so only an infinity -- which they propagate rather than
-    skip -- needs the mask at all.
-    """
-    if ar.size == 0:
-        return None
-    ar_min = np.fmin.reduce(ar, axis=None)
-    ar_max = np.fmax.reduce(ar, axis=None)
-    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
-        return None
-    if np.isneginf(ar_min) or np.isposinf(ar_max):
-        finite = ar[np.isfinite(ar)]
-        if finite.size == 0:
-            return None
-        return float(finite.min()), float(finite.max())
-    return float(ar_min), float(ar_max)
 
 
 def _title2str(opts):
@@ -2504,17 +2482,25 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
-        [0, 255] or float. Float arrays are converted as follows: images whose
-        full range is within [0, 1] are scaled to [0, 255]; images whose full
-        range is within [-1, 1] but includes negative values are mapped from
-        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
-        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
-        instead.
+        or `HxW` tensor `img` that contains the image. The array values can be uint8,
+        any other integer type, bool, or float. uint8 values are drawn as they
+        are; every other type is converted as follows: images whose full range
+        is within [0, 1] are scaled to [0, 255] (so a 0/1 or bool mask is drawn
+        black and white); images whose full range is within [-1, 1] but
+        includes negative values are mapped from [-1, 1] to [0, 255]; all other
+        values are clipped to [0, 255], with a `UserWarning` when that clip
+        changes an integer image. Pass `opts.normalize=True` to min-max scale
+        the image to fill [0, 255] instead.
+
+        In float images, NaN and -inf become 0 and +inf becomes 255. This is
+        true with or without `opts.normalize`. The ranges above ignore NaN and
+        infinite values. With `opts.normalize`, if all finite values are the
+        same (or there are none), the finite pixels become 0, and NaN and
+        infinite pixels still follow the rule above.
 
         The following `opts` are supported:
 
-        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
+        - `opts.normalize`: min-max scale a non-uint8 image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
         - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
@@ -2523,23 +2509,7 @@ class Visdom(object):
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
-        if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+        img = image_to_uint8(img, opts.get("normalize", False))
 
         # extract dimensions and process formats
         if img.ndim == 2:
@@ -2638,13 +2608,15 @@ class Visdom(object):
         """
         Overlay a heatmap on an image.
 
-        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
-        `image()`). `heatmap` is an `HxW` float array. Values are expected in
-        [0, 1] but any finite range is accepted — values outside [0, 1] are
-        rescaled via min-max normalization before blending. NaN maps to 0;
-        infinite values are clamped to the [0, 1] boundary. The two are
-        blended in Python and sent as a single image, so no frontend changes
-        are required.
+        `img` is a `CxHxW` or `HxW` tensor (uint8, any other integer type, bool
+        or float, same rules as `image()`). As in `image()`, NaN and -inf in
+        `img` become 0 and +inf becomes 255, even with `opts.normalize`.
+        `heatmap` is an `HxW` float array.
+        Values are expected in [0, 1] but any finite range is accepted —
+        values outside [0, 1] are rescaled via min-max normalization before
+        blending. NaN maps to 0; infinite values are clamped to the [0, 1]
+        boundary. The two are blended in Python and sent as a single image, so
+        no frontend changes are required.
 
         The following `opts` are supported:
 
@@ -2659,26 +2631,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        img = np.asarray(img)
-        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
-            img = img.astype(np.float64)
-        if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+        img = image_to_uint8(img, opts.get("normalize", False))
 
         if img.ndim == 2:
             H, W = img.shape
@@ -2803,6 +2756,9 @@ class Visdom(object):
         or a list of images all of the same size,
         makes a grid of images of size (B / nrow, nrow).
 
+        Non-uint8 integer and bool batches use the same conversion and warnings
+        as a single image and keep their dtype while the grid is built. Padding
+        and ``opts.normalize`` apply to the whole grid.
 
         This is a modified from `make_grid()`
         https://github.com/pytorch/vision/blob/master/torchvision/utils.py
@@ -2835,25 +2791,19 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        # The grid has always been float64, which `image()` then takes through
-        # its float branch: eight bytes a pixel for what is usually a uint8
-        # batch, plus that branch's full-size temporaries. Staying in uint8 is
-        # only *identical* while that branch does no scaling, and it has two
-        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
-        # which includes the fill value of 1 itself -- so a uint8 batch holding
-        # nothing above 1 keeps the float grid, and with it the stretch pinned
-        # by `test_images_padding_colour_follows_the_input_dtype`. And
-        # `opts.normalize` asks for the min-max stretch explicitly, which the
-        # branch is the only thing that implements: a uint8 grid never reaches
-        # it, so the option would silently do nothing. Deciding this costs one
-        # C-speed pass over the batch and saves a copy of it at eight times the
-        # width.
+        # `image()` draws uint8 bytes unchanged, so a uint8 batch that needs
+        # [0, 1] scaling or `normalize` keeps the float grid. Every other
+        # integer and bool batch keeps its dtype so `image_to_uint8()` sees the
+        # values and can warn, normalize exactly, and avoid a float64 copy.
         normalize = opts is not None and opts.get("normalize", False)
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
-            grid = np.ones(grid_shape, dtype=np.uint8)
+        if tensor.dtype == np.uint8:
+            grid_dtype = np.uint8 if tensor.max() > 1 and not normalize else np.float64
+        elif tensor.dtype.kind in "biu":
+            grid_dtype = tensor.dtype
         else:
-            grid = np.ones(grid_shape)
+            grid_dtype = np.float64
+        grid = np.ones(grid_shape, dtype=grid_dtype)
 
         # One strided write per row of cells instead of one per tile: the grid
         # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
