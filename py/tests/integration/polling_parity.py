@@ -339,6 +339,37 @@ class TestPollingCommandParity(PollingTestCase):
         self.assertEqual(len(self.query(first)), 1)
         self.assertEqual(len(self.query(second)), 1)
 
+    def test_an_env_update_reaches_every_polling_subscriber_identically(self):
+        """``broadcast_envs`` encodes once and hands the same string to each.
+
+        The polling transport is where that sharing has to hold: its
+        ``write_message`` appends the string to a per-client deque, so one
+        object now sits in several queues at once until each is drained.
+        """
+        self.create_text_window(eid="expt", content="polled")
+        first, second = self.sub_sid(), self.sub_sid()
+        self.query(first)
+        self.query(second)
+
+        self.send(first, {"cmd": "delete_env", "eid": "expt"})
+
+        expected = [{"command": "env_update", "data": ["main"]}]
+        self.assertEqual(self.query(first), expected)
+        self.assertEqual(self.query(second), expected)
+
+    def test_saved_layouts_reach_every_polling_subscriber_identically(self):
+        """Same sharing, on the layouts broadcast."""
+        first, second = self.sub_sid(), self.sub_sid()
+        self.query(first)
+        self.query(second)
+        layouts = '[["view D", {"win_0": [1, 1, 2, 2]}]]'
+
+        self.send(first, {"cmd": "save_layouts", "data": layouts})
+
+        expected = [{"command": "layout_update", "data": layouts}]
+        self.assertEqual(self.query(first), expected)
+        self.assertEqual(self.query(second), expected)
+
 
 class TestPollingUnderReadonly(PollingTestCase):
     app_kwargs = {"use_frontend_client_polling": True, "readonly": True}

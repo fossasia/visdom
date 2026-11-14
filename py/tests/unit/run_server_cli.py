@@ -163,6 +163,35 @@ def test_the_switch_flags_are_forwarded(started):
     assert kwargs["use_frontend_client_polling"] is True
 
 
+def test_the_internal_port_is_off_unless_given(started):
+    assert started()["internal_port"] is None
+
+
+def test_the_internal_port_and_its_certificate_are_forwarded(started):
+    kwargs = started(
+        "-internal_port",
+        "8098",
+        "-internal_ssl_certfile",
+        "internal.crt",
+        "-internal_ssl_keyfile",
+        "internal.key",
+    )
+    assert kwargs["internal_port"] == 8098
+    assert kwargs["internal_ssl_certfile"] == "internal.crt"
+    assert kwargs["internal_ssl_keyfile"] == "internal.key"
+
+
+def test_the_internal_port_without_a_certificate_stops_the_command(started):
+    with pytest.raises(SystemExit) as excinfo:
+        started("-internal_port", "8098")
+    assert excinfo.value.code == 2
+
+
+def test_the_internal_port_is_never_served_in_the_clear():
+    with pytest.raises(ValueError):
+        run_server.start_server(internal_port=8098)
+
+
 def test_the_ssl_pair_is_forwarded(started):
     kwargs = started("-ssl_certfile", "cert.pem", "-ssl_keyfile", "key.pem")
     assert (kwargs["ssl_certfile"], kwargs["ssl_keyfile"]) == ("cert.pem", "key.pem")

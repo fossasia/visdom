@@ -6,7 +6,32 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import json
+
 from abc import ABC, abstractmethod
+
+#: Returned by :func:`read_json_file` when a file cannot be read or parsed, so
+#: that a document which legitimately parses to ``None`` is not mistaken for a
+#: failure. Compared by identity, never by equality.
+UNREADABLE_JSON = object()
+
+
+def read_json_file(path, default=UNREADABLE_JSON):
+    """Parse the JSON document at ``path``, or return ``default``.
+
+    The single read point for a file-backed :class:`DataStore`: the encoding
+    and the set of tolerated failures are decided here once instead of at
+    every call site, so a store never opens a file itself. A missing,
+    unopenable or unparseable file yields ``default`` -- which is
+    :data:`UNREADABLE_JSON` unless the caller has a value of its own that
+    cannot be confused with a successful parse. ``UnicodeDecodeError`` needs
+    no separate clause; it is a :class:`ValueError`.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fn:
+            return json.load(fn)
+    except (OSError, ValueError):
+        return default
 
 
 class DataStore(ABC):

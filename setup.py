@@ -11,7 +11,6 @@ from importlib import metadata
 from io import open
 from setuptools import setup, find_packages
 
-
 try:
     import torch
     from packaging.version import parse
