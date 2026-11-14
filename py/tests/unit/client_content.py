@@ -537,6 +537,30 @@ def test_embeddings_rejects_labels_that_do_not_match_the_rows(offline_client, la
     send.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "labels, message",
+    [
+        pytest.param([1.0, float("nan"), 2.0], "labels must be finite", id="nan"),
+        pytest.param([1.0, float("inf"), 2.0], "labels must be finite", id="inf"),
+        pytest.param(np.zeros((3, 2)), "labels must be one-dimensional", id="two_d"),
+    ],
+)
+def test_embeddings_rejects_invalid_label_values_before_sending_anything(
+    offline_client, labels, message
+):
+    """A NaN label used to send the loading pane, run t-SNE, and only then
+    fail inside _normalize_labels."""
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client, "_send", return_value="w"
+    ) as send:
+        with pytest.raises(ValueError, match=message):
+            offline_client.embeddings(
+                FEATURES, labels, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
 def test_embeddings_leaves_the_callers_opts_untouched(offline_client):
     """A numeric title is cast to a string in the payload, not in the caller's dict."""
     opts = {"title": 5, "register_embedding_events": False}
