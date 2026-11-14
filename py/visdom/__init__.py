@@ -2454,25 +2454,24 @@ class Visdom(object):
         # the loading pane goes out: a failure after that leaves the browser
         # on a spinner. Torch tensors go through ``_to_numpy`` first, which
         # detaches and moves them to the CPU (a ``requires_grad`` or CUDA
-        # tensor makes a bare ``np.asarray`` raise). After that everything is
-        # converted except an object that looks like a matrix (ndim, shape,
-        # dtype) but offers no ``__array__``: that is a scipy sparse matrix,
-        # which the backend reads natively and ``np.asarray`` would collapse
-        # into a 0-d object array. Even converted, ``np.asarray`` is not
-        # enough on its own, because a ragged list becomes a 1-D object array
-        # and a mixed-type list becomes strings, so the check below stays.
+        # tensor makes a bare ``np.asarray`` raise). A scipy sparse matrix is
+        # densified with ``toarray()``: neither backend takes sparse input
+        # (both call ``len(X)``, which scipy refuses), and ``np.asarray`` would
+        # collapse it into a 0-d object array. Densifying also puts its stored
+        # values under the finite check below. Even converted, ``np.asarray``
+        # is not enough on its own, because a ragged list becomes a 1-D object
+        # array and a mixed-type list becomes strings, so the checks stay.
         invalid = (
             "features must be a 2-D numeric matrix or a list of equal-length "
             "numeric rows"
         )
         try:
             features = _to_numpy(features)
-            if hasattr(features, "__array__") or not (
-                hasattr(features, "ndim")
-                and hasattr(features, "dtype")
-                and hasattr(features, "shape")
+            if not isinstance(features, np.ndarray) and callable(
+                getattr(features, "toarray", None)
             ):
-                features = np.asarray(features)
+                features = features.toarray()
+            features = np.asarray(features)
         except (ValueError, TypeError, RuntimeError) as error:
             # numpy's own message for a ragged list names an "inhomogeneous
             # shape", not what the caller has to fix.
@@ -2491,7 +2490,7 @@ class Visdom(object):
                 "features must have at least two rows and one column to embed; "
                 "got shape %r" % (features.shape,)
             )
-        if isinstance(features, np.ndarray) and not np.isfinite(features).all():
+        if not np.isfinite(features).all():
             raise ValueError("features must be finite: found NaN or infinity")
         try:
             n_labels = len(labels)
