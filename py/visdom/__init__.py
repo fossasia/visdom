@@ -31,7 +31,7 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 import logging
 import warnings
 import time
@@ -958,6 +958,98 @@ def _decode_binary_arrays(obj):
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _without_userinfo(url):
+    """``url`` with any ``user:password@`` dropped from its host.
+
+    ``show()`` puts the server URL in markup a notebook saves and people
+    share, and ``__repr__`` prints it. A password typed into ``server=`` has
+    no business in either.
+    """
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = "[{0}]".format(host)
+    if parsed.port is not None:
+        host = "{0}:{1}".format(host, parsed.port)
+    return urlunparse((parsed.scheme, host, "", "", "", ""))
+
+
+def _url_eid(eid):
+    """An env id as the server keys it, for building a dashboard URL.
+
+    ``escape_eid`` is the server's own choke point for this, but it lives in
+    ``visdom.utils.server_utils`` and the client deliberately does not import
+    the server side; ``Visdom.__init__`` inlines the same replacements for
+    ``self.env`` for the same reason. Whitespace is stripped here because the
+    server strips it too, so ``"run 7 "`` is keyed -- and routed -- as
+    ``"run 7"``.
+    """
+    return (
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
+    )
+
+
+def _embed_size(value):
+    """An iframe dimension as a CSS length.
+
+    A number is pixels, matching the ``height=600`` default; a string is the
+    CSS the caller wants, such as ``"100%"`` or ``"40vh"``. It has to be a
+    length and nothing else -- these end up in a ``style`` attribute, and a
+    second declaration smuggled in after a semicolon would be styling the
+    notebook rather than sizing the frame.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        text = str(value).strip()
+        if not text or ";" in text:
+            raise ValueError(
+                "iframe dimensions must be a CSS length, got {0!r}".format(value)
+            )
+        return text
+    if value <= 0:
+        raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
+    if isinstance(value, numbers.Integral):
+        return "{0}px".format(int(value))
+    return "{0}px".format(value)
+
+
+class _NotebookEmbed:
+    """A dashboard URL that renders as an iframe in a notebook cell.
+
+    Jupyter, VS Code and every other notebook frontend call ``_repr_html_``
+    when the displayed object has one, so nothing here imports IPython. A
+    terminal has
+    no such hook and falls back to ``__repr__``, which is the URL itself rather
+    than a wall of markup.
+    """
+
+    def __init__(self, url, height=600, width="100%", note=None):
+        self.url = url
+        # Normalized up front so a bad dimension raises from the show() call
+        # that passed it, rather than later from whatever displays the result.
+        self.height = _embed_size(height)
+        self.width = _embed_size(width)
+        self.note = note
+
+    def __repr__(self):
+        return self.note if self.url is None else self.url
+
+    def _repr_html_(self):
+        if self.url is None:
+            return "<p>{0}</p>".format(html.escape(self.note))
+        # The sizes go in the style, not in width=/height=: the HTML attributes
+        # are a legacy length that reads '40vh' as 40 pixels and drops the unit.
+        style = "width:{0};height:{1};border:0".format(self.width, self.height)
+        return '<iframe src="{0}" style="{1}" frameborder="0"></iframe>'.format(
+            html.escape(self.url, quote=True), html.escape(style, quote=True)
+        )
 
 
 class Visdom(object):
@@ -2104,6 +2196,86 @@ class Visdom(object):
         from visdom.tracking.restore import restore_run
 
         return restore_run(json_path, self, env=env, delay=delay)
+
+    # Notebooks
+
+    def _dashboard_url(self, env=None):
+        """The browser URL for one of this server's environments.
+
+        ``env`` defaults to this client's own environment, as it does
+        everywhere else in the API. The server renders the dashboard at
+        ``/env/<eid>`` as well as at its root, so the URL deep-links straight
+        to that environment.
+        """
+        base = "{0}:{1}{2}".format(
+            _without_userinfo(self.server), self.port, self.base_url
+        )
+        eid = _url_eid(self.env if env is None else env)
+        return "{0}/env/{1}".format(base, quote(eid, safe=""))
+
+    def _repr_html_(self):
+        return self.show()._repr_html_()
+
+    def show(self, env=None, height=600, width="100%"):
+        """Embed the dashboard in a notebook cell.
+
+        Returns an object that renders as an iframe pointing at this client's
+        server, so displaying it in Jupyter or VS Code shows the live
+        dashboard where the plotting code is. A bare ``vis`` in a cell does
+        the same thing, by way of ``_repr_html_``.
+
+        Args:
+            env : str, optional
+                Environment to open; defaults to this client's own.
+            height : number or str, optional
+                Iframe height. A number is pixels; a string is a CSS length
+                such as ``"40vh"``. Both are applied as CSS.
+            width : number or str, optional
+                Iframe width. Defaults to the full cell width.
+
+        Nothing here imports IPython -- a notebook calls ``_repr_html_``
+        itself -- so this works without any extra dependency. Outside a
+        notebook the object prints the URL instead.
+
+        The environment has to exist on the server, which plotting into it is
+        what does: the dashboard answers ``404`` for an env it has never seen,
+        and that is what the frame would show.
+
+        The URL is built from this client's own ``server``, ``port`` and
+        ``base_url``, so it has to be an address the *browser* can reach --
+        which is the kernel's own machine when the notebook runs where you
+        are. A kernel somewhere else (a remote host, or a hosted notebook
+        such as Colab or Kaggle) serves its frontend from another origin, so
+        ``localhost`` there names the browser's machine and the frame stays
+        blank; that needs a port forward or a reverse proxy, and the client
+        pointed at that address.
+
+        Three things the embed cannot do anything about: a server started with
+        ``-enable_login`` serves the login form inside the frame, a JupyterLab
+        reached over HTTPS blocks a plain-HTTP frame to another port, and a
+        workspace-scoped client gets the server's default view because a
+        browser frame cannot send the header that selects a workspace.
+        """
+        if self.offline:
+            return _NotebookEmbed(
+                None,
+                height,
+                width,
+                note=(
+                    "This Visdom client is offline, so there is no server to "
+                    "embed. Point a client at a running server to see its "
+                    "dashboard here."
+                ),
+            )
+        if self.workspace:
+            logger.warning(
+                "This client is scoped to workspace %r, but a browser frame "
+                "cannot carry the X-Visdom-Workspace header that scoping "
+                "needs. The embedded dashboard shows the server's default "
+                "view, not this workspace.",
+                self.workspace,
+            )
+        return _NotebookEmbed(self._dashboard_url(env), height, width)
 
     # Content
 
