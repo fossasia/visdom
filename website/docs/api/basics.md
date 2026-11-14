@@ -118,7 +118,7 @@ Callbacks are called on property value update:
 vis.audio(tensor=None, audiofile=None, win=None, env=None, opts=None)
 ```
 
-This function plays audio. It takes as input the filename of the audio file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo audio).
+This function plays audio. It takes as input the filename of the audio file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or `2xN`) is accepted too.
 
 ```python
 # From a file
