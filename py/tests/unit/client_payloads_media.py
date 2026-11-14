@@ -938,9 +938,7 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
-@pytest.mark.parametrize(
-    "text", ["line one\nline two", "研究 café", r"literal \n path"]
-)
+@pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
 def test_svg_file_preserves_text(capture_send, tmp_path, text):
     """File input must produce the same SVG text as the string API."""
     markup = "<svg width='2'>\n<text>{}</text>\n</svg>".format(text)
