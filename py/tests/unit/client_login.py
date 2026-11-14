@@ -63,11 +63,24 @@ def silent_server():
     server.close()
 
 
-def test_the_login_has_a_read_timeout():
+def test_the_login_has_a_positive_connect_and_read_timeout():
     connect, read = visdom.LOGIN_TIMEOUT
 
-    assert connect is not None
-    assert read is not None
+    assert connect > 0
+    assert read > 0
+
+
+@pytest.fixture
+def closed_sessions(monkeypatch):
+    closed = []
+    original = visdom._KeySession.close
+
+    def close(self):
+        closed.append(self)
+        original(self)
+
+    monkeypatch.setattr(visdom._KeySession, "close", close)
+    return closed
 
 
 def test_a_login_the_server_never_answers_times_out(silent_server, monkeypatch):
@@ -78,3 +91,38 @@ def test_a_login_the_server_never_answers_times_out(silent_server, monkeypatch):
     with pytest.raises(requests.exceptions.Timeout):
         client.session
     assert time.monotonic() - started < 10
+
+
+def test_a_login_that_times_out_closes_its_session(
+    silent_server, monkeypatch, closed_sessions
+):
+    monkeypatch.setattr(visdom, "LOGIN_TIMEOUT", (1, 1))
+    client = _client(silent_server)
+
+    with pytest.raises(requests.exceptions.Timeout):
+        client.session
+    assert len(closed_sessions) == 1
+    assert client._session is None
+
+
+def test_a_refused_login_closes_its_session(monkeypatch, closed_sessions):
+    refused = requests.Response()
+    refused.status_code = 401
+    monkeypatch.setattr(visdom._KeySession, "post", lambda *a, **k: refused)
+    client = _client(1)
+
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        client.session
+    assert len(closed_sessions) == 1
+    assert client._session is None
+
+
+def test_a_successful_login_keeps_its_session(monkeypatch, closed_sessions):
+    accepted = requests.Response()
+    accepted.status_code = 200
+    monkeypatch.setattr(visdom._KeySession, "post", lambda *a, **k: accepted)
+    client = _client(1)
+
+    session = client.session
+    assert closed_sessions == []
+    assert client._session is session

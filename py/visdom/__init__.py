@@ -1157,13 +1157,19 @@ class Visdom(object):
                     {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
                 )
             if self.username:
-                resp = sess.post(
-                    "%s:%s%s" % (self.server, self.port, self.base_url),
-                    json=dict(username=self.username, password=self.password),
-                    timeout=LOGIN_TIMEOUT,
-                )
-                if resp.status_code != requests.codes.ok:
-                    raise RuntimeError("Authentication failed")
+                # Close the new session if the login fails or times out, so a
+                # failed attempt does not leave its connection pool open.
+                try:
+                    resp = sess.post(
+                        "%s:%s%s" % (self.server, self.port, self.base_url),
+                        json=dict(username=self.username, password=self.password),
+                        timeout=LOGIN_TIMEOUT,
+                    )
+                    if resp.status_code != requests.codes.ok:
+                        raise RuntimeError("Authentication failed")
+                except BaseException:
+                    sess.close()
+                    raise
                 logger.info("Authentication succeeded")
             self._session = sess
             return sess
