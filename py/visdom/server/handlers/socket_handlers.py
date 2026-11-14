@@ -24,7 +24,7 @@ import tornado.ioloop
 import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
 from visdom.server.workspace_manager import WorkspaceAuthError
-from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
+from visdom.utils.shared_utils import get_new_window_id, get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
@@ -207,18 +207,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     if win_id in env:
                         # A window was created under this id since the close,
                         # usually by an append to it. Restoring over it would
-                        # lose that window, so the pane goes back on the stack.
-                        undo_count = await push_deleted_off_loop(
-                            self, eid, win_id, p_data
-                        )
-                        notify(
-                            self,
-                            f"Pane '{win_id}' is already open in environment '{eid}'.",
-                            type="warning",
-                            target_subs=[self],
-                        )
-                        broadcast_undo_state(self, eid, self.storage, undo_count)
-                        return
+                        # lose that window, so the pane comes back under a new id.
+                        win_id = p_data["id"] = get_new_window_id()
                     max_i = max((p.get("i", -1) for p in env.values()), default=-1)
                     p_data["i"] = max_i + 1
                     env[win_id] = p_data

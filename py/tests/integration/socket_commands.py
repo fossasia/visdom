@@ -246,40 +246,29 @@ def test_undo_leaves_a_reopened_pane_alone(env):
     assert env.state["expt"]["jsons"]["win_0"] is reopened
 
 
-def test_undo_warns_when_the_pane_is_already_open(env):
+def test_undo_restores_the_pane_under_a_new_id_when_its_id_is_taken(env):
     sub = open_sub(env)
     send(sub, cmd="close", eid="expt", data="win_0")
     reopen(env)
 
     send(sub, cmd="undo", eid="expt")
 
-    notification = last(sub, "notification")
-    assert notification["data"]["type"] == "warning"
-    assert "win_0" in notification["data"]["message"]
+    [restored] = [p for w, p in env.state["expt"]["jsons"].items() if w != "win_0"]
+    assert restored["content"] == pane()["content"]
+    assert env.state["expt"]["jsons"][restored["id"]] is restored
 
 
-def test_undo_reports_the_depth_when_the_pane_is_already_open(env):
+def test_a_taken_id_does_not_block_older_closes(env):
+    env.state["expt"]["jsons"]["win_1"] = pane("win_1")
     sub = open_sub(env)
-    sub.eid = "expt"
+    send(sub, cmd="close", eid="expt", data="win_1")
     send(sub, cmd="close", eid="expt", data="win_0")
     reopen(env)
-    sub.messages.clear()
 
     send(sub, cmd="undo", eid="expt")
-
-    assert last(sub, "undo_state")["count"] == 1
-
-
-def test_undo_restores_the_pane_once_its_id_is_free(env):
-    sub = open_sub(env)
-    send(sub, cmd="close", eid="expt", data="win_0")
-    reopen(env)
-    send(sub, cmd="undo", eid="expt")
-    del env.state["expt"]["jsons"]["win_0"]
-
     send(sub, cmd="undo", eid="expt")
 
-    assert env.state["expt"]["jsons"]["win_0"]["content"] == pane()["content"]
+    assert "win_1" in env.state["expt"]["jsons"]
 
 
 # -- delete_env --------------------------------------------------------------
