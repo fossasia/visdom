@@ -1874,7 +1874,7 @@ class Visdom(object):
         :meth:`update_hparams` remains the way to change the selection, or to
         refresh a pane the server has not loaded.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2162,7 +2162,7 @@ class Visdom(object):
 
         No specific `opts` are currently supported.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _assert_opts(opts)
         data = [{"content": data, "type": "properties"}]
 
@@ -2202,7 +2202,7 @@ class Visdom(object):
         is resized with the pane. You need `beautifulsoup4` and `lxml`
         packages installed to use this option.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2890,7 +2890,7 @@ class Visdom(object):
         - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         _title2str(opts)
         _assert_opts(opts)
@@ -3006,7 +3006,7 @@ class Visdom(object):
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["fps"] = opts.get("fps", 25)
         opts["loop"] = opts.get("loop", False)
         opts["autoplay"] = opts.get("autoplay", False)
@@ -3611,7 +3611,7 @@ class Visdom(object):
         - `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -3704,7 +3704,7 @@ class Visdom(object):
         - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -3839,7 +3839,7 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         assert X.ndim == 2, "data should be two-dimensional"
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -4118,7 +4118,7 @@ class Visdom(object):
         else:
             Y = np.arange(1, len(X) + 1)
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["stacked"] = opts.get("stacked", False)
 
         _title2str(opts)
@@ -4209,7 +4209,7 @@ class Visdom(object):
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -4254,7 +4254,7 @@ class Visdom(object):
         if X.ndim == 1:
             X = X[:, None]
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -4309,7 +4309,7 @@ class Visdom(object):
             "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
         )
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
         opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
         opts["colormap"] = opts.get("colormap", "Viridis")
@@ -4400,7 +4400,7 @@ class Visdom(object):
         assert gridY.shape == Y.shape, "Y and gridY should have the same size"
 
         # default options:
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["mode"] = "lines"
         opts["arrowheads"] = opts.get("arrowheads", True)
         _title2str(opts)
@@ -4522,7 +4522,7 @@ class Visdom(object):
         labels = np.arange(1, X.shape[1] + 1)[None, :]
         labels = np.tile(labels, (X.shape[0], 1)).flatten()
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["mode"] = "lines"
         _title2str(opts)
         _assert_opts(opts)
@@ -4564,7 +4564,7 @@ class Visdom(object):
                                     `values` are interpreted relative to
                                     children (`string`; default = `'remainder'`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         _assert_sunburst_opts(opts)
@@ -4653,7 +4653,7 @@ class Visdom(object):
         assert X.ndim == 1, "X should be one-dimensional"
         assert np.all(np.greater_equal(X, 0)), "X cannot contain negative values"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -4689,7 +4689,7 @@ class Visdom(object):
           `'manual'` (`string`; default = `'auto'`; 3D mesh only)
         - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -4751,7 +4751,7 @@ class Visdom(object):
         - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
           `layoutopts = {'plotly': {'font': {'size': 10}}}`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -4874,10 +4874,9 @@ class Visdom(object):
             # assertion below.
             X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
         assert X.ndim == 1, "values of X should be one-dimensional"
-        if opts is None:
-            opts = {}
-            opts["height"] = 300
-            opts["width"] = 500
+        # Copy the caller's dict: the height/width defaults below are written
+        # into ``opts``. A missing ``opts`` gets the same 300x500 as before.
+        opts = {} if opts is None else dict(opts)
         X = X.astype(float).tolist()
         Y1 = Y1.astype(float).tolist()
         Y2 = Y2.astype(float).tolist()
@@ -4963,7 +4962,7 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         try:
             import networkx as nx
         except ImportError:
@@ -5061,7 +5060,7 @@ class Visdom(object):
                                    descending (requires `Y`)
         - `opts.title`:            plot title
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -5218,7 +5217,7 @@ class Visdom(object):
         if X.ndim == 1:
             X = X[:, None]
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -5314,7 +5313,7 @@ class Visdom(object):
 
         - `opts.title`: title for the window (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -5385,7 +5384,7 @@ class Visdom(object):
            `False` for a read-only display table (e.g. a live
            leaderboard).
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         opts.setdefault("editable", True)
