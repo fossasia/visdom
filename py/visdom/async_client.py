@@ -68,7 +68,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.websocket import websocket_connect
 
-from visdom import Visdom, _is_loopback
+from visdom import Visdom, _is_loopback, _raise_for_status
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,8 @@ class _AsyncTransport(object):
         self.api_key = api_key
         self.workspace = workspace
         self.on_refusal = None
+        # Set by the client from its own raise_exceptions.
+        self.raise_exceptions = False
         self.cookie = None
         self._connected = False
         self._client = None
@@ -313,7 +315,9 @@ class _AsyncTransport(object):
         """POST ``data`` to ``url`` and return the response body as text.
 
         Raises the ``requests`` exception the synchronous ``_send`` expects, so
-        callers cannot tell which transport produced the failure.
+        callers cannot tell which transport produced the failure. With
+        ``raise_exceptions`` set, an error status other than a refusal raises
+        ``ServerError``, as it does in the synchronous client.
         """
         await self._ensure_login()
         body = "" if data is None else data
@@ -332,9 +336,13 @@ class _AsyncTransport(object):
             except (OSError, HTTPClientError) as retry_error:
                 raise _as_requests_error(retry_error) from e
         self._connected = True
-        text = response.body.decode("utf-8") if response.body else ""
+        # 'replace', as requests does for r.text: an undecodable error page must
+        # still surface as a ServerError rather than a UnicodeDecodeError.
+        text = response.body.decode("utf-8", errors="replace") if response.body else ""
         if self.on_refusal is not None:
             self.on_refusal(response.code, text)
+        if self.raise_exceptions:
+            _raise_for_status(response.code, getattr(response, "reason", ""), text)
         return text
 
     def close(self):
@@ -848,6 +856,9 @@ class _BridgedVisdom(Visdom):
             )
         if getattr(self._transport, "on_refusal", self) is None:
             self._transport.on_refusal = self._note_refusal
+        self._transport.raise_exceptions = bool(
+            getattr(self, "raise_exceptions", False)
+        )
         return self._transport
 
     def run_call(self, call, bound, args, kwargs):
