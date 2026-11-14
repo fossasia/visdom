@@ -191,6 +191,12 @@ def _refusal_reason(body):
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+# (connect, read) for the login request. Unlike the plot posts it gets a read
+# timeout too: the reply is a small JSON, and without one a server that accepts
+# the connection but never answers blocks Visdom() forever. Matches the async
+# client's CONNECT_TIMEOUT / REQUEST_TIMEOUT.
+LOGIN_TIMEOUT = (20, 20)
+
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
 
 
@@ -1154,6 +1160,7 @@ class Visdom(object):
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
                     json=dict(username=self.username, password=self.password),
+                    timeout=LOGIN_TIMEOUT,
                 )
                 if resp.status_code != requests.codes.ok:
                     raise RuntimeError("Authentication failed")
