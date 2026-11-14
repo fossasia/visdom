@@ -76,12 +76,34 @@ def close_reason(message):
     return message.encode("utf-8")[:WS_REASON_BYTES].decode("utf-8", "ignore")
 
 
+def _get_env_generation(handler, eid):
+    """Current generation count for an environment, bumped on deletion."""
+    target = getattr(handler, "server_state", None) or handler
+    gens = getattr(target, "_env_generations", None)
+    if gens is None:
+        gens = target._env_generations = {}
+    return gens.get(eid, 0)
+
+
+def _advance_env_generation(handler, eid):
+    """Advance generation on deletion so stale in-flight saves cannot announce."""
+    target = getattr(handler, "server_state", None) or handler
+    gens = getattr(target, "_env_generations", None)
+    if gens is None:
+        gens = target._env_generations = {}
+    gens[eid] = gens.get(eid, 0) + 1
+    pending = getattr(target, "_pending_env_broadcasts", None)
+    if pending is not None:
+        pending.pop(eid, None)
+    return gens[eid]
+
+
 def _get_pending_broadcasts(handler):
-    """Pending new-env broadcast set shared across sockets via server state."""
+    """Pending new-env broadcast mapping shared across sockets via server state."""
     target = getattr(handler, "server_state", None) or handler
     pending = getattr(target, "_pending_env_broadcasts", None)
     if pending is None:
-        pending = target._pending_env_broadcasts = set()
+        pending = target._pending_env_broadcasts = {}
     return pending
 
 
@@ -246,8 +268,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     # was being read; there is nothing left to copy.
                     return
                 pending = _get_pending_broadcasts(self)
+                gen = _get_env_generation(self, msg["eid"])
                 if msg["eid"] not in self.state:
-                    pending.add(msg["eid"])
+                    pending[msg["eid"]] = gen
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
@@ -260,15 +283,17 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 except OSError as e:
                     logging.error(f"failed to save environment {self.eid}: {e}")
                     saved = False
-                if msg["eid"] not in self.state:
-                    # Dropped or deleted while the save was in flight.
-                    pending.discard(msg["eid"])
+                if (
+                    msg["eid"] not in self.state
+                    or _get_env_generation(self, msg["eid"]) != gen
+                ):
+                    # Dropped, deleted, or replaced while the save was in flight.
                     return
-                if saved and msg["eid"] in pending:
+                if saved and pending.get(msg["eid"]) == gen:
                     # The browser that forked adds the env to its own list;
                     # every other one only learns of it from this. Sent once
                     # the copy is saved, in the order /fork_env uses.
-                    pending.discard(msg["eid"])
+                    pending.pop(msg["eid"], None)
                     broadcast_envs(self)
 
         elif cmd == "save_all":
@@ -279,7 +304,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = escape_eid(msg["eid"])
                 if eid == "main":
                     return
-                _get_pending_broadcasts(self).discard(eid)
+                _advance_env_generation(self, eid)
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
                 removal = delete_env_off_loop(self, eid)
