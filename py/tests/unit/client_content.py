@@ -122,6 +122,14 @@ def test_text_defaults_opts_to_an_empty_dict(capture_send):
     assert sent["payload"]["eid"] is None
 
 
+def test_text_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string; that must not rewrite the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.text("hi", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_text_passes_an_unrecognized_opt_through(capture_send):
     """``_assert_opts`` type-checks the opts it knows; it does not gate keys."""
     sent = capture_send(lambda v: v.text("hi", opts={"not_an_opt": 1}))
