@@ -340,6 +340,73 @@ def test_save_onto_an_existing_environment_announces_nothing(env):
     assert commands(sub).count("env_update") == announced
 
 
+def test_save_failure_leaves_announcement_pending_until_retry(env):
+    """Failed persistence suppresses announcement until a retry saves it."""
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub]
+    assert not env.storage.env_exists("copy")
+
+    send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "copy"]
+    assert env.storage.env_exists("copy")
+
+    send(forker, cmd="save", eid="copy", prev_eid="copy", data={})
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+
+
+def test_save_declined_by_storage_does_not_announce_until_retry(env):
+    """A store returning False does not broadcast until retry succeeds."""
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    with mock.patch.object(env.storage, "save_env", return_value=False):
+        send(forker, cmd="save", eid="copy_declined", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub]
+
+    send(forker, cmd="save", eid="copy_declined", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "copy_declined",
+        ]
+
+
+def test_save_in_memory_mode_announces_fork(app_factory):
+    """In-memory mode (env_path=None) announces the fork without disk writes."""
+    app = app_factory(env_path=None)
+    app.state["expt"] = {"jsons": {"win_0": pane()}, "reload": {}}
+    forker = open_sub(app)
+    other = open_sub(app)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    send(forker, cmd="save", eid="memcopy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "memcopy"]
+
+    send(forker, cmd="save", eid="memcopy", prev_eid="memcopy", data={})
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+
+
 def test_save_without_a_known_source_is_a_noop(env):
     sub = open_sub(env)
 

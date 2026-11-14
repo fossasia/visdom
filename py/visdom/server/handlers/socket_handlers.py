@@ -76,6 +76,15 @@ def close_reason(message):
     return message.encode("utf-8")[:WS_REASON_BYTES].decode("utf-8", "ignore")
 
 
+def _get_pending_broadcasts(handler):
+    """Pending new-env broadcast set shared across sockets via server state."""
+    target = getattr(handler, "server_state", None) or handler
+    pending = getattr(target, "_pending_env_broadcasts", None)
+    if pending is None:
+        pending = target._pending_env_broadcasts = set()
+    return pending
+
+
 class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
@@ -236,18 +245,29 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     # the env being saved under a new id was deleted while it
                     # was being read; there is nothing left to copy.
                     return
-                is_new_env = msg["eid"] not in self.state
+                pending = _get_pending_broadcasts(self)
+                is_new_env = msg["eid"] not in self.state or msg["eid"] in pending
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
-                await save_env_off_loop(self, self.eid)
+                saved = False
+                try:
+                    res = await save_env_off_loop(self, self.eid)
+                    saved = True if self.env_path is None else bool(res)
+                except OSError as e:
+                    logging.error(f"failed to save environment {self.eid}: {e}")
+                    saved = False
                 if is_new_env:
-                    # The browser that forked adds the env to its own list;
-                    # every other one only learns of it from this. Sent once
-                    # the copy is saved, in the order /fork_env uses.
-                    broadcast_envs(self)
+                    if saved:
+                        pending.discard(msg["eid"])
+                        # The browser that forked adds the env to its own list;
+                        # every other one only learns of it from this. Sent once
+                        # the copy is saved, in the order /fork_env uses.
+                        broadcast_envs(self)
+                    else:
+                        pending.add(msg["eid"])
 
         elif cmd == "save_all":
             fire_and_forget_save_all(self)
@@ -257,6 +277,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = escape_eid(msg["eid"])
                 if eid == "main":
                     return
+                _get_pending_broadcasts(self).discard(eid)
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
                 removal = delete_env_off_loop(self, eid)
