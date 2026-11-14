@@ -17,6 +17,7 @@ in the previous server.py class.
 import contextlib
 import functools
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -138,6 +139,45 @@ def set_cookie(value=None):
         cookie_secret = input("Please input your cookie secret key here: ")
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
+
+
+def session_token(cookie_secret, user_credential):
+    """Return the value the login cookie carries for the current credential.
+
+    It is the username plus an HMAC, keyed by the cookie secret, of the hash
+    the browser sends for the password (``client_hash``). So it stays the
+    same across restarts, changes when the username or password does -- which
+    ends every session issued for the old credential -- and, unlike the
+    stored password hash, tells someone who reads the cookie nothing they
+    could crack offline. Without ``client_hash`` the stored hash stands in.
+    """
+    username = user_credential["username"]
+    seed = user_credential.get("client_hash") or user_credential["password"]
+    mac = hmac.new(
+        cookie_secret.encode("utf-8"),
+        "{0}\0{1}".format(username, seed).encode("utf-8"),
+        hashlib.sha256,
+    )
+    return "{0}:{1}".format(username, mac.hexdigest())
+
+
+def current_session_user(handler):
+    """Return the login cookie when it was issued for the current credential.
+
+    A valid signature alone is not enough: a cookie issued before the
+    password changed is still signed with the same secret, so it must also
+    match the token for the credential the server runs with now.
+    """
+    app = getattr(handler, "application", None)
+    if not app or not app.settings.get("cookie_secret"):
+        return None
+    token = getattr(app, "session_token", None)
+    cookie = handler.get_secure_cookie("user_password")
+    if token is None or cookie is None:
+        return None
+    if not hmac.compare_digest(cookie, token.encode("utf-8")):
+        return None
+    return cookie
 
 
 def hash_password(password, salt=None):

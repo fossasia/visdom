@@ -1419,7 +1419,7 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
-            self.set_secure_cookie("user_password", username + password)
+            self.set_secure_cookie("user_password", self.application.session_token)
         else:
             self.set_status(400)
 

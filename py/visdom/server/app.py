@@ -28,6 +28,7 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     delete_env_off_loop,
     purge_env,
+    session_token,
 )
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
@@ -199,7 +200,11 @@ class Application(tornado.web.Application):
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
+        # A copy, so dropping client_hash below leaves the caller's dict alone.
+        if user_credential:
+            user_credential = dict(user_credential)
         self.user_credential = user_credential
+        self.session_token = None
         self.login_enabled = False
         self.last_access = time.time()
         self.wrap_socket = use_frontend_client_polling
@@ -214,6 +219,12 @@ class Application(tornado.web.Application):
             self.login_enabled = True
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
                 settings["cookie_secret"] = fn.read()
+            self.session_token = session_token(
+                settings["cookie_secret"], user_credential
+            )
+            # client_hash is what the browser sends to log in, so it is used
+            # once, to derive the token, and not kept.
+            user_credential.pop("client_hash", None)
 
         self.server_state = ServerState(
             state=self.state,
