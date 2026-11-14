@@ -15,6 +15,7 @@ import logging
 import traceback
 import http.client
 import time
+from urllib.parse import urlsplit
 
 import tornado.web
 import tornado.websocket
@@ -36,6 +37,42 @@ WRITE_ENDPOINTS = {
 }
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
+
+# Methods that must not change server state, so they need no origin check.
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+# Sec-Fetch-Site values a browser sends for a request made by the visdom page
+# itself ("same-origin") or typed by the user ("none").
+TRUSTED_FETCH_SITES = {"same-origin", "none"}
+
+
+def is_cross_site_request(request):
+    """Return True when a browser sent this request from another site's page.
+
+    A page on any site can make the user's browser POST to a visdom server,
+    and a text/plain body skips the CORS preflight, so the request would run
+    without the user knowing. Browsers mark where a request came from, and
+    the visdom UI only ever talks to its own origin, so anything else is
+    refused. The python client, curl and other non-browser callers send
+    neither header and are unaffected.
+    """
+    if request.method in SAFE_METHODS:
+        return False
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        # Compares no host names, so it holds behind a reverse proxy too.
+        return fetch_site not in TRUSTED_FETCH_SITES
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return False
+    if origin == "null":
+        return True
+    # Older browsers send Origin but not Sec-Fetch-Site. A proxy may rewrite
+    # Host, so the host the browser used may arrive as X-Forwarded-Host.
+    origin_host = urlsplit(origin).netloc.lower()
+    forwarded = request.headers.get("X-Forwarded-Host", "")
+    allowed = {request.host.lower(), forwarded.split(",")[0].strip().lower()}
+    return origin_host not in allowed
 
 
 def build_cloud_context(slug, role):
@@ -273,6 +310,10 @@ class BaseHandler(
         handler's state/storage/subs/sources at that workspace's isolated space so
         all subsequent handler logic operates on that workspace's environments.
         """
+        if is_cross_site_request(self.request):
+            self.set_status(403)
+            self.finish({"error": "Cross-site requests are not allowed."})
+            return
         try:
             resolved = await self.resolve_workspace_off_loop()
         except WorkspaceAuthError as exc:
@@ -346,8 +387,6 @@ class BaseHandler(
             except Exception as e:
                 logging.error(e)
             self.set_status(status_code)
-            self.write(
-                f"""
+            self.write(f"""
                 <h1>{status_code} - {title}</h1>
-                """
-            )
+                """)
