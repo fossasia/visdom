@@ -35,6 +35,7 @@ from testutils import recording_array
 from visdom import (
     _average_precision,
     _binary_clf_curve,
+    _compute_calibration_curve,
     _coerce_curve_xy,
     _compute_confusion_matrix,
     _compute_pr_curve,
@@ -911,3 +912,324 @@ def test_confusion_matrix_input_errors(offline_client, kwargs, message):
     """Every ValueError guard on the public method."""
     with pytest.raises(ValueError, match=message):
         offline_client.confusion_matrix(**kwargs)
+
+
+@pytest.mark.parametrize("strategy", ["uniform", "quantile"])
+def test_calibration_curve_matches_sklearn(strategy):
+    """Bins, fractions and mean probabilities are the same as sklearn's."""
+    calibration = pytest.importorskip("sklearn.calibration")
+
+    for seed in range(10):
+        rng = np.random.RandomState(seed)
+        y_prob = rng.rand(rng.randint(20, 500))
+        y_true = (rng.rand(y_prob.size) < y_prob**1.5).astype(int)
+        for n_bins in (1, 3, 10):
+            expected_true, expected_pred = calibration.calibration_curve(
+                y_true, y_prob, n_bins=n_bins, strategy=strategy
+            )
+            prob_true, prob_pred, counts, _ = _compute_calibration_curve(
+                y_true, y_prob, n_bins=n_bins, strategy=strategy
+            )
+            np.testing.assert_allclose(prob_true, expected_true)
+            np.testing.assert_allclose(prob_pred, expected_pred)
+            assert counts.sum() == y_prob.size
+
+
+def test_calibration_curve_ece_by_hand():
+    """Bins [0.1, 0.3] and [0.6, 0.8, 0.9]: ECE = (2*0.3 + 3*|2/3-0.7667|) / 5."""
+    prob_true, prob_pred, counts, ece = _compute_calibration_curve(
+        [0, 1, 1, 1, 0], [0.1, 0.3, 0.6, 0.8, 0.9], n_bins=2
+    )
+    np.testing.assert_allclose(prob_true, [0.5, 2 / 3])
+    np.testing.assert_allclose(prob_pred, [0.2, 2.3 / 3])
+    assert counts.tolist() == [2, 3]
+    assert ece == pytest.approx((2 * 0.3 + 3 * abs(2 / 3 - 2.3 / 3)) / 5)
+
+
+def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
+    """Empty bins are dropped and pos_label picks the positive class."""
+    prob_true, prob_pred, counts, _ = _compute_calibration_curve(
+        ["b", "a", "a"], [0.05, 0.95, 0.92], n_bins=10, pos_label="a"
+    )
+    assert counts.tolist() == [1, 2]
+    np.testing.assert_allclose(prob_true, [0.0, 1.0])
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"y_true": [0, 1], "y_prob": [0.1]}, "y_true and y_prob should match"),
+        ({"y_true": [], "y_prob": []}, "should be non-empty"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 1.2]}, "probabilities in"),
+        ({"y_true": [0, 1], "y_prob": [0.1, float("nan")]}, "finite values"),
+        ({"y_true": [0, 1], "y_prob": np.array([0.1 + 0.5j, 0.2])}, "real values"),
+        ({"y_true": [0, 1, 2], "y_prob": [0.1, 0.2, 0.3]}, "binary labels only"),
+        ({"y_true": [2, 3], "y_prob": [0.1, 0.2]}, "pos_label is not specified"),
+        (
+            {"y_true": [2, 3], "y_prob": [0.1, 0.2], "pos_label": 1},
+            "pos_label=1 is not one of",
+        ),
+        ({"y_true": [1, float("nan")], "y_prob": [0.1, 0.2]}, "no missing values"),
+        (
+            {"y_true": np.array([1.0, np.inf]), "y_prob": [0.1, 0.2]},
+            "y_true should only contain finite",
+        ),
+        ({"y_true": [[0, 1], [1, 0]], "y_prob": [[0.2, 0.8], [0.7, 0.3]]}, "1 dim"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),
+        ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "strategy": "x"}, "strategy"),
+    ],
+)
+def test_calibration_curve_input_errors(offline_client, kwargs, message):
+    """Bad input is refused before anything is sent."""
+    with pytest.raises(ValueError, match=message):
+        offline_client.calibration_curve(**kwargs)
+
+
+def test_calibration_curve_sends_curve_and_diagonal(capture_send):
+    """The model trace carries per-bin counts, the diagonal is dashed."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[0, 1, 1, 1, 0], y_prob=[0.1, 0.3, 0.6, 0.8, 0.9], n_bins=2
+        )
+    )
+    model, diagonal = sent["payload"]["data"]
+    assert model["mode"] == "lines+markers"
+    assert model["text"] == ["n=2", "n=3"]
+    assert diagonal["x"] == [0.0, 1.0] and diagonal["y"] == [0.0, 1.0]
+    assert diagonal["line"]["dash"] == "dash"
+    opts = sent["payload"]["opts"]
+    assert opts["legend"] == ["Model", "Perfectly calibrated"]
+    # (2 * |0.5 - 0.2| + 3 * |2/3 - 2.3/3|) / 5 = 0.18
+    assert opts["title"] == "Calibration Curve (ECE=0.1800)"
+    assert opts["xlabel"] == "Mean predicted probability"
+
+
+def test_calibration_curve_keeps_a_custom_title_and_legend(capture_send):
+    """User opts win over the defaults."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[0, 1],
+            y_prob=[0.2, 0.7],
+            opts={"title": "Calib", "legend": ["Net", "Ideal"]},
+        )
+    )
+    assert sent["payload"]["opts"]["title"] == "Calib"
+    assert [d["name"] for d in sent["payload"]["data"]] == ["Net", "Ideal"]
+
+
+def test_calibration_curve_accepts_a_single_column(capture_send):
+    """An (n, 1) column is one vector, unlike a one-hot (n, 2) matrix."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[[0], [1], [1]], y_prob=[[0.2], [0.7], [0.9]], n_bins=2
+        )
+    )
+    assert sent["payload"]["data"][0]["text"] == ["n=1", "n=2"]
+
+
+def test_calibration_curve_allows_a_single_class():
+    """A batch with no positives is still valid input, but not a silent one."""
+    with pytest.warns(UserWarning, match="no samples of pos_label=1"):
+        prob_true, _, _, _ = _compute_calibration_curve([0, 0], [0.2, 0.7])
+    assert prob_true.tolist() == [0.0, 0.0]
+
+
+def test_calibration_curve_points_the_warning_at_the_caller(capture_send):
+    with pytest.warns(UserWarning, match="no samples") as record:
+        capture_send(lambda v: v.calibration_curve([0, 0], [0.2, 0.7], pos_label=1))
+    assert record[0].filename == __file__
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label, expected",
+    [
+        ([-1, -1], None, [0.0, 0.0]),
+        ([False, False], None, [0.0, 0.0]),
+        ([1, 1], None, [1.0, 1.0]),
+        (["spam", "spam"], "spam", [1.0, 1.0]),
+        ([0, 0], 1, [0.0, 0.0]),
+        ([1, 1], 0, [0.0, 0.0]),
+        ([False, False], True, [0.0, 0.0]),
+        (["ham", "ham"], "spam", [0.0, 0.0]),
+        ([0, 0], np.int64(1), [0.0, 0.0]),
+        ([0, 0], 10**30, [0.0, 0.0]),
+        ([b"ham", b"ham"], b"ham", [1.0, 1.0]),
+    ],
+    ids=[
+        "minus-ones",
+        "falses",
+        "ones",
+        "strings-present",
+        "zeros-pos-1",
+        "ones-pos-0",
+        "falses-pos-true",
+        "strings-absent",
+        "numpy-int",
+        "huge-int",
+        "bytes-present",
+    ],
+)
+def test_calibration_curve_single_class_with_a_known_positive(
+    y_true, pos_label, expected
+):
+    """One class can't show what the other is, so an absent pos_label of the
+    same kind is valid: every sample is negative, and a warning says so."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        prob_true, _, _, _ = _compute_calibration_curve(
+            y_true, [0.2, 0.7], n_bins=2, pos_label=pos_label
+        )
+    assert prob_true.tolist() == expected
+    assert bool(caught) == (expected == [0.0, 0.0])
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label, message",
+    [
+        (["spam", "spam"], None, "pos_label is not specified"),
+        (["1", "1"], None, "pos_label is not specified"),
+        ([2, 2], None, "pos_label is not specified"),
+        (["ham", "spam"], 1, "pos_label=1 can't be a label"),
+        ([0, 2], 1, "pos_label=1 is not one of"),
+        ([0, 2], 10**30, "is not one of"),
+        (["spam", "spam"], 1, "pos_label=1 can't be a label"),
+        ([0, 0], "1", "pos_label='1' can't be a label"),
+        ([True, True], "True", "can't be a label"),
+        ([0, 0], float("nan"), "pos_label=nan can't be a label"),
+        ([0.0, 0.0], float("inf"), "pos_label=inf can't be a label"),
+        ([0, 0], [1], "can't be a label"),
+        (["spam", "spam"], b"spam", "can't be a label"),
+        ([b"spam", b"spam"], "spam", "can't be a label"),
+    ],
+    ids=[
+        "strings-no-pos",
+        "digit-strings-no-pos",
+        "twos-no-pos",
+        "number-for-two-strings",
+        "absent-from-two",
+        "huge-int-absent-from-two",
+        "number-for-one-string",
+        "string-for-numbers",
+        "string-for-bools",
+        "nan",
+        "inf",
+        "list",
+        "bytes-for-str",
+        "str-for-bytes",
+    ],
+)
+def test_calibration_curve_refuses_an_unclear_pos_label(y_true, pos_label, message):
+    """No pos_label for non-{0, 1} labels, one of another kind than the labels
+    (with one class or two), or one matching neither of two classes."""
+    with pytest.raises(ValueError, match=message):
+        _compute_calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
+
+
+def test_calibration_curve_matches_sklearn_pos_label_rules():
+    calibration = pytest.importorskip("sklearn.calibration")
+    y_prob = np.array([0.1, 0.4, 0.6, 0.9])
+    for y_true, pos_label in [
+        ([0, 1, 1, 0], None),
+        ([-1, 1, 1, -1], None),
+        ([False, True, True, False], None),
+        (["ham", "spam", "spam", "ham"], "spam"),
+        ([0, 0, 0, 0], None),
+        ([2, 2, 2, 2], 2),
+        ([2, 2, 2, 2], 1),
+        (["ham", "ham", "ham", "ham"], "spam"),
+    ]:
+        expected, _ = calibration.calibration_curve(
+            y_true, y_prob, n_bins=2, pos_label=pos_label
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # the no-positives cases warn
+            prob_true, _, _, _ = _compute_calibration_curve(
+                y_true, y_prob, n_bins=2, pos_label=pos_label
+            )
+        np.testing.assert_allclose(prob_true, expected)
+
+
+def test_calibration_curve_reads_object_arrays_by_their_values():
+    """Object columns (pandas strings, categoricals) act like typed arrays."""
+    prob_true, _, _, _ = _compute_calibration_curve(
+        np.array([0, 1, 1, 0], dtype=object), [0.1, 0.6, 0.9, 0.4], n_bins=2
+    )
+    assert prob_true.tolist() == [0.0, 1.0]
+    with pytest.raises(ValueError, match="pos_label=1 can't be a label"):
+        _compute_calibration_curve(
+            np.array(["ham", "spam"], dtype=object), [0.2, 0.7], pos_label=1
+        )
+
+
+@pytest.mark.parametrize(
+    "y_true, y_prob, message",
+    [
+        (np.array([0, 1, None], dtype=object), [0.1, 0.4, 0.6], "no missing"),
+        (np.array(["a", None], dtype=object), [0.1, 0.4], "no missing"),
+        (np.array([0.0, np.nan], dtype=object), [0.1, 0.4], "no missing"),
+        ([0, 1], ["0.1", "0.4"], "numeric probabilities"),
+        ([0, 1], np.array([0.1, None], dtype=object), "numeric probabilities"),
+    ],
+)
+def test_calibration_curve_refuses_missing_or_non_numeric_values(
+    y_true, y_prob, message
+):
+    with pytest.raises(ValueError, match=message):
+        _compute_calibration_curve(y_true, y_prob, pos_label="a")
+
+
+@pytest.mark.parametrize(
+    "y_true, pos_label",
+    [
+        (np.array(["yes", np.nan], dtype=object), "yes"),
+        (["yes", np.nan], "yes"),
+        (["yes", None], "yes"),
+        ([0, np.nan], None),
+        ([0, "1"], "1"),
+        (np.array([0, "1"], dtype=object), "1"),
+    ],
+)
+def test_calibration_curve_refuses_missing_or_mixed_labels(
+    offline_client, y_true, pos_label
+):
+    """numpy would read ["yes", nan] as ["yes", "nan"], a silent negative."""
+    with pytest.raises(ValueError, match="only numbers or only strings"):
+        offline_client.calibration_curve(y_true, [0.2, 0.7], pos_label=pos_label)
+
+
+def test_calibration_curve_refuses_a_ragged_label_list():
+    with pytest.raises(ValueError, match="1 dim"):
+        _compute_calibration_curve([[0], [1, 0]], [0.2, 0.7])
+
+
+def test_calibration_curve_takes_pandas_columns():
+    pd = pytest.importorskip("pandas")
+    y_prob = pd.Series([0.1, 0.6, 0.9, 0.4])
+    for y_true in (
+        pd.Series(["no", "yes", "yes", "no"]),
+        pd.Series(["no", "yes", "yes", "no"], dtype="string"),
+        pd.Categorical(["no", "yes", "yes", "no"]),
+    ):
+        prob_true, _, _, _ = _compute_calibration_curve(
+            y_true, y_prob, n_bins=2, pos_label="yes"
+        )
+        assert prob_true.tolist() == [0.0, 1.0]
+    for y_true in (
+        pd.Series(["no", None], dtype="string"),
+        pd.Series(["yes", np.nan]),
+    ):
+        with pytest.raises(ValueError, match="no missing"):
+            _compute_calibration_curve(y_true, [0.1, 0.4], pos_label="yes")
+
+
+def test_calibration_curve_takes_string_labels_with_pos_label(capture_send):
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=["ham", "spam", "spam"],
+            y_prob=[0.2, 0.7, 0.9],
+            n_bins=2,
+            pos_label="spam",
+        )
+    )
+    assert sent["payload"]["data"][0]["y"] == [0.0, 1.0]

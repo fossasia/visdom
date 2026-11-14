@@ -43,3 +43,18 @@ def plot_roc_precomputed(viz, env, args):
         opts=dict(title="ROC Curve (Precomputed)"),
         env=env,
     )
+
+
+def plot_calibration_curve(viz, env, args):
+    np.random.seed(42)
+    n = 1000
+    y_prob = np.random.rand(n)
+    # an overconfident model: true rate is flatter than the predicted one
+    y_true = (np.random.rand(n) < 0.25 + 0.5 * y_prob).astype(int)
+
+    viz.calibration_curve(
+        y_true=y_true,
+        y_prob=y_prob,
+        n_bins=10,
+        env=env,
+    )
