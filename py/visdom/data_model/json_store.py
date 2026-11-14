@@ -269,6 +269,26 @@ class JSONStore(DataStore):
             return name
         return None
 
+    def _recovered_path(self, eid):
+        primary = self._primary_path(eid)
+        if primary is None or not HASHED_ENV_RE.fullmatch(os.path.basename(primary)):
+            return None
+        stem = os.path.normcase(self._safe_eid(eid))
+        try:
+            with os.scandir(os.path.abspath(self.env_path)) as entries:
+                for entry in entries:
+                    if (
+                        HASHED_STORAGE_RE.fullmatch(entry.name)
+                        and os.path.normcase(entry.name[: -len(".json.hash")]) == stem
+                        and entry.is_file()
+                    ):
+                        record = self._read_meta(entry.path)
+                        if record.readable and record.name is None:
+                            return entry.path
+        except OSError:
+            return None
+        return None
+
     def _resolve_existing(self, eid):
         """Return the existing file path for ``eid`` (primary or hash), or ``None``.
 
@@ -291,7 +311,7 @@ class JSONStore(DataStore):
                 if path == hashed[:-5] and owner != self._safe_eid(eid):
                     continue
                 return path
-        return None
+        return self._recovered_path(eid)
 
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""

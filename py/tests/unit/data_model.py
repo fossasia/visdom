@@ -314,6 +314,11 @@ def test_list_recovers_hash_file_missing_name_field(store, env_path, suffix):
     store.save_env("main", _env())
 
     assert store.list_envs() == sorted(["main", stem])
+    assert store.env_exists(stem)
+    assert store.load_env(stem) == {"jsons": {}, "reload": {}}
+    assert store.delete_env(stem)
+    assert not os.path.exists(os.path.join(env_path, stem + suffix))
+    assert store.list_envs() == ["main"]
 
 
 @pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
@@ -330,6 +335,25 @@ def test_list_recovers_hash_file_unusable_name_field(store, env_path, suffix):
     store.save_env("main", _env())
 
     assert store.list_envs() == sorted(["main", stem])
+    assert store.env_exists(stem)
+    assert store.load_env(stem) == {"jsons": {}, "reload": {}}
+    assert store.delete_env(stem)
+    assert not os.path.exists(os.path.join(env_path, stem + suffix))
+    assert store.list_envs() == ["main"]
+
+
+@pytest.mark.parametrize(
+    "payload", ['{"name": "owned-env", "jsons": {}, "reload": {}}', "{invalid"]
+)
+def test_recovered_stem_does_not_alias_named_or_unreadable_files(store, payload):
+    path = store._hash_path("owned-env")
+    stem = os.path.basename(path)[: -len(".json.hash")]
+    store._atomic_write(path, payload)
+    assert not store.env_exists(stem)
+    assert store.load_env(stem) == {}
+    assert not store.delete_env(stem)
+    with open(path) as handle:
+        assert handle.read() == payload
 
 
 def test_list_skips_unreadable_hash_files(store, env_path):

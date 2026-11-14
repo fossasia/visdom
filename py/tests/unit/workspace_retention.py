@@ -135,6 +135,20 @@ class TestRetention(unittest.TestCase):
         self.assertEqual(answer["removed"], 0)
         self.assertTrue(store.env_exists(eid))
 
+    def test_retention_deletes_recovered_hash_file(self):
+        for metadata in ({}, {"name": 123}):
+            with self.subTest(metadata=metadata):
+                eid = "hash_" + "b" * 64
+                path = os.path.join(self.directory, eid + ".json.hash")
+                with open(path, "w") as handle:
+                    json.dump(dict(jsons={}, reload={}, **metadata), handle)
+                when = time.time() - 30 * DAY
+                os.utime(path, (when, when))
+                answer = self.app.retire_workspace(self.workspace, 7, dry_run=False)
+                self.assertEqual(answer["envs"], [eid])
+                self.assertEqual(answer["removed"], 1)
+                self.assertTrue(self.settle(path))
+
     def test_an_env_with_unsaved_writes_is_kept(self):
         path = self.write_env("january", days_old=30)
         space = self.app.workspace_env_manager.space(self.workspace)
