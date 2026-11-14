@@ -490,8 +490,10 @@ def remove_directory(path):
 
 
 def _stored_eid(entry):
-    stem = entry.name[: -len(".json")]
-    if not (HASHED_ENV_RE.match(entry.name) or HASHED_STORAGE_RE.fullmatch(entry.name)):
+    is_hashed = HASHED_STORAGE_RE.fullmatch(entry.name)
+    suffix = ".json.hash" if is_hashed else ".json"
+    stem = entry.name[: -len(suffix)]
+    if not (HASHED_ENV_RE.match(entry.name) or is_hashed):
         return stem
     try:
         with open(entry.path, "r", encoding="utf-8") as fn:

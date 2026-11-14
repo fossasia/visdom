@@ -27,12 +27,23 @@ from unittest import mock
 import pytest
 
 from visdom.server.app import Application
+from visdom.server.workspace_env_manager import _stored_eid
 from visdom.data_model.json_store import JSONStore
 from visdom.utils.server_utils import purge_env as purge
 
 pytestmark = pytest.mark.unit
 
 DAY = 86400
+
+
+@pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
+@pytest.mark.parametrize("metadata", [{}, {"name": 123}, {"name": "real-env"}])
+def test_stored_eid_handles_hash_suffixes(tmp_path, suffix, metadata):
+    stem = "hash_" + "a" * 64
+    (tmp_path / (stem + suffix)).write_text(json.dumps(metadata), encoding="utf-8")
+    expected = "real-env" if metadata.get("name") == "real-env" else stem
+    with os.scandir(tmp_path) as entries:
+        assert _stored_eid(next(entries)) == expected
 
 
 class TestRetention(unittest.TestCase):

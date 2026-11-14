@@ -638,7 +638,8 @@ class JSONStore(DataStore):
             if not os.path.isfile(path):
                 continue
             seen.add(os.path.abspath(path))
-            stem = name[: -len(".json")]
+            suffix = ".json.hash" if is_hashed else ".json"
+            stem = name[: -len(suffix)]
             if HASHED_ENV_RE.match(name) or is_hashed:
                 record = self._read_meta(path)
                 if not record.readable:

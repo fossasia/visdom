@@ -298,7 +298,8 @@ def test_env_literally_named_like_hash_pattern_is_still_listed(store):
     assert store.env_exists(eid)
 
 
-def test_list_recovers_hash_file_missing_name_field(store, env_path):
+@pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
+def test_list_recovers_hash_file_missing_name_field(store, env_path, suffix):
     """A well-formed hash_<64>.json missing its "name" field is recovered.
 
     This can happen if a genuine hash-fallback file's "name" field is lost
@@ -308,14 +309,15 @@ def test_list_recovers_hash_file_missing_name_field(store, env_path):
     strictly better than losing access to the data entirely.
     """
     stem = "hash_" + "b" * 64
-    with open(os.path.join(env_path, stem + ".json"), "w") as fn:
+    with open(os.path.join(env_path, stem + suffix), "w") as fn:
         fn.write(json.dumps({"jsons": {}, "reload": {}}))
     store.save_env("main", _env())
 
     assert store.list_envs() == sorted(["main", stem])
 
 
-def test_list_recovers_hash_file_unusable_name_field(store, env_path):
+@pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
+def test_list_recovers_hash_file_unusable_name_field(store, env_path, suffix):
     """A hash_<64>.json with a non-string "name" field falls back to stem.
 
     Even if a "name" key exists in the JSON, it must be a string; otherwise we
@@ -323,7 +325,7 @@ def test_list_recovers_hash_file_unusable_name_field(store, env_path):
     still appears in list_envs().
     """
     stem = "hash_" + "c" * 64
-    with open(os.path.join(env_path, stem + ".json"), "w") as fn:
+    with open(os.path.join(env_path, stem + suffix), "w") as fn:
         fn.write(json.dumps({"name": 123, "jsons": {}, "reload": {}}))
     store.save_env("main", _env())
 
