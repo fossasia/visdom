@@ -184,7 +184,7 @@ class Visdom:
     ) -> _SendReturn: ...
     def svg(
         self,
-        svgstr: _OptStr = ...,
+        svgstr: Optional[Union[Text, bytes, bytearray, memoryview]] = ...,
         svgfile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
