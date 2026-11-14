@@ -255,6 +255,9 @@ class TestUnauthenticatedRequests(LoginTestCase):
     def test_logging_an_experiment_is_unauthorized(self):
         self._assert_401("/experiments/log", {"eid": "main", "params": {"lr": 0.1}})
 
+    def test_restoring_a_run_is_unauthorized(self):
+        self._assert_401("/restore_run", {"path": "whatever.json"})
+
     def test_an_unauthorized_response_carries_no_body(self):
         self.assertEqual(self._assert_401("/env_state", {}).body, b"")
 
@@ -461,6 +464,9 @@ class TestReadonlyRejectsWrites(VisdomHTTPTestCase):
         resp = self.post_json("/experiments/log", {"eid": "main", "params": {"a": 1}})
 
         self.assertEqual(resp.code, 403)
+
+    def test_restoring_a_run_is_refused(self):
+        self._assert_403("/restore_run", {"path": "whatever.json"})
 
 
 class TestReadonlyAllowsReads(VisdomHTTPTestCase):

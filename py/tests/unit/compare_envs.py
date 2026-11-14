@@ -24,7 +24,12 @@ import copy
 
 import pytest
 
-from visdom.utils.server_utils import MAX_ENV_NAME_LEN, compare_envs
+from visdom.data_model.json_store import JSONStore
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    MAX_ENV_NAME_LEN,
+    compare_envs,
+)
 
 from testutils.payloads import env_payload
 
@@ -130,6 +135,36 @@ def test_an_env_only_on_disk_is_loaded_and_cached(fake_socket, store):
     compare_envs(state, ["live", "saved"], fake_socket, store)
     assert "saved" in state
     assert _trace_names(_by_title(fake_socket, "loss")) == ["live_loss", "saved_loss"]
+
+
+def test_a_cold_base_env_is_parsed_once(fake_socket, store, monkeypatch):
+    """The base env is materialised and then copied, not copied and then read.
+
+    Deep-copying a cold ``LazyEnvData`` handed back a second cold env holding a
+    store of its own, so the file was parsed twice: once when the copy was
+    first read, and once by the merge loop reading the original. Copying the
+    env's data instead reads it once, and that read is one the loop below was
+    going to do anyway. ``load_env`` is counted on the class rather than on the
+    instance precisely so the copy's own store is counted too.
+    """
+    store.save_env("base", _env(_plot_pane("w1", "loss")))
+    reads = []
+    load_env = JSONStore.load_env
+
+    def counting_load_env(self, eid):
+        reads.append(eid)
+        return load_env(self, eid)
+
+    monkeypatch.setattr(JSONStore, "load_env", counting_load_env)
+    state = {
+        "base": LazyEnvData(store, "base"),
+        "other": _env(_plot_pane("w2", "loss")),
+    }
+
+    compare_envs(state, ["base", "other"], fake_socket, store)
+
+    assert reads == ["base"]
+    assert _trace_names(_by_title(fake_socket, "loss")) == ["base_loss", "other_loss"]
 
 
 # -- Env numbering ------------------------------------------------------------
