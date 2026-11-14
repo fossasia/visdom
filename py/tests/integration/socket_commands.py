@@ -26,6 +26,7 @@ race a thread pool.
 
 import asyncio
 import json
+import threading
 from unittest import mock
 
 import pytest
@@ -310,6 +311,355 @@ def test_save_repoints_the_socket_at_the_new_environment(env):
     send(sub, cmd="save", eid="copy", prev_eid="expt", data={})
 
     assert sub.eid == "copy"
+
+
+def test_save_announces_a_forked_environment(env):
+    """A fork made in one browser reaches the others too.
+
+    The browser that forks adds the new environment to its own list, so the
+    missing announcement only showed in every other one: their environment
+    selectors kept the old list until the page was reloaded.
+    """
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "copy"]
+
+
+def test_save_onto_an_existing_environment_announces_nothing(env):
+    """Saving an environment under its own name leaves the list as it was."""
+    sub = open_sub(env)
+    announced = commands(sub).count("env_update")
+
+    send(sub, cmd="save", eid="expt", prev_eid="expt", data={})
+
+    assert commands(sub).count("env_update") == announced
+
+
+def test_save_failure_leaves_announcement_pending_until_retry(env):
+    """Failed persistence suppresses announcement until a retry saves it."""
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub]
+    assert not env.storage.env_exists("copy")
+
+    send(forker, cmd="save", eid="copy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "copy"]
+    assert env.storage.env_exists("copy")
+
+    send(forker, cmd="save", eid="copy", prev_eid="copy", data={})
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+
+
+def test_save_declined_by_storage_does_not_announce_until_retry(env):
+    """A store returning False does not broadcast until retry succeeds."""
+    forker = open_sub(env)
+    other = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    with mock.patch.object(env.storage, "save_env", return_value=False):
+        send(forker, cmd="save", eid="copy_declined", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub]
+
+    send(forker, cmd="save", eid="copy_declined", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "copy_declined",
+        ]
+
+
+def test_save_in_memory_mode_announces_fork(app_factory):
+    """In-memory mode (env_path=None) announces the fork without disk writes."""
+    app = app_factory(env_path=None)
+    app.state["expt"] = {"jsons": {"win_0": pane()}, "reload": {}}
+    forker = open_sub(app)
+    other = open_sub(app)
+    heard = {sub: commands(sub).count("env_update") for sub in (forker, other)}
+
+    send(forker, cmd="save", eid="memcopy", prev_eid="expt", data={})
+
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == ["main", "expt", "memcopy"]
+
+    send(forker, cmd="save", eid="memcopy", prev_eid="memcopy", data={})
+    for sub in (forker, other):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+
+
+def test_overlapping_saves_of_pending_env_announce_once(env):
+    """Concurrent saves for a pending environment announce exactly once."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (sub1, sub2)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(sub1, cmd="save", eid="concurrent", prev_eid="expt", data={})
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "concurrent", "prev_eid": "expt", "data": {}}
+    )
+
+    async def run_concurrent():
+        await asyncio.gather(
+            sub1.on_message(save_msg),
+            sub2.on_message(save_msg),
+        )
+
+    asyncio.run(run_concurrent())
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "concurrent",
+        ]
+
+
+def test_overlapping_retry_succeeds_while_first_retry_fails(env):
+    """If retry A fails while overlapping retry B succeeds, B must announce."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (sub1, sub2)}
+
+    with mock.patch.object(env.storage, "save_env", side_effect=OSError("disk full")):
+        send(sub1, cmd="save", eid="raced_retry", prev_eid="expt", data={})
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub]
+
+    a_in_save = threading.Event()
+    b_submitted = threading.Event()
+    orig_save = env.storage.save_env
+
+    def controlled_save(eid, env_data):
+        if not a_in_save.is_set():
+            a_in_save.set()
+            assert b_submitted.wait(timeout=2.0), "Retry B failed to submit"
+            raise OSError("disk full on A")
+        return orig_save(eid, env_data)
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "raced_retry", "prev_eid": "expt", "data": {}}
+    )
+
+    async def run_overlapping():
+        with mock.patch.object(env.storage, "save_env", side_effect=controlled_save):
+            t_a = None
+            t_b = None
+            try:
+                t_a = asyncio.create_task(sub1.on_message(save_msg))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not a_in_save.is_set():
+                    if asyncio.get_running_loop().time() > deadline:
+                        raise AssertionError("Retry A never entered save_env")
+                    await asyncio.sleep(0.001)
+                t_b = asyncio.create_task(sub2.on_message(save_msg))
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while (
+                    getattr(env.storage_executor, "_work_queue", None) is not None
+                    and env.storage_executor._work_queue.empty()
+                ):
+                    if asyncio.get_running_loop().time() > deadline:
+                        raise AssertionError(
+                            "Retry B failed to queue in storage executor"
+                        )
+                    await asyncio.sleep(0.001)
+                b_submitted.set()
+                await asyncio.gather(t_a, t_b)
+            finally:
+                b_submitted.set()
+                for t in (t_a, t_b):
+                    if t is not None and not t.done():
+                        t.cancel()
+
+    asyncio.run(run_overlapping())
+
+    assert env.storage.env_exists("raced_retry")
+
+    for sub in (sub1, sub2):
+        assert commands(sub).count("env_update") == heard[sub] + 1
+        assert last(sub, "env_update")["data"] == [
+            "main",
+            "expt",
+            "raced_retry",
+        ]
+
+
+def test_stale_save_completion_after_delete_and_recreate_does_not_announce(env):
+    """Save A in flight does not announce replacement environment if B fails."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+
+    a_in_save = threading.Event()
+    a_can_finish = threading.Event()
+    orig_save = env.storage.save_env
+
+    call_count = 0
+
+    def controlled_save(eid, env_data):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            a_in_save.set()
+            assert a_can_finish.wait(timeout=2.0), "Save A timed out waiting"
+            return orig_save(eid, env_data)
+        else:
+            raise OSError("disk full on B")
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "recreated", "prev_eid": "expt", "data": {}}
+    )
+    delete_msg = json.dumps({"cmd": "delete_env", "eid": "recreated"})
+
+    async def run_scenario():
+        with mock.patch.object(env.storage, "save_env", side_effect=controlled_save):
+            t_a = asyncio.create_task(sub1.on_message(save_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while not a_in_save.is_set():
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Save A never entered save_env")
+                await asyncio.sleep(0.001)
+            t_del = asyncio.create_task(sub2.on_message(delete_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while "recreated" in env.state:
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Environment was not popped on delete")
+                await asyncio.sleep(0.001)
+            t_b = asyncio.create_task(sub2.on_message(save_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while "recreated" not in env.state:
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Replacement was not set in state")
+                await asyncio.sleep(0.001)
+            try:
+                a_can_finish.set()
+                await asyncio.gather(t_a, t_del, t_b)
+            finally:
+                a_can_finish.set()
+
+    asyncio.run(run_scenario())
+
+    for sub in (sub1, sub2):
+        assert "recreated" not in last(sub, "env_update")["data"]
+
+
+def test_stale_save_completion_after_delete_and_recreate_announces_once_on_success(
+    env,
+):
+    """Save A in flight does not double-announce when replacement B succeeds."""
+    sub1 = open_sub(env)
+    sub2 = open_sub(env)
+    heard = {sub: commands(sub).count("env_update") for sub in (sub1, sub2)}
+
+    a_in_save = threading.Event()
+    a_can_finish = threading.Event()
+    orig_save = env.storage.save_env
+
+    call_count = 0
+
+    def controlled_save(eid, env_data):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            a_in_save.set()
+            assert a_can_finish.wait(timeout=2.0), "Save A timed out waiting"
+        return orig_save(eid, env_data)
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "recreated_ok", "prev_eid": "expt", "data": {}}
+    )
+    delete_msg = json.dumps({"cmd": "delete_env", "eid": "recreated_ok"})
+
+    async def run_scenario():
+        with mock.patch.object(env.storage, "save_env", side_effect=controlled_save):
+            t_a = asyncio.create_task(sub1.on_message(save_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while not a_in_save.is_set():
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Save A never entered save_env")
+                await asyncio.sleep(0.001)
+            t_del = asyncio.create_task(sub2.on_message(delete_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while "recreated_ok" in env.state:
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Environment was not popped on delete")
+                await asyncio.sleep(0.001)
+            t_b = asyncio.create_task(sub2.on_message(save_msg))
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while "recreated_ok" not in env.state:
+                if asyncio.get_running_loop().time() > deadline:
+                    raise AssertionError("Replacement was not set in state")
+                await asyncio.sleep(0.001)
+            try:
+                a_can_finish.set()
+                await asyncio.gather(t_a, t_del, t_b)
+            finally:
+                a_can_finish.set()
+
+    asyncio.run(run_scenario())
+
+    for sub in (sub1, sub2):
+        assert "recreated_ok" in last(sub, "env_update")["data"]
+        # Exactly 2 announcements: 1 from delete_env (removal), 1 from Save B (re-addition)
+        assert commands(sub).count("env_update") == heard[sub] + 2
+
+
+def test_in_flight_save_dropped_when_environment_deleted(env):
+    """An environment deleted while its save is in flight is not reannounced."""
+    sub = open_sub(env)
+    heard = commands(sub).count("env_update")
+
+    save_started = threading.Event()
+    delete_done = threading.Event()
+    orig_save = env.storage.save_env
+
+    def slow_save(eid, env_data):
+        save_started.set()
+        delete_done.wait(timeout=2.0)
+        return orig_save(eid, env_data)
+
+    save_msg = json.dumps(
+        {"cmd": "save", "eid": "raced", "prev_eid": "expt", "data": {}}
+    )
+    delete_msg = json.dumps({"cmd": "delete_env", "eid": "raced"})
+
+    async def run_race():
+        with mock.patch.object(env.storage, "save_env", side_effect=slow_save):
+            t1 = asyncio.create_task(sub.on_message(save_msg))
+            while not save_started.is_set():
+                await asyncio.sleep(0.005)
+            await sub.on_message(delete_msg)
+            delete_done.set()
+            await t1
+
+    asyncio.run(run_race())
+
+    assert "raced" not in env.state
+    assert last(sub, "env_update")["data"] == ["main", "expt"]
+    assert commands(sub).count("env_update") == heard + 1
 
 
 def test_save_without_a_known_source_is_a_noop(env):
