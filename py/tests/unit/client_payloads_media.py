@@ -1005,6 +1005,48 @@ def test_svg_file_preserves_text(capture_send, tmp_path, text):
     assert content(sent) == markup
 
 
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_svg_accepts_buffer_svgstr(capture_send, wrap):
+    """bytes, bytearray and memoryview decode as UTF-8, like the svgfile path."""
+    sent = capture_send(lambda v: v.svg(svgstr=wrap(b"<svg a='1'><g/></svg>")))
+    assert content(sent) == "<svg a='1'><g/></svg>"
+
+
+def test_svg_accepts_a_strided_byte_memoryview(capture_send):
+    markup = b"<svg a='1'><g/></svg>"
+    padded = bytes(b for byte in markup for b in (byte, 0))
+    view = memoryview(padded)[::2]
+    sent = capture_send(lambda v: v.svg(svgstr=view))
+    assert content(sent) == markup.decode()
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_svg_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.svg(svgstr=make_view())
+
+
+def test_svg_accepts_utf8_bytes_with_non_ascii_text(capture_send):
+    markup = "<svg a='1'><text>café</text></svg>"
+    sent = capture_send(lambda v: v.svg(svgstr=markup.encode("utf-8")))
+    assert content(sent) == markup
+
+
+def test_svg_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string in the payload, not in the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.svg(svgstr="<svg a='1'><g/></svg>", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_svg_passes_opts_through(capture_send):
     sent = capture_send(
         lambda v: v.svg(svgstr="<svg a='1'><g/></svg>", opts=dict(title="diagram"))

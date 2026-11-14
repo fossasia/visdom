@@ -2183,7 +2183,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2191,6 +2191,19 @@ class Visdom(object):
             svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
+        # The svgfile path decodes bytes; a direct ``svgstr=b"<svg ...>"``
+        # otherwise fell straight into ``re.search`` and raised
+        # ``TypeError: cannot use a string pattern on a bytes-like object``.
+        if isinstance(svgstr, memoryview) and (
+            svgstr.ndim != 1 or svgstr.format not in ("B", "b", "c")
+        ):
+            raise TypeError(
+                "svg() can only decode a one-dimensional byte memoryview; "
+                "got a memoryview with format %r and %d dimension(s)"
+                % (svgstr.format, svgstr.ndim)
+            )
+        if isinstance(svgstr, (bytes, bytearray, memoryview)):
+            svgstr = bytes(svgstr).decode("utf-8")
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
         assert svg is not None, "could not parse SVG string"
         return self.text(text=svg.group(0), win=win, env=env, opts=opts)
