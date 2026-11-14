@@ -141,6 +141,39 @@ def test_text_decodes_utf8_buffers_to_a_string(capture_send, wrap):
     assert block(sent) == {"content": "café", "type": "text"}
 
 
+def test_text_decodes_a_strided_byte_memoryview(capture_send):
+    """A non-contiguous one-dimensional byte view still decodes its content."""
+    view = memoryview(np.frombuffer(b"h.i.", dtype=np.uint8))[::2]
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_cast_to_bytes(capture_send):
+    view = memoryview(np.array([104, 105], dtype=np.uint8)).cast("B")
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_over_a_bytearray(capture_send):
+    sent = capture_send(lambda v: v.text(memoryview(bytearray(b"hi"))))
+    assert block(sent)["content"] == "hi"
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.array([1, 2], dtype=np.int16)), id="int16"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_text_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    """Decoding raw memory would print control characters, so it is refused."""
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.text(make_view())
+
+
 def test_text_coerces_a_numpy_array_to_its_str_form(capture_send):
     sent = capture_send(lambda v: v.text(np.array([1, 2, 3])))
     assert block(sent)["content"] == "[1 2 3]"
