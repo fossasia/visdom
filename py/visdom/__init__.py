@@ -1000,9 +1000,9 @@ def _url_eid(eid):
 def _embed_size(value):
     """An iframe dimension as a CSS length.
 
-    A number is pixels, matching the ``height=600`` default; a string is the
-    CSS the caller wants, such as ``"100%"`` or ``"40vh"``. It has to be a
-    length and nothing else -- these end up in a ``style`` attribute, and a
+    A number is pixels, matching the ``height=600`` default, and has to be
+    finite and positive; a string is the CSS the caller wants, such as
+    ``"100%"`` or ``"40vh"``. It has to be a length and nothing else -- these end up in a ``style`` attribute, and a
     second declaration smuggled in after a semicolon would be styling the
     notebook rather than sizing the frame.
     """
@@ -1013,6 +1013,11 @@ def _embed_size(value):
                 "iframe dimensions must be a CSS length, got {0!r}".format(value)
             )
         return text
+    if not math.isfinite(value):
+        # nan and inf are Numbers that survive the comparison below -- nan
+        # fails every comparison, inf passes -- and would format into a
+        # 'nanpx' / 'infpx' length the browser drops on the floor.
+        raise ValueError("iframe dimensions must be finite, got {0!r}".format(value))
     if value <= 0:
         raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
     if isinstance(value, numbers.Integral):

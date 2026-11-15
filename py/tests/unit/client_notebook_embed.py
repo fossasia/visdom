@@ -122,6 +122,18 @@ class TestShow:
         with pytest.raises(ValueError):
             _client().show(height=0)
 
+    @pytest.mark.parametrize(
+        "value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"]
+    )
+    def test_a_non_finite_dimension_is_refused(self, value):
+        # nan loses every comparison and inf wins them, so neither is caught by
+        # the positive check; both would format into a 'nanpx' / 'infpx' length
+        # that sizes nothing.
+        with pytest.raises(ValueError):
+            _client().show(height=value)
+        with pytest.raises(ValueError):
+            _client().show(width=value)
+
     def test_the_client_itself_renders_the_same_iframe(self):
         client = _client(env="run-7")
 

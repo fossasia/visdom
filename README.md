@@ -1681,7 +1681,7 @@ vis.show(env="baseline", height=400)
 
 Arguments:
 - `env`: environment to open. Defaults to the client's own env, as elsewhere in the API. The embedded dashboard keeps its environment selector, so this is the starting point rather than a restriction.
-- `height`: iframe height. A number is pixels (default `600`); a string is a CSS length, e.g. `"40vh"`. Both are applied as CSS — the HTML `height` attribute is a legacy length that would read `40vh` as 40 pixels — so a dimension has to be a length and nothing else.
+- `height`: iframe height. A number is pixels (default `600`) and has to be finite and positive — `nan` and `inf` are refused rather than formatted into a `nanpx` length; a string is a CSS length, e.g. `"40vh"`. Both are applied as CSS — the HTML `height` attribute is a legacy length that would read `40vh` as 40 pixels — so a dimension has to be a length and nothing else.
 - `width`: iframe width. Defaults to `"100%"`, the full width of the cell.
 
 Returns an object that renders as the iframe in a notebook and prints as the
