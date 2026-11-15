@@ -48,6 +48,7 @@ from visdom import (
     _EventHandler,
     _ExperimentQueryReply,
     _ExperimentReply,
+    _LineUpdate,
     _OptOps,
     _OptStr,
     _SendReturn,
@@ -409,7 +410,7 @@ class AsyncVisdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
     ) -> _SendReturn: ...
     async def scatter(
         self,
@@ -418,7 +419,7 @@ class AsyncVisdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
         name: _OptStr = ...,
     ) -> _SendReturn: ...
     async def line(
@@ -428,7 +429,7 @@ class AsyncVisdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
         name: _OptStr = ...,
         Z: Optional[Tensor] = ...,
         is3d: bool = ...,
