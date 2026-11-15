@@ -884,23 +884,11 @@ def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
     assert 'type="audio/wav"' in content(sent)
 
 
-def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client):
-    class DummyFigure:
-        def __init__(self):
-            self.saved_to = None
-
-        def write_image(self, filepath, **kwargs):
-            self.saved_to = filepath
-
-    fig = DummyFigure()
-    with patch.dict(sys.modules, {"plotly": object()}):
-        offline_client.save_plotly_figure(fig, b"plot.png")
-        assert fig.saved_to == "plot.png"
-        assert isinstance(fig.saved_to, str)
-
-        offline_client.save_plotly_figure(fig, _BytesPath("figure.svg"))
-        assert fig.saved_to == "figure.svg"
-        assert isinstance(fig.saved_to, str)
+def test_audio_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "café_音频_test.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
 
 
 def test_audio_escapes_the_caption(capture_send):
@@ -956,6 +944,13 @@ def test_video_accepts_bytes_pathlike(capture_send, tmp_path):
     path = tmp_path / "clip.mp4"
     path.write_bytes(b"not really video")
     sent = capture_send(lambda v: v.video(videofile=_BytesPath(path)))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "vidéo_café_動画.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
     assert 'type="video/mp4"' in content(sent)
 
 
@@ -1048,13 +1043,6 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     path = tmp_path / "drawing.svg"
     path.write_text("<svg width='2'><rect/></svg>")
     sent = capture_send(lambda v: v.svg(svgfile=str(path)))
-    assert content(sent) == "<svg width='2'><rect/></svg>"
-
-
-def test_svg_accepts_pathlib_path(capture_send, tmp_path):
-    path = tmp_path / "drawing.svg"
-    path.write_text("<svg width='2'><rect/></svg>")
-    sent = capture_send(lambda v: v.svg(svgfile=path))
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 

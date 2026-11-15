@@ -1073,8 +1073,8 @@ to support the Theano codec in an OGG container (Chrome supports this).
 
 #### vis.svg
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
-the filename or `pathlib.Path` of an SVG file `svgfile` (`svgfile` accepts string or `os.PathLike`).
-The function does not support any specific `opts`.
+the name of an SVG file `svgfile`. The function does not support any specific
+`opts`.
 
 #### vis.matplot
 This function draws a Matplotlib `plot`. The function supports
