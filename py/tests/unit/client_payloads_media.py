@@ -1046,6 +1046,54 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
+class _BytesPath:
+    def __init__(self, path):
+        self._path = os.fsencode(path)
+
+    def __fspath__(self):
+        return self._path
+
+
+def test_svg_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "drawing.svg"
+    path.write_text("<svg width='2'><rect/></svg>")
+    sent = capture_send(lambda v: v.svg(svgfile=path))
+    assert content(sent) == "<svg width='2'><rect/></svg>"
+
+
+def test_svg_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "drawing.svg"
+    path.write_text("<svg width='2'><rect/></svg>")
+    sent = capture_send(lambda v: v.svg(svgfile=_BytesPath(path)))
+    assert content(sent) == "<svg width='2'><rect/></svg>"
+
+
+def test_svg_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "schéma_図_test.svg"
+    path.write_text("<svg width='2'><rect/></svg>")
+    sent = capture_send(lambda v: v.svg(svgfile=path))
+    assert content(sent) == "<svg width='2'><rect/></svg>"
+
+
+def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client):
+    class DummyFigure:
+        def __init__(self):
+            self.saved_to = None
+
+        def write_image(self, filepath, **kwargs):
+            self.saved_to = filepath
+
+    fig = DummyFigure()
+    with patch.dict(sys.modules, {"plotly": object()}):
+        offline_client.save_plotly_figure(fig, b"plot.png")
+        assert fig.saved_to == "plot.png"
+        assert isinstance(fig.saved_to, str)
+
+        offline_client.save_plotly_figure(fig, _BytesPath("figure.svg"))
+        assert fig.saved_to == "figure.svg"
+        assert isinstance(fig.saved_to, str)
+
+
 @pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
 def test_svg_file_preserves_text(capture_send, tmp_path, text):
     """File input must produce the same SVG text as the string API."""

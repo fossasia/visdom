@@ -2355,8 +2355,8 @@ class Visdom(object):
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
         This function draws an SVG object. It takes as input an SVG string or
-        the name of an SVG file. The function does not support any
-        plot-specific `opts`.
+        the filename or `pathlib.Path` of an SVG file (`os.PathLike` supported).
+        The function does not support any plot-specific `opts`.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -2450,6 +2450,8 @@ class Visdom(object):
                 "Plotly must be installed to save Plotly figures. "
                 "Install with: pip install plotly"
             )
+        if isinstance(filepath, (os.PathLike, bytes)):
+            filepath = os.fsdecode(filepath)
         try:
             figure.write_image(filepath, **kwargs)
         except ValueError as e:

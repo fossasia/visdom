@@ -339,7 +339,7 @@ class AsyncVisdom:
     async def svg(
         self,
         svgstr: _OptStr = ...,
-        svgfile: _OptStr = ...,
+        svgfile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -348,14 +348,17 @@ class AsyncVisdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     async def save_plotly_figure(
-        self, figure: Any, filepath: Text, **kwargs: Any
+        self,
+        figure: Any,
+        filepath: Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]],
+        **kwargs: Any
     ) -> None: ...
     async def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptStr = ...,
+        save_path: _OptPath = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     async def image(
