@@ -51,7 +51,9 @@ from visdom import (
     _ExperimentReply,
     _OptOps,
     _OptPath,
+    _OptSaveTarget,
     _OptStr,
+    _SaveTarget,
     _SendReturn,
     _TagMap,
 )
@@ -350,7 +352,7 @@ class AsyncVisdom:
     async def save_plotly_figure(
         self,
         figure: Any,
-        filepath: Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]],
+        filepath: _SaveTarget,
         **kwargs: Any
     ) -> None: ...
     async def plotlyplot(
@@ -358,7 +360,7 @@ class AsyncVisdom:
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptPath = ...,
+        save_path: _OptSaveTarget = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     async def image(

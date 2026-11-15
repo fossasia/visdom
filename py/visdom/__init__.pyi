@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
+from typing import Any, Callable, Dict, IO, List, Mapping, Optional, Set, Text, Tuple, Union
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
 _OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
+_SaveTarget = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes], IO[Any]]
+_OptSaveTarget = Optional[_SaveTarget]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -228,7 +230,7 @@ class Visdom:
     def save_plotly_figure(
         self,
         figure: Any,
-        filepath: Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]],
+        filepath: _SaveTarget,
         **kwargs: Any
     ) -> None: ...
     def plotlyplot(
@@ -236,7 +238,7 @@ class Visdom:
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptPath = ...,
+        save_path: _OptSaveTarget = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(
