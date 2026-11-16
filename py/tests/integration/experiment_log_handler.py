@@ -38,6 +38,15 @@ class TestExperimentLogEndpoint(VisdomHTTPTestCase):
         """Read the persisted experiment straight from disk via a fresh store."""
         return ExperimentStore(JSONStore(self.env_path)).get_experiment(eid)
 
+    def post_raw(self, body):
+        """POST a body verbatim, so malformed JSON reaches the handler."""
+        return self.fetch(
+            "/experiments/log",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+
     def test_log_creates_and_persists_experiment(self):
         resp = self.post_json(
             "/experiments/log",
@@ -202,6 +211,35 @@ class TestExperimentLogEndpoint(VisdomHTTPTestCase):
     def test_non_mapping_params_is_400(self):
         resp = self.post_json("/experiments/log", {"eid": "main", "params": [1, 2, 3]})
         self.assertEqual(resp.code, 400)
+
+    def test_empty_body_logs_the_default_experiment(self):
+        """An empty body is ``{}``: the default log on eid ``main``."""
+        resp = self.post_raw("")
+        self.assertEqual(resp.code, 200)
+        self.assertIsNotNone(self.read_experiment("main"))
+
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500."""
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+        self.assertIn("JSON", resp.reason)
+        self.assertIsNone(self.read_experiment("main"))
+
+    def test_non_object_body_is_400(self):
+        """A JSON list, null, number, or string carries no arguments."""
+        for body in ("[]", "null", "1", '"main"'):
+            resp = self.post_raw(body)
+            self.assertEqual(resp.code, 400, body)
+            self.assertIn("object", resp.reason)
+            self.assertIsNone(self.read_experiment("main"))
+
+    def test_non_string_eid_is_400(self):
+        """A numeric or list eid is refused before an experiment is written."""
+        for body in ('{"eid": 5}', '{"eid": []}'):
+            resp = self.post_raw(body)
+            self.assertEqual(resp.code, 400, body)
+            self.assertIn("eid", resp.reason)
+            self.assertIsNone(self.read_experiment("main"))
 
     def test_experiment_survives_full_env_save(self):
         """A window save must not clobber a previously logged experiment.
