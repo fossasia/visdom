@@ -6,22 +6,28 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Tests for the alert rule: its grammar, what it accepts, and the fold.
+"""Tests for metric alert rules: the grammar, the fold, and the record.
 
-A rule is three separable things, and this covers the first two and a half.
-The *grammar* is what turns ``"> 2.0"`` into an operator and a number, and is
-the only place user text is read. The *rule* is what that grammar builds. The
-*fold* is what decides whether an observation fires one, and is a pure
-function of the rule's own state -- never of the metric history, which is the
-property that lets it run on the event loop beside the append.
+A rule is three separable things, and they are tested separately here. The
+*grammar* is what turns ``"> 2.0"`` into an operator and a number, and is the
+only place user text is read. The *fold* is what decides whether an
+observation fires a rule, and is a pure function of the rule's own state --
+never of the metric history, which is the property that lets it run on the
+event loop beside the append. The *record* is where rules live, which is the
+experiment, so that a restart finds the streak it left off at.
 
-The fold is held to that here by feeding it a stand-in record rather than an
-``Experiment``: it reads nothing but ``alerts``, and a test that proved it
-against the real record could not tell the difference.
+The store tests assert the fourth thing, which is the one a reader is most
+likely to doubt: that evaluating a rule reads no environment. A rule is
+evaluated inside the one read-append-write ``log_metrics`` already makes, so
+the datastore handed to it here raises on every call it could make.
 """
+
+import math
 
 import pytest
 
+from visdom.data_model.base import DataStore
+from visdom.experiments import ExperimentStore
 from visdom.experiments.alerts import (
     ACTION_TOAST,
     Alert,
@@ -32,9 +38,11 @@ from visdom.experiments.alerts import (
     describe,
     evaluate,
     GOAL_MAX,
+    MAX_ALERTS_PER_ENV,
     observe,
     parse_condition,
 )
+from visdom.experiments.models import Experiment, STATUS_FINISHED
 
 pytestmark = pytest.mark.unit
 
@@ -44,6 +52,49 @@ class Record:
 
     def __init__(self, *alerts):
         self.alerts = list(alerts)
+
+
+def _refuse(name):
+    """A ``DataStore`` method that fails rather than answering."""
+
+    def method(self, *args, **kwargs):
+        raise AssertionError("the alert path reached storage: {0}".format(name))
+
+    method.__name__ = name
+    return method
+
+
+class ExplodingStore(DataStore):
+    """A ``DataStore`` whose every operation fails.
+
+    The alert fold runs where the server already has the environment in hand.
+    Anything that went looking for it again would be reading a file on the
+    event loop, which is the one thing this feature must not do -- and a
+    store that raises turns that from a performance regression nobody
+    measures into a failed test.
+    """
+
+
+# Filled in rather than spelled out: thirteen abstract methods are thirteen
+# places to forget the refusal, and the point is that *nothing* answers.
+for _abstract in sorted(DataStore.__abstractmethods__):
+    setattr(ExplodingStore, _abstract, _refuse(_abstract))
+ExplodingStore.__abstractmethods__ = frozenset()
+
+
+def live_store(env):
+    """A store over one in-memory env, with no storage behind it at all.
+
+    The same shape the server builds for every metadata write: the env is
+    served from memory and the write is somebody else's job.
+    """
+    written = []
+    store = ExperimentStore(
+        ExplodingStore(),
+        env_provider=lambda _eid, _env=env: _env,
+        persist=lambda eid, env_data: written.append(eid),
+    )
+    return store, written
 
 
 # ------------------------------------------------------------------ grammar --
@@ -473,3 +524,189 @@ class TestDescribe:
     def test_the_step_is_left_out_when_there_was_none(self):
         alert = build_alert("loss", "> 2.0")
         assert describe(AlertEvent(alert, 2.5)) == "loss is 2.5, > 2"
+
+
+# ------------------------------------------------------------------ records --
+
+
+class TestExperimentRules:
+    def test_a_metric_may_carry_several_rules_of_different_conditions(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0"))
+        experiment.set_alert(build_alert("loss", "stalled"))
+        assert [a.rule_id for a in experiment.alerts] == [
+            ("loss", ">"),
+            ("loss", "stalled"),
+        ]
+
+    def test_restating_a_rule_replaces_it_and_resets_its_state(self):
+        experiment = Experiment(env_id="run-7")
+        first = build_alert("loss", "> 2.0", for_steps=2)
+        experiment.set_alert(first)
+        feed(first, [2.5, 2.5])
+        experiment.set_alert(build_alert("loss", "> 9.0", for_steps=2))
+        assert len(experiment.alerts) == 1
+        assert experiment.alerts[0].threshold == 9.0
+        assert experiment.alerts[0].streak == 0
+
+    def test_the_number_of_rules_is_bounded(self):
+        experiment = Experiment(env_id="run-7")
+        for index in range(MAX_ALERTS_PER_ENV):
+            experiment.set_alert(build_alert("m{0}".format(index), "nan"))
+        with pytest.raises(ValueError):
+            experiment.set_alert(build_alert("one-too-many", "nan"))
+
+    def test_the_bound_does_not_stop_a_replacement(self):
+        experiment = Experiment(env_id="run-7")
+        for index in range(MAX_ALERTS_PER_ENV):
+            experiment.set_alert(build_alert("m{0}".format(index), "> 1.0"))
+        experiment.set_alert(build_alert("m0", "> 5.0"))
+        assert len(experiment.alerts) == MAX_ALERTS_PER_ENV
+
+    def test_clearing_a_metric_drops_every_rule_on_it(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0"))
+        experiment.set_alert(build_alert("loss", "stalled"))
+        experiment.set_alert(build_alert("acc", "nan"))
+        assert experiment.clear_alerts("loss") == 2
+        assert [a.rule_id for a in experiment.alerts] == [("acc", "nan")]
+
+    def test_clearing_one_condition_leaves_the_others(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0"))
+        experiment.set_alert(build_alert("loss", "stalled"))
+        assert experiment.clear_alerts("loss", ">") == 1
+        assert [a.rule_id for a in experiment.alerts] == [("loss", "stalled")]
+
+    def test_clearing_nothing_removes_nothing(self):
+        experiment = Experiment(env_id="run-7")
+        assert experiment.clear_alerts("loss") == 0
+
+    def test_rules_survive_the_record_round_trip(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        restored = Experiment.from_dict(experiment.to_dict())
+        assert [a.rule_id for a in restored.alerts] == [("loss", ">")]
+
+    def test_an_experiment_recorded_before_alerts_existed_still_loads(self):
+        blob = Experiment(env_id="run-7").to_dict()
+        del blob["alerts"]
+        assert Experiment.from_dict(blob).alerts == []
+
+    def test_get_alerts_can_be_narrowed_to_one_metric(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "nan"))
+        experiment.set_alert(build_alert("acc", "nan"))
+        assert [a.key for a in experiment.get_alerts("acc")] == ["acc"]
+        assert len(experiment.get_alerts()) == 2
+
+    def test_get_alerts_hands_back_a_list_the_caller_cannot_grow(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.get_alerts().append(build_alert("loss", "nan"))
+        assert experiment.alerts == []
+
+
+# ------------------------------------------------------------------- store --
+
+
+class TestStoreEvaluation:
+    def test_logging_a_metric_folds_the_rules_and_reads_no_storage(self):
+        env = {"jsons": {}, "reload": {}}
+        store, written = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0"))
+
+        fired = []
+        store.log_metrics("run-7", {"loss": 2.5}, step=4, fired=fired)
+
+        assert [event.alert.key for event in fired] == ["loss"]
+        assert written == ["run-7", "run-7"]
+
+    def test_the_new_state_is_in_the_blob_the_write_carried(self):
+        # The fold happens between the append and the serialisation on
+        # purpose: state updated afterwards would be lost on the next read.
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0", for_steps=5))
+
+        store.log_metrics("run-7", {"loss": 2.5}, fired=[])
+
+        stored = env["experiment"]["alerts"][0]
+        assert stored["streak"] == 1
+        assert stored["fire_count"] == 0
+
+    def test_a_caller_that_asks_nothing_pays_for_no_fold(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0"))
+
+        store.log_metrics("run-7", {"loss": 2.5})
+
+        assert env["experiment"]["alerts"][0]["streak"] == 0
+
+    def test_a_rule_can_be_set_before_the_run_logs_anything(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        experiment = store.set_alert("run-7", build_alert("loss", "nan"))
+        assert experiment.env_id == "run-7"
+        assert len(env["experiment"]["alerts"]) == 1
+
+    def test_a_finished_run_refuses_a_new_rule(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.log_metrics("run-7", {"loss": 1.0})
+        store.finish_experiment("run-7", STATUS_FINISHED)
+        with pytest.raises(Exception) as caught:
+            store.set_alert("run-7", build_alert("loss", "nan"))
+        assert "terminal" in str(caught.value)
+
+    def test_a_finished_run_still_lets_a_rule_be_cleared(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "nan"))
+        store.log_metrics("run-7", {"loss": 1.0})
+        store.finish_experiment("run-7", STATUS_FINISHED)
+        store.clear_alerts("run-7", "loss")
+        assert env["experiment"]["alerts"] == []
+
+    def test_clearing_a_rule_that_was_never_set_writes_nothing(self):
+        env = {"jsons": {}, "reload": {}}
+        store, written = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "nan"))
+        written.clear()
+        store.clear_alerts("run-7", "accuracy")
+        assert written == []
+
+    def test_clearing_on_an_env_with_no_experiment_is_a_key_error(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        with pytest.raises(KeyError):
+            store.clear_alerts("run-7", "loss")
+
+    def test_get_alerts_answers_from_the_env_it_was_given(self):
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0"))
+        assert [a.rule_id for a in store.get_alerts("run-7")] == [("loss", ">")]
+
+    def test_get_alerts_on_an_env_without_an_experiment_is_empty(self):
+        store, _ = live_store({"jsons": {}, "reload": {}})
+        assert store.get_alerts("run-7") == []
+
+    def test_a_long_history_costs_the_fold_nothing(self):
+        # The fold reads the rule, never the series. A record with ten
+        # thousand observations behind it is the same work as one on its
+        # first step -- which is what lets this run on the event loop.
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0"))
+        store.log_metrics("run-7", [("loss", 1.0)] * 10, fired=[])
+        env["experiment"]["metrics"].extend(
+            {"key": "loss", "value": 1.0, "step": index, "timestamp": 0.0}
+            for index in range(10000)
+        )
+
+        fired = []
+        store.log_metrics("run-7", {"loss": 2.5}, fired=fired)
+
+        assert len(fired) == 1
+        assert math.isclose(fired[0].value, 2.5)
