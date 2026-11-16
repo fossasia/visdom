@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, IO, List, Mapping, Optional, Set, Text, 
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
 _OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
-_SaveTarget = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes], IO[Any]]
+_SaveTarget = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes], IO[bytes]]
 _OptSaveTarget = Optional[_SaveTarget]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
