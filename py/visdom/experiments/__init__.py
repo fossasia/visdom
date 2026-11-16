@@ -8,6 +8,7 @@
 
 from visdom.experiments.alerts import (
     Alert,
+    AlertEvent,
     build_alert,
     MAX_ALERTS_PER_ENV,
 )
@@ -60,6 +61,7 @@ from visdom.experiments.tags import (
 
 __all__ = [
     "Alert",
+    "AlertEvent",
     "And",
     "ComparableExperiment",
     "Comparison",

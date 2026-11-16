@@ -6,7 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Metric alert rules: what one is, and what it will accept.
+"""Metric alert rules, and the folding of observations into them.
 
 An :class:`Alert` is a rule attached to one experiment: a metric name, a
 condition, and the bookkeeping that decides when the condition has held for
@@ -24,11 +24,16 @@ and it reads it with ``int()`` or ``float()`` -- an integer operand stays an
 integer, because ``float()`` would round the very value the rule names;
 nothing here evaluates user text.
 
-Every rule also carries its own running state -- the streak of matching
-observations, the best value seen so far, how many observations have passed
-since -- which is part of the stored record rather than held in memory, so a
-restarted server picks a streak up where it left off. Folding an observation
-into that state is the next piece and lives beside this one.
+Evaluation is a fold, not a query. Every rule carries its own running state
+-- the streak of matching observations, the best value seen so far, how many
+observations have passed since -- so deciding whether an observation fires
+costs the same whether the run has logged ten of them or ten thousand, and
+reads nothing but the rule itself. That is what lets it run on the event loop
+beside the append rather than behind a re-read of the environment.
+
+A rule fires on the observation that *completes* its streak and not again
+until the streak breaks, so a metric that stays over its threshold for an
+hour is one notification rather than one per observation.
 """
 
 from __future__ import annotations
@@ -111,6 +116,26 @@ def _as_number(value: Any) -> Optional[Union[int, float]]:
     if not _is_finite_number(value):
         return None
     return value
+
+
+def _is_diverged(value: Any) -> bool:
+    """Whether ``value`` is an observation that is not a finite number.
+
+    That is a NaN or an infinity -- and ``None``, which is the same thing
+    after a round trip. Standard JSON cannot spell a non-finite number, so
+    ``NanSafeEncoder`` writes one as ``null``: by the time a diverged metric
+    reaches the server it *is* ``None``, and a condition that only matched the
+    float would never fire for any client that went over the wire. The store's
+    own ``_is_absent`` treats the two spellings as one for the same reason.
+
+    A metric logged as a string is not covered: that is a value of the wrong
+    kind rather than arithmetic that went wrong, and it is not absent either.
+    """
+    if value is None:
+        return True
+    if isinstance(value, bool) or not isinstance(value, float):
+        return False
+    return not math.isfinite(value)
 
 
 def _positive_int(value: Any, field_name: str) -> int:
@@ -457,6 +482,15 @@ class Alert:
         )
 
 
+@dataclass(frozen=True)
+class AlertEvent:
+    """A rule that has just fired, and the observation that fired it."""
+
+    alert: Alert
+    value: Any
+    step: Optional[int] = None
+
+
 def build_alert(
     key: Any,
     condition: Any,
@@ -482,4 +516,130 @@ def build_alert(
         goal=goal,
         action=ACTION_TOAST if action is None else action,
         message=message,
+    )
+
+
+def _matches(alert: Alert, value: Any) -> bool:
+    """Whether this observation satisfies ``alert``, folding in its state.
+
+    The stall watch is the one condition that cannot be a pure predicate: it
+    is the series that stalls, not the value, so the best seen so far and the
+    count since it was seen are updated here.
+    """
+    if alert.condition == CONDITION_NAN:
+        return _is_diverged(value)
+
+    number = _as_number(value)
+    if number is None:
+        return False
+
+    if alert.condition == CONDITION_STALLED:
+        improved = alert.best is None or (
+            number < alert.best if alert.goal == GOAL_MIN else number > alert.best
+        )
+        if improved:
+            alert.best = number
+            alert.since_best = 0
+            return False
+        alert.since_best += 1
+        return alert.since_best >= alert.patience
+
+    if alert.condition == CONDITION_GT:
+        return number > alert.threshold
+    if alert.condition == CONDITION_LT:
+        return number < alert.threshold
+    return number == alert.threshold
+
+
+def observe(alert: Alert, value: Any, step: Optional[int] = None) -> bool:
+    """Fold one observation of ``alert.key`` in; return whether it fires.
+
+    The streak is compared to ``for_steps`` for equality rather than for
+    having reached it, which is what makes a rule fire once per unbroken run
+    of matching observations: the streak keeps climbing past the threshold
+    without firing again, and an observation that does not match resets it and
+    re-arms the rule.
+    """
+    if _matches(alert, value):
+        alert.streak += 1
+    else:
+        alert.streak = 0
+        return False
+
+    if alert.streak != alert.for_steps:
+        return False
+
+    alert.fire_count += 1
+    alert.last_fired_at = time.time()
+    alert.last_fired_step = step
+    return True
+
+
+def evaluate(experiment, observations, step: Optional[int] = None) -> list:
+    """Fold ``observations`` into ``experiment``'s rules; return what fired.
+
+    ``observations`` is the ``(key, value)`` sequence just appended to the
+    record -- the values themselves, not the series they were appended to.
+    Nothing here reads the metric history, so a run with a long one costs no
+    more than a run on its first step.
+
+    The rules are mutated in place, so the caller's next write of the
+    experiment carries the new state. That is the only reason this is called
+    before the record is serialised rather than after.
+    """
+    alerts = getattr(experiment, "alerts", None)
+    if not alerts:
+        return []
+
+    watched: dict = {}
+    for alert in alerts:
+        watched.setdefault(alert.key, []).append(alert)
+
+    fired = []
+    for key, value in observations:
+        for alert in watched.get(key, ()):
+            if observe(alert, value, step):
+                fired.append(AlertEvent(alert=alert, value=value, step=step))
+    return fired
+
+
+def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
+    """The notification text for a fired rule.
+
+    A caller's own ``message`` is used verbatim when it set one -- it is the
+    sentence they wanted, and interpolating into it would make the rule's text
+    a format string. Otherwise the message is built from the rule, the
+    observation that fired it and the environment it fired in, because a toast
+    arrives with none of that context around it.
+    """
+    alert = event.alert
+    where = "" if not env_id else "{0}: ".format(env_id)
+    if alert.message:
+        return "{0}{1}".format(where, alert.message)
+
+    at = "" if event.step is None else " at step {0}".format(event.step)
+
+    if alert.condition == CONDITION_NAN:
+        # ``None`` is what a NaN or an infinity looks like after the JSON on
+        # the wire has been through it, and "is None" is not what happened.
+        arrived = "not a finite number" if event.value is None else str(event.value)
+        return "{0}{1} is {2}{3}".format(where, alert.key, arrived, at)
+
+    if alert.condition == CONDITION_STALLED:
+        best = "" if alert.best is None else " (best {0:g})".format(alert.best)
+        return "{0}{1} has not improved in {2} observations{3}{4}".format(
+            where, alert.key, alert.patience, best, at
+        )
+
+    held = (
+        "" if alert.for_steps == 1 else " for {0} observations".format(alert.for_steps)
+    )
+    return "{0}{1} is {2:g}, {3} {4:g}{5}{6}".format(
+        where,
+        alert.key,
+        event.value,
+        alert.condition,
+        alert.threshold,
+        held,
+        at,
     )
