@@ -53,6 +53,7 @@ from visdom.server.handlers.experiments_handler import (
 from visdom.server.handlers.tracking_restore_handler import RestoreRunHandler
 from visdom.server.handlers.web_handlers import (
     ActivityHandler,
+    AlertsHandler,
     EvictHandler,
     CloseHandler,
     CompareHandler,
@@ -307,6 +308,7 @@ class Application(tornado.web.Application):
                 server_state_args,
             ),
             (r"%s/tags" % experiments_url, TagsHandler, server_state_args),
+            (r"%s/alerts" % experiments_url, AlertsHandler, server_state_args),
             (
                 r"%s/user/(.*)" % self.base_url,
                 UserSettingsHandler,
