@@ -1108,14 +1108,34 @@ def test_a_failed_lookup_skips_only_that_envs_experiment_calls(logging_client):
     ]
 
 
-def _replay_lines(client, lines, search=None):
-    """Replay a log holding ``lines`` as written; the sends and the warnings."""
+def _accepts_finish(msg):
+    """The server's reply to a finish it took: the experiment, now finished."""
+    from visdom.utils.server_utils import extract_eid
+
+    return json.dumps(
+        {"env_id": extract_eid(msg), "status": msg["status"], "metrics": []}
+    )
+
+
+def _replay_lines(client, lines, search=None, finish=_accepts_finish):
+    """Replay a log holding ``lines`` as written; the sends and the warnings.
+
+    A finish is answered by ``finish``; every other call is echoed back.
+    """
     with open(client.log_to_filename, "w") as f:
         f.write("".join(lines))
     client.offline = False
     search = search or (lambda query, limit=100: {"experiments": []})
+
+    def answer(msg, endpoint="events", **_):
+        if endpoint == "experiments/log" and msg.get("action") == "finish":
+            return finish(msg)
+        return msg, endpoint
+
     with patch.object(client, "search_experiments", side_effect=search):
-        with echoes(client) as send, patch("visdom.logger.warning") as warning:
+        with patch.object(client, "_send", side_effect=answer) as send, patch(
+            "visdom.logger.warning"
+        ) as warning:
             client.replay_log(client.log_to_filename)
     sent = [(c.args[1], c.args[0].get("eid")) for c in send.call_args_list]
     return sent, [c.args for c in warning.call_args_list]
@@ -1199,10 +1219,11 @@ def test_replay_log_is_quiet_about_a_finished_experiment_it_already_matches(
     warning.assert_not_called()
 
 
-def test_replay_log_sends_nothing_after_a_logged_finish(logging_client):
+@pytest.mark.parametrize("status", ["finished", "failed"])
+def test_replay_log_sends_nothing_after_a_logged_finish(logging_client, status):
     """An offline log can hold calls after finish; the server would refuse them."""
     logging_client.log_metrics({"acc": 0.7}, step=1)
-    logging_client.finish_experiment()
+    logging_client.finish_experiment(status=status)
     logging_client.log_metrics({"acc": 0.8}, step=2)
     logging_client.experiment(name="again")
     sent, warnings_ = _replay_lines(
@@ -1211,6 +1232,58 @@ def test_replay_log_sends_nothing_after_a_logged_finish(logging_client):
     actions = [a for a in sent if a[0] == "experiments/log"]
     assert len(actions) == 2  # the first metric and the finish
     assert [w[1:] for w in warnings_ if "is finished" in w[0]] == [("main", 1)]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        False,
+        "<html><title>409: Conflict</title></html>",
+        '{"error": "readonly"}',
+        "",
+        None,
+        True,
+        json.dumps({"env_id": "main", "status": "running", "metrics": []}),
+        json.dumps({"env_id": "other", "status": "finished", "metrics": []}),
+        json.dumps({"env_id": "main", "status": "finished"}),
+    ],
+    ids=[
+        "connection_lost",
+        "error_page",
+        "refused",
+        "empty",
+        "no_reply",
+        "not_a_reply",
+        "still_running",
+        "other_env",
+        "not_an_experiment",
+    ],
+)
+def test_replay_log_keeps_replaying_after_a_finish_that_failed(logging_client, reply):
+    """Until the server confirms the finish, the experiment is still running."""
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.finish_experiment()
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    logging_client.experiment(name="again")
+    sent, warnings_ = _replay_lines(
+        logging_client,
+        open(logging_client.log_to_filename).readlines(),
+        finish=lambda msg: reply,
+    )
+    actions = [a for a in sent if a[0] == "experiments/log"]
+    assert len(actions) == 4  # both metrics, the finish and the log after it
+    assert not [w for w in warnings_ if "is finished" in w[0]]
+    assert [w[1:] for w in warnings_ if "did not confirm" in w[0]] == [("main",)]
+
+
+def test_offline_replay_does_not_ask_for_a_confirmed_finish(logging_client):
+    """Offline there is no server to confirm anything, so nothing is warned."""
+    logging_client.finish_experiment()
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    with echoes(logging_client) as send, patch("visdom.logger.warning") as warning:
+        logging_client.replay_log(logging_client.log_to_filename)
+    assert len(send.call_args_list) == 2
+    warning.assert_not_called()
 
 
 def test_replay_log_looks_up_many_envs_in_a_few_requests(logging_client):

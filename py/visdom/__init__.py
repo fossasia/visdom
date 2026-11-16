@@ -1014,6 +1014,21 @@ def _stored_record(experiment):
     return metrics, experiment["status"] != "running"
 
 
+def _confirms_finish(reply, eid):
+    """Whether the reply to a replayed finish shows ``eid``'s experiment finished.
+
+    Anything else, such as ``False`` for a lost connection or an error page,
+    leaves the experiment as it was.
+    """
+    if isinstance(reply, (str, bytes)):
+        try:
+            reply = json.loads(reply)
+        except ValueError:
+            return False
+    record = _stored_record(reply)
+    return record is not None and record[1] and reply.get("env_id") == eid
+
+
 def _replay_key(key, value, step):
     """Match key for a metric; keeps ``True`` apart from ``1`` (equal in Python)."""
 
@@ -2160,7 +2175,9 @@ class Visdom(object):
         server without the experiments endpoints, that env's experiment calls
         are skipped with a warning and everything else is still replayed. A
         finished experiment takes no more calls, so logged metrics it lacks are
-        skipped with a warning. A line that is not a whole entry, such as the
+        skipped with a warning. A logged finish counts only once the server
+        confirms it; if it fails, the calls after it are still replayed, with
+        a warning. A line that is not a whole entry, such as the
         last one of a log cut short by a crash, is skipped with a warning.
         """
         from visdom.utils.server_utils import extract_eid
@@ -2203,10 +2220,19 @@ class Visdom(object):
                 msg = self._unreplayed(msg, eid, stored, unsent)
                 if msg is None:
                     continue
-                if msg.get("action") == "finish":
-                    # The server refuses anything after this for the env.
+            reply = self._send(msg, endpoint, from_log=True)
+            if eid is not None and msg.get("action") == "finish" and not self.offline:
+                # Only once the server says so: a finish that did not go
+                # through leaves the experiment running, open to what follows.
+                if _confirms_finish(reply, eid):
                     stored[eid] = (stored[eid][0], True)
-            self._send(msg, endpoint, from_log=True)
+                else:
+                    logger.warning(
+                        "replay_log: the server did not confirm finishing the"
+                        " experiment for %r, so the calls logged after it are"
+                        " still replayed",
+                        eid,
+                    )
         for eid, count in unsent.items():
             logger.warning(
                 "replay_log: the experiment for %r is finished, so %d logged"
