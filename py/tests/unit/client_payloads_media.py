@@ -851,6 +851,61 @@ def test_audio_keeps_short_stereo_as_stereo(capture_send, tensor, frames):
     np.testing.assert_array_equal(_wav(sent), _expected_wav(np.array(frames)))
 
 
+def _clipped_recording(dtype, n=400):
+    """Integer samples as scipy.io.wavfile.read gives them, clipped at the minimum.
+
+    The wave leans negative, so the bottom clips and the top peaks lower.
+    """
+    low, high = np.iinfo(dtype).min, np.iinfo(dtype).max
+    wave = 0.6 * np.sin(np.linspace(0, 40, n)) - 0.5
+    return np.clip(np.round(wave * -float(low)), low, high).astype(dtype)
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _clipped_recording(np.int8),
+        lambda: _clipped_recording(np.int16),
+        lambda: _clipped_recording(np.int32),
+        lambda: _clipped_recording(np.int64),
+        lambda: np.stack([_clipped_recording(np.int16)] * 2, axis=1),
+        lambda: np.stack([_clipped_recording(np.int16)] * 2),
+        lambda: np.full(16, -32768, dtype=np.int16),
+        # float32 would round the fourth sample one step off
+        lambda: np.array(
+            [-(2**31), -436645484, -216901342, -884435299, -1416627832, -957258491],
+            dtype=np.int32,
+        ),
+    ],
+    ids=[
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "int16_stereo",
+        "int16_channels_first",
+        "all_at_minimum",
+        "int32_exact",
+    ],
+)
+def test_audio_plays_integer_samples_like_the_same_samples_as_float(capture_send, make):
+    """np.abs of an int16 -32768 is still -32768, so it can't set the peak."""
+    samples = make()
+    before = samples.copy()
+    as_int = capture_send(lambda v: v.audio(tensor=samples))
+    as_float = capture_send(lambda v: v.audio(tensor=samples.astype(np.float64)))
+    assert content(as_int) == content(as_float)
+    np.testing.assert_array_equal(samples, before)
+
+
+def test_audio_keeps_clipped_int16_samples_at_the_bottom(capture_send):
+    """They used to come out as +32767, a full-scale jump heard as a click."""
+    recording = _clipped_recording(np.int16)
+    played = _wav(capture_send(lambda v: v.audio(tensor=recording)))
+    assert (played[recording == -32768] == -32767).all()
+    assert np.abs(np.diff(played.astype(int))).max() < 2000
+
+
 @pytest.mark.parametrize("extension", ["wav", "mp3", "ogg", "flac"])
 def test_audio_maps_the_file_extension_to_a_mime_type(
     capture_send, tmp_path, extension

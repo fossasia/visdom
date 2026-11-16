@@ -3085,6 +3085,10 @@ class Visdom(object):
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
             ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
+            # Integer samples play like the same samples as float: in int16,
+            # np.abs(-32768) is still -32768, which threw the peak off.
+            if np.issubdtype(tensor.dtype, np.integer):
+                tensor = tensor.astype(np.float64)
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
