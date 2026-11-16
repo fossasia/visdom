@@ -815,3 +815,134 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+# ------------------------------------------------------- alert messages ----
+#
+# The alert endpoint takes the written condition through unparsed: the server
+# is the only thing that reads an operand, so what these assert is the message
+# the client builds and the refusals it makes before building one.
+
+
+def test_set_alert_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.set_alert(
+            "val_loss", "> 2.0", for_steps=3, message="too high"
+        )
+    assert endpoint == "experiments/alerts"
+    assert msg["action"] == "set"
+    assert msg["eid"] == "run-7"
+    assert msg["alert"] == {
+        "metric": "val_loss",
+        "condition": "> 2.0",
+        "for_steps": 3,
+        "patience": None,
+        "goal": None,
+        "action": "toast",
+        "message": "too high",
+    }
+
+
+def test_set_alert_carries_the_stall_knobs_only_when_given(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.set_alert("acc", "stalled", patience=4, goal="max")
+    assert (msg["alert"]["patience"], msg["alert"]["goal"]) == (4, "max")
+
+
+def test_set_alert_env_override(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, _ = offline_client.set_alert("loss", "nan", env="other")
+    assert msg["eid"] == "other"
+
+
+def test_list_alerts_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.list_alerts()
+    assert endpoint == "experiments/alerts"
+    assert msg == {"action": "get", "eid": "run-7"}
+
+
+def test_list_alerts_is_a_question_an_offline_client_cannot_ask(offline_client):
+    # The read methods answer None offline rather than falling through to
+    # _send's short circuit and handing back True, which a caller expecting a
+    # list cannot tell from an answer.
+    offline_client.offline = True
+    assert offline_client.list_alerts() is None
+
+
+def test_clear_alert_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.clear_alert("val_loss", condition="> 2.0")
+    assert endpoint == "experiments/alerts"
+    assert msg["action"] == "clear"
+    assert msg["metric"] == "val_loss"
+    assert msg["condition"] == "> 2.0"
+
+
+def test_clear_alert_without_a_condition_names_every_rule_on_the_metric(
+    offline_client,
+):
+    with echoes(offline_client):
+        msg, _ = offline_client.clear_alert("val_loss")
+    assert msg["condition"] is None
+
+
+def test_set_alert_decodes_the_rule_list(offline_client):
+    rules = [{"key": "val_loss", "condition": ">", "fire_count": 0}]
+    with replies(offline_client, json.dumps(rules)):
+        assert offline_client.set_alert("val_loss", "> 2.0") == rules
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.set_alert("", "> 2.0"),
+        lambda v: v.set_alert("   ", "> 2.0"),
+        lambda v: v.set_alert(7, "> 2.0"),
+        lambda v: v.set_alert("loss", ""),
+        lambda v: v.set_alert("loss", None),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps="3"),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=True),
+        lambda v: v.set_alert("loss", "stalled", patience=1.5),
+        lambda v: v.set_alert("loss", "nan", message=7),
+        lambda v: v.clear_alert(""),
+        lambda v: v.clear_alert("loss", condition=7),
+    ],
+    ids=[
+        "empty_metric",
+        "blank_metric",
+        "metric_not_a_string",
+        "empty_condition",
+        "condition_not_a_string",
+        "for_steps_not_an_int",
+        "for_steps_a_bool",
+        "patience_not_an_int",
+        "message_not_a_string",
+        "clear_empty_metric",
+        "clear_condition_not_a_string",
+    ],
+)
+def test_alert_methods_reject_malformed_input(offline_client, call):
+    # Refused before a request is built: the fixture's transport raises if one
+    # is, so a call that slipped through would fail here rather than quietly
+    # ask the server to validate it.
+    with pytest.raises(TypeError):
+        call(offline_client)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=0),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=-1),
+        lambda v: v.set_alert("loss", "stalled", patience=0),
+    ],
+    ids=["for_steps_zero", "for_steps_negative", "patience_zero"],
+)
+def test_alert_counts_must_be_at_least_one(offline_client, call):
+    with pytest.raises(ValueError):
+        call(offline_client)
