@@ -803,6 +803,145 @@ paths:
         "403":
           description: Tag writes are disabled in readonly mode.
 
+  /experiments/alerts:
+    get:
+      operationId: getMetricAlerts
+      tags: [Experiments]
+      summary: Read the metric alert rules attached to an environment
+      description: >
+        Returns the environment's alert rules as a list, each carrying what it
+        watches and the state behind it — the streak of matching observations,
+        how many times it has fired, and the step it last fired at. Rules are
+        stored inside the existing `Experiment` metadata; no separate rule
+        index or persistence format is maintained. An environment without
+        rules returns an empty list.
+      parameters:
+        - in: query
+          name: eid
+          schema:
+            type: string
+          description: Environment ID. Defaults to `main`.
+      responses:
+        "200":
+          description: The environment's alert rules.
+        "401":
+          description: Authentication required but not provided.
+    post:
+      operationId: updateMetricAlerts
+      tags: [Experiments]
+      summary: Read, define, or drop an environment's metric alert rules
+      description: >
+        With `action: get` (the default) this reads the same data as GET.
+        `action: set` defines one rule from the `alert` object, replacing any
+        rule already watching that metric with that condition; the experiment
+        is created if the environment has none, so a rule can be set before
+        the run logs anything. `action: clear` drops the rules watching
+        `metric`, or only the one whose `condition` is named.
+
+        A rule is evaluated where the metrics it watches arrive, in
+        `POST /experiments/log` with `action: metrics`, and a rule that fires
+        broadcasts a `notification` command to the WebSocket and polling
+        clients watching that environment. Defining a rule on an experiment
+        that has finished is refused with 409: it would never record another
+        observation for the rule to judge. Clearing one is allowed.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [get, set, clear]
+                  default: get
+                eid:
+                  type: string
+                  description: Target environment. Defaults to `main`.
+                metric:
+                  type: string
+                  description: >
+                    Required for `action: clear`. The watched metric whose
+                    rules are to be dropped.
+                condition:
+                  type: string
+                  description: >
+                    Optional for `action: clear`. Which of that metric's rules
+                    to drop, written either as it was set (`"> 2.0"`) or as
+                    the bare condition (`">"`). Absent drops all of them.
+                alert:
+                  type: object
+                  description: >
+                    Required for `action: set`.
+                  required: [metric, condition]
+                  properties:
+                    metric:
+                      type: string
+                      description: The metric to watch, as it is logged.
+                    condition:
+                      type: string
+                      description: >
+                        `"> <number>"`, `"< <number>"`, `"== <number>"`,
+                        `"nan"` (an observation that is not a finite number,
+                        including the `null` a NaN or an infinity becomes on
+                        the wire) or `"stalled"` (no improvement for
+                        `patience` observations). A fixed enum with a numeric
+                        operand, never an expression: the operand is read
+                        with `float()`. `>=` and `<=` are not accepted.
+                    for_steps:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >
+                        Consecutive matching observations before the rule
+                        fires. It fires on the one that completes the streak
+                        and not again until the streak breaks.
+                    patience:
+                      type: integer
+                      minimum: 1
+                      default: 10
+                      nullable: true
+                      description: >
+                        Observations without an improvement before `stalled`
+                        fires. Refused on any other condition.
+                    goal:
+                      type: string
+                      enum: [min, max]
+                      default: min
+                      nullable: true
+                      description: >
+                        Which direction improves, for `stalled`. Refused on
+                        any other condition.
+                    action:
+                      type: string
+                      enum: [toast]
+                      default: toast
+                      description: >
+                        How a firing is delivered. `toast` notifies every
+                        browser watching the environment.
+                    message:
+                      type: string
+                      maxLength: 200
+                      nullable: true
+                      description: >
+                        Replaces the generated notification text.
+      responses:
+        "200":
+          description: The environment's alert rules after the change.
+        "400":
+          description: >
+            Unknown action, a missing or malformed `alert` object, an
+            unparseable condition, or a knob that does not apply to the
+            condition given.
+        "401":
+          description: Authentication required but not provided.
+        "403":
+          description: Alert writes are disabled in readonly mode.
+        "404":
+          description: Clearing a rule on an environment with no experiment.
+        "409":
+          description: Defining a rule on an experiment that has finished.
+
   /experiments/hparams:
     post:
       operationId: createHparamsPane
