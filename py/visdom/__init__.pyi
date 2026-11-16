@@ -22,9 +22,14 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 _ExperimentReply = Mapping[Text, Any]
 _TagMap = Mapping[Text, Text]
 
+# The alert endpoint answers with the environment's rules, one mapping each,
+# rather than with an experiment.
+_AlertList = List[Mapping[Text, Any]]
+
 # The reply of the experiment endpoints that only answer questions. An offline
 # client has no server to ask, so those hand back None rather than a reply.
 _ExperimentQueryReply = Optional[_ExperimentReply]
+_AlertQueryReply = Optional[_AlertList]
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -127,6 +132,21 @@ class Visdom:
         append: bool = ...,
     ) -> _TagMap: ...
     def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
+    def set_alert(
+        self,
+        metric: Text,
+        condition: Text,
+        for_steps: int = ...,
+        patience: Optional[int] = ...,
+        goal: _OptStr = ...,
+        action: Text = ...,
+        message: _OptStr = ...,
+        env: _OptStr = ...,
+    ) -> _AlertList: ...
+    def list_alerts(self, env: _OptStr = ...) -> _AlertQueryReply: ...
+    def clear_alert(
+        self, metric: Text, condition: _OptStr = ..., env: _OptStr = ...
+    ) -> _AlertList: ...
     def search_experiments(
         self,
         query: _OptStr = ...,
