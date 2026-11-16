@@ -6,6 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.experiments.alerts import (
+    Alert,
+    build_alert,
+    MAX_ALERTS_PER_ENV,
+)
 from visdom.experiments.compare import (
     ComparableExperiment,
     SECTIONS,
@@ -54,6 +59,7 @@ from visdom.experiments.tags import (
 )
 
 __all__ = [
+    "Alert",
     "And",
     "ComparableExperiment",
     "Comparison",
@@ -65,6 +71,7 @@ __all__ = [
     "ExperimentLike",
     "ExperimentStore",
     "LiveUpdateQueue",
+    "MAX_ALERTS_PER_ENV",
     "MAX_QUERY_DEPTH",
     "MAX_QUERY_LENGTH",
     "METADATA_KEY",
@@ -78,6 +85,7 @@ __all__ = [
     "Tag",
     "normalize_tags",
     "tags_to_mapping",
+    "build_alert",
     "build_comparison",
     "build_record",
     "flatten_experiments",
