@@ -6,17 +6,18 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Tests for the alert rule: its grammar, and what it will accept.
+"""Tests for the alert rule: its grammar, what it accepts, and the fold.
 
-A rule is three separable things, and this covers the first two. The
-*grammar* is what turns ``"> 2.0"`` into an operator and a number, and is the
-only place user text is read -- so the refusals are as much the subject here
-as the acceptances. The *rule* is what that grammar builds: a dataclass that
-validates every field at construction and round-trips through the dict it is
-stored as.
+A rule is three separable things, and this covers the first two and a half.
+The *grammar* is what turns ``"> 2.0"`` into an operator and a number, and is
+the only place user text is read. The *rule* is what that grammar builds. The
+*fold* is what decides whether an observation fires one, and is a pure
+function of the rule's own state -- never of the metric history, which is the
+property that lets it run on the event loop beside the append.
 
-The third thing, the fold that decides whether an observation fires a rule,
-is tested beside the code that does it.
+The fold is held to that here by feeding it a stand-in record rather than an
+``Experiment``: it reads nothing but ``alerts``, and a test that proved it
+against the real record could not tell the difference.
 """
 
 import pytest
@@ -24,13 +25,25 @@ import pytest
 from visdom.experiments.alerts import (
     ACTION_TOAST,
     Alert,
+    AlertEvent,
     build_alert,
     condition_name,
     DEFAULT_PATIENCE,
+    describe,
+    evaluate,
+    GOAL_MAX,
+    observe,
     parse_condition,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class Record:
+    """The least an ``evaluate`` caller can be: something holding rules."""
+
+    def __init__(self, *alerts):
+        self.alerts = list(alerts)
 
 
 # ------------------------------------------------------------------ grammar --
@@ -204,3 +217,209 @@ class TestAlertValidation:
         restored = Alert.from_dict({"key": "loss", "condition": "nan"})
         assert restored.for_steps == 1
         assert restored.fire_count == 0
+
+
+# --------------------------------------------------------------------- fold --
+
+
+def feed(alert, values, step=None):
+    """Fold ``values`` in one at a time; return the steps at which it fired."""
+    fired = []
+    for index, value in enumerate(values):
+        if observe(alert, value, step if step is not None else index):
+            fired.append(index)
+    return fired
+
+
+class TestThresholdConditions:
+    def test_over_fires_on_the_first_observation_over(self):
+        assert feed(build_alert("loss", "> 2.0"), [1.0, 2.0, 2.5]) == [2]
+
+    def test_under_and_equal(self):
+        assert feed(build_alert("loss", "< 0.5"), [1.0, 0.4]) == [1]
+        assert feed(build_alert("loss", "== 0"), [1.0, 0.0]) == [1]
+
+    def test_the_threshold_itself_does_not_fire_a_strict_comparison(self):
+        assert feed(build_alert("loss", "> 2.0"), [2.0, 2.0, 2.0]) == []
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), None, "2.5", True])
+    def test_a_value_that_is_not_a_finite_number_never_crosses_a_threshold(self, value):
+        # NaN in particular: every comparison against it is false, so a
+        # diverged loss would slip past '> 2.0' unnoticed. That is what the
+        # 'nan' condition is for, and the test below holds it to it.
+        assert feed(build_alert("loss", "> 2.0"), [value]) == []
+
+    def test_an_integer_too_wide_for_a_float_is_refused_rather_than_raising(self):
+        # JSON puts no bound on integer length, so an observation can hold
+        # one. float() and math.isfinite() both raise OverflowError on it,
+        # which would come out of the request that logged the metric.
+        assert feed(build_alert("loss", "> 2.0"), [10**400]) == []
+        assert feed(build_alert("loss", "nan"), [10**400]) == []
+        assert feed(build_alert("loss", "stalled", patience=1), [10**400, 1]) == []
+
+    def test_a_non_numeric_observation_breaks_a_streak(self):
+        alert = build_alert("loss", "> 2.0", for_steps=2)
+        assert feed(alert, [2.5, "paused", 2.5]) == []
+        assert alert.streak == 1
+
+
+class TestNanCondition:
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_every_non_finite_float_fires(self, value):
+        assert feed(build_alert("loss", "nan"), [value]) == [0]
+
+    def test_a_null_fires_too_because_that_is_what_crosses_the_wire(self):
+        # The one that matters: standard JSON cannot spell a non-finite
+        # number, so the client's encoder writes one as null. A condition
+        # that only matched the float would be dead for every real client.
+        assert feed(build_alert("loss", "nan"), [None]) == [0]
+
+    @pytest.mark.parametrize("value", [0.0, -1, 1e308, True])
+    def test_a_number_does_not(self, value):
+        assert feed(build_alert("loss", "nan"), [value]) == []
+
+    @pytest.mark.parametrize("value", ["nan", [float("nan")], {"a": 1}])
+    def test_a_value_of_the_wrong_kind_does_not(self, value):
+        # This condition is about arithmetic going wrong, not about a metric
+        # being logged as something other than a number -- which the store
+        # does not treat as absent either.
+        assert feed(build_alert("loss", "nan"), [value]) == []
+
+
+class TestStalledCondition:
+    def test_it_fires_once_patience_observations_bring_no_improvement(self):
+        alert = build_alert("loss", "stalled", patience=2)
+        assert feed(alert, [1.0, 0.9, 0.9, 0.9]) == [3]
+        assert alert.best == 0.9
+
+    def test_an_improvement_resets_the_count(self):
+        alert = build_alert("loss", "stalled", patience=2)
+        assert feed(alert, [1.0, 1.0, 0.5, 1.0, 1.0, 1.0]) == [4]
+
+    def test_the_goal_decides_which_way_is_better(self):
+        rising = [0.1, 0.2, 0.3, 0.4]
+        assert (
+            feed(build_alert("acc", "stalled", patience=2, goal=GOAL_MAX), rising) == []
+        )
+        assert feed(build_alert("acc", "stalled", patience=2), rising) == [2]
+
+    def test_the_first_observation_is_the_best_so_far_and_never_fires(self):
+        alert = build_alert("loss", "stalled", patience=1)
+        assert feed(alert, [5.0]) == []
+        assert alert.best == 5.0
+
+    def test_a_non_finite_observation_is_neither_a_stall_nor_an_improvement(self):
+        alert = build_alert("loss", "stalled", patience=1)
+        assert feed(alert, [1.0, float("nan"), float("nan")]) == []
+        assert alert.best == 1.0
+        assert alert.since_best == 0
+
+
+class TestDebounce:
+    def test_the_condition_has_to_hold_for_the_whole_streak(self):
+        alert = build_alert("loss", "> 2.0", for_steps=3)
+        assert feed(alert, [2.5, 2.5]) == []
+        assert feed(alert, [2.5]) == [0]
+
+    def test_one_observation_under_the_threshold_starts_the_streak_over(self):
+        alert = build_alert("loss", "> 2.0", for_steps=3)
+        assert feed(alert, [2.5, 2.5, 1.0, 2.5, 2.5]) == []
+        assert alert.streak == 2
+
+    def test_a_rule_fires_once_per_unbroken_run(self):
+        # The whole point of the debounce: a metric that sits over its
+        # threshold for an hour is one notification, not one per step.
+        alert = build_alert("loss", "> 2.0", for_steps=2)
+        assert feed(alert, [2.5] * 10) == [1]
+        assert alert.fire_count == 1
+
+    def test_it_re_arms_once_the_streak_breaks(self):
+        alert = build_alert("loss", "> 2.0", for_steps=2)
+        assert feed(alert, [2.5, 2.5, 1.0, 2.5, 2.5]) == [1, 4]
+        assert alert.fire_count == 2
+
+    def test_the_streak_survives_a_round_trip_through_the_record(self):
+        # The reason the state is stored rather than held in memory: a server
+        # restarted mid-run picks the streak up where it left off instead of
+        # re-arming every rule it reloads.
+        alert = build_alert("loss", "> 2.0", for_steps=3)
+        feed(alert, [2.5, 2.5])
+        restored = Alert.from_dict(alert.to_dict())
+        assert feed(restored, [2.5]) == [0]
+
+    def test_firing_records_where_it_happened(self):
+        alert = build_alert("loss", "> 2.0")
+        assert feed(alert, [2.5], step=120) == [0]
+        assert alert.last_fired_step == 120
+        assert alert.last_fired_at is not None
+
+
+# ---------------------------------------------------------------- evaluate --
+
+
+class TestEvaluate:
+    def test_only_the_metrics_in_the_batch_are_judged(self):
+        experiment = Record(build_alert("loss", "> 2.0"))
+        experiment.alerts.append(build_alert("acc", "< 0.1"))
+        fired = evaluate(experiment, [("loss", 2.5)], step=3)
+        assert [event.alert.key for event in fired] == ["loss"]
+        assert fired[0].value == 2.5 and fired[0].step == 3
+
+    def test_every_rule_on_one_metric_sees_the_observation(self):
+        experiment = Record(build_alert("loss", "> 2.0"))
+        experiment.alerts.append(build_alert("loss", "stalled", patience=1))
+        evaluate(experiment, [("loss", 2.5)])
+        fired = evaluate(experiment, [("loss", 2.5)])
+        assert sorted(event.alert.condition for event in fired) == ["stalled"]
+
+    def test_an_experiment_with_no_rules_is_not_walked(self):
+        assert evaluate(Record(), [("loss", 2.5)]) == []
+
+    def test_a_batch_is_judged_in_the_order_it_was_logged(self):
+        experiment = Record(build_alert("loss", "> 2.0", for_steps=2))
+        fired = evaluate(experiment, [("loss", 2.5), ("loss", 2.5)])
+        assert len(fired) == 1
+
+
+class TestDescribe:
+    def test_a_threshold_message_names_the_value_and_the_rule(self):
+        alert = build_alert("val_loss", "> 2.0", for_steps=3)
+        message = describe(AlertEvent(alert, 2.41, 120), env_id="run-7")
+        assert message == (
+            "run-7: val_loss is 2.41, > 2 for 3 observations at step 120"
+        )
+
+    def test_a_stall_message_names_the_best_seen(self):
+        alert = build_alert("acc", "stalled", patience=10, goal=GOAL_MAX)
+        feed(alert, [0.91])
+        message = describe(AlertEvent(alert, 0.9, 30), env_id="run-7")
+        assert message == (
+            "run-7: acc has not improved in 10 observations (best 0.91) at step 30"
+        )
+
+    def test_a_nan_message_says_what_arrived(self):
+        alert = build_alert("loss", "nan")
+        assert describe(AlertEvent(alert, float("nan"), 12), env_id="run-7") == (
+            "run-7: loss is nan at step 12"
+        )
+
+    def test_a_null_is_described_as_what_it_means(self):
+        # "loss is None" is not what happened: the observation was a NaN or
+        # an infinity, and the wire turned it into null on the way here.
+        alert = build_alert("loss", "nan")
+        assert describe(AlertEvent(alert, None, 12), env_id="run-7") == (
+            "run-7: loss is not a finite number at step 12"
+        )
+
+    def test_a_caller_s_own_message_is_used_verbatim(self):
+        # Never interpolated into: a rule's text would otherwise be a format
+        # string, and one with a stray brace in it would raise from the
+        # notification path rather than from the call that set it.
+        alert = build_alert("loss", "nan", message="the loss diverged {oops}")
+        assert describe(AlertEvent(alert, float("nan")), env_id="run-7") == (
+            "run-7: the loss diverged {oops}"
+        )
+
+    def test_the_step_is_left_out_when_there_was_none(self):
+        alert = build_alert("loss", "> 2.0")
+        assert describe(AlertEvent(alert, 2.5)) == "loss is 2.5, > 2"
