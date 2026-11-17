@@ -28,6 +28,9 @@ def plot_workloads(client, n_points):
     x = np.arange(n_points, dtype=np.float64)
     y = np.sin(x / 50.0)
     labels = np.arange(n_points) % 4 + 1
+    many_labels = np.arange(n_points) % 20 + 1
+    colors = np.arange(n_points) % 256
+    sizes = np.full(n_points, 6.0)
     xy = np.column_stack([x, y])
     return [
         ("line", lambda: client.line(X=x, Y=y, win="bench_line")),
@@ -36,7 +39,24 @@ def plot_workloads(client, n_points):
             lambda: client.line(X=x[:1], Y=y[:1], win="bench_line", update="append"),
         ),
         ("scatter", lambda: client.scatter(X=xy, Y=labels, win="bench_scatter")),
+        (
+            "scatter 20 traces",
+            lambda: client.scatter(X=xy, Y=many_labels, win="bench_scatter20"),
+        ),
+        (
+            "scatter per-point style",
+            lambda: client.scatter(
+                X=xy,
+                Y=labels,
+                win="bench_scatter_style",
+                opts={"markercolor": colors, "markersize": sizes},
+            ),
+        ),
         ("heatmap", lambda: client.heatmap(X=y.reshape(-1, 1), win="bench_heat")),
+        (
+            "dual_axis_lines",
+            lambda: client.dual_axis_lines(X=x, Y1=y, Y2=y, win="bench_dual"),
+        ),
     ]
 
 

@@ -22,13 +22,16 @@ local visdom behaves exactly as before.
 """
 
 import asyncio
+import json
 import os
+import shutil
 import threading
 import time
+import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from visdom.data_model.json_store import JSONStore
+from visdom.data_model.json_store import HASHED_ENV_RE, JSONStore
 from visdom.server.server_state import ServerState
 from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
@@ -218,6 +221,7 @@ class WorkspaceEnvManager:
         None returns the server's own (default) state."""
         if workspace_id is None:
             return self._states[None]
+        workspace_id = canonical_id(workspace_id)
         with self._lock:
             state = self._states.get(workspace_id)
             if state is None:
@@ -245,6 +249,11 @@ class WorkspaceEnvManager:
             return [
                 (wid, state) for wid, state in self._states.items() if wid is not None
             ]
+
+    async def on_scan_thread(self, fn, *args):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, fn, *args
+        )
 
     async def stored_workspaces_off_loop(self):
         return await asyncio.get_running_loop().run_in_executor(
@@ -303,6 +312,106 @@ class WorkspaceEnvManager:
             self._disk_scanned_at = now
             return self._disk_cache
 
+    def loaded_space(self, workspace_id):
+        """The state for a workspace only if something has already built it.
+
+        ``space`` creates one on demand, which is right for a request arriving
+        for that workspace and wrong for a caller sweeping every workspace on
+        disk: building a state writes a fresh ``main`` into a workspace that had
+        been dormant, so a tidy-up would leave a file behind everywhere it went.
+        """
+        with self._lock:
+            return self._states.get(canonical_id(workspace_id))
+
+    def workspace_storage(self, workspace_id):
+        """A store over one workspace's directory, without building its state.
+
+        For acting on the files of a workspace nothing has loaded. A store is
+        just a path, so this costs nothing and keeps the file layout in the one
+        place that knows it.
+        """
+        if self.base_env_path is None:
+            return JSONStore(None)
+        return JSONStore(self._workspace_path(workspace_id))
+
+    def workspace_directory(self, workspace_id):
+        """Where one workspace's files live, or ``None`` for anything else.
+
+        Only a well-formed workspace id names a directory, so an id arriving
+        over the wire cannot point this anywhere else on the disk.
+        """
+        if self.base_env_path is None:
+            return None
+        try:
+            canonical = str(uuid.UUID(str(workspace_id)))
+        except ValueError:
+            return None
+        return os.path.join(self.base_env_path, "workspaces", canonical)
+
+    def forget(self, workspace_id):
+        """Stop holding a workspace, returning the state it had, or ``None``.
+
+        Autosave walks the states held here, so a forgotten workspace is never
+        written out again.
+        """
+        if workspace_id is None:
+            return None
+        with self._lock:
+            state = self._states.pop(canonical_id(workspace_id), None)
+        with self._disk_lock:
+            self._disk_scanned_at = None
+        return state
+
+    def expired_envs(self, workspace_id, older_than_days, keep=("main",)):
+        """Environments in one workspace nobody has written to for that long.
+
+        Read from disk rather than from memory, because a workspace nothing has
+        touched since this process started holds no state here at all, and a
+        dormant workspace is exactly the one with the oldest environments in it.
+
+        ``main`` is kept whatever its age. It is the environment a client writes
+        to when it names none, so removing it makes a workspace look broken
+        rather than tidied.
+        """
+        if self.base_env_path is None or older_than_days is None:
+            return []
+
+        cutoff = time.time() - (older_than_days * 86400)
+        directory = self._workspace_path(workspace_id)
+        expired = []
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            return []
+
+        for entry in entries:
+            if not entry.is_file() or not entry.name.endswith(".json"):
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            if stat.st_mtime >= cutoff:
+                continue
+            eid = _stored_eid(entry)
+            if eid is not None and eid not in keep:
+                expired.append(
+                    {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
+                )
+        return sorted(expired, key=lambda item: item["last_written"])
+
+    def _workspace_path(self, workspace_id):
+        name = canonical_id(workspace_id)
+        root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
+        path = os.path.join(root, name)
+        if (
+            name in ("", ".", "..")
+            or os.path.basename(name) != name
+            or os.path.dirname(os.path.realpath(path)) != root
+        ):
+            raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+        return path
+
     def _create_space(self, workspace_id, slug=None):
         """Build a workspace's state, inheriting the server's configuration.
 
@@ -317,15 +426,7 @@ class WorkspaceEnvManager:
             storage = JSONStore(None)
             env_path = None
         else:
-            name = str(workspace_id)
-            root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
-            env_path = os.path.join(root, name)
-            if (
-                name in ("", ".", "..")
-                or os.path.basename(name) != name
-                or os.path.dirname(os.path.realpath(env_path)) != root
-            ):
-                raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+            env_path = self._workspace_path(workspace_id)
             ensure_dir_exists(env_path)
             storage = JSONStore(env_path)
 
@@ -349,3 +450,48 @@ class WorkspaceEnvManager:
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def canonical_id(workspace_id):
+    if workspace_id is None:
+        return None
+    try:
+        return str(uuid.UUID(str(workspace_id)))
+    except ValueError:
+        return str(workspace_id)
+
+
+def remove_directory(path):
+    """Delete a workspace directory, returning the bytes it held.
+
+    ``None`` when there was no directory, which is the normal answer from every
+    instance but the first one asked, since they share the disk.
+    """
+    if path is None or not os.path.isdir(path):
+        return None
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return None
+    return total
+
+
+def _stored_eid(entry):
+    stem = entry.name[: -len(".json")]
+    if not HASHED_ENV_RE.match(entry.name):
+        return stem
+    try:
+        with open(entry.path, "r", encoding="utf-8") as fn:
+            data = json.load(fn)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("name"), str):
+        return data["name"]
+    return stem
