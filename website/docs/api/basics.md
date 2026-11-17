@@ -118,7 +118,7 @@ Callbacks are called on property value update:
 vis.audio(tensor=None, audiofile=None, win=None, env=None, opts=None)
 ```
 
-This function plays audio. It takes as input the filename of the audio file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or `2xN`) is accepted too.
+This function plays audio. It takes as input the filename or `pathlib.Path` of the audio file (`audiofile` accepts string or `os.PathLike`) or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or `2xN`) is accepted too.
 
 ```python
 # From a file
@@ -147,7 +147,7 @@ Visdom uses scipy to convert tensor inputs to wave files. Some versions of Chrom
 vis.video(tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None)
 ```
 
-This function plays a video. It takes as input the filename of the video `videofile` or a `LxHxWxC`-sized `tensor` containing all the frames of the video as input.
+This function plays a video. It takes as input the filename or `pathlib.Path` of the video `videofile` (`videofile` accepts string or `os.PathLike`) or a `LxHxWxC`-sized `tensor` containing all the frames of the video as input.
 
 ```python
 # From a file

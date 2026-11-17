@@ -237,12 +237,10 @@ from visdom.utils.shared_utils import NanSafeEncoder
 
 
 def loadfile(filename):
+    filename = os.fsdecode(filename)
     assert os.path.isfile(filename), "could not find file %s" % filename
-    fileobj = open(filename, "rb")
-    assert fileobj, "could not open file %s" % filename
-    str = fileobj.read()
-    fileobj.close()
-    return str
+    with open(filename, "rb") as fileobj:
+        return fileobj.read()
 
 
 def _finite_range(ar):
@@ -3056,8 +3054,8 @@ class Visdom(object):
     @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
-        This function plays audio. It takes as input the filename of the audio
-        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        This function plays audio. It takes as input the filename or `pathlib.Path`
+        of the audio file (`os.PathLike` supported) or an `N` tensor containing the waveform (use an `Nx2` matrix for
         stereo audio). The `(channels, N)` layout that torchaudio and librosa
         return (`1xN` or `2xN`) is accepted too. The function does not support
         any plot-specific `opts`.
@@ -3101,6 +3099,7 @@ class Visdom(object):
                 tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
+        audiofile = os.fsdecode(audiofile)
         extension = audiofile.split(".")[-1].lower()
         mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
         mimetype = mimetypes.get(extension)
@@ -3166,8 +3165,8 @@ class Visdom(object):
         self, tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None
     ):
         """
-        This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        This function plays a video. It takes as input the filename or `pathlib.Path`
+        of the video `videofile` (`os.PathLike` supported) or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
         the frames of the video as input, as specified in `dim`. The color
         channels must be in BGR order.
 
@@ -3194,6 +3193,7 @@ class Visdom(object):
         ), "should specify video tensor or file"
 
         if tensor is None:
+            videofile = os.fsdecode(videofile)
             extension = videofile.split(".")[-1].lower()
             mimetypes = {"mp4": "mp4", "ogv": "ogg", "avi": "avi", "webm": "webm"}
             mimetype = mimetypes.get(extension)
