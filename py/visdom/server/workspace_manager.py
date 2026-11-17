@@ -28,6 +28,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+from visdom.server.workspace_env_manager import canonical_id
+
 
 class WorkspaceAuthError(Exception):
     """Raised when the gateway declines or cannot service a resolve request."""
@@ -81,6 +83,22 @@ class WorkspaceManager:
             {"Authorization": f"Bearer {session_token}"},
             workspace_slug,
         )
+
+    def forget(self, workspace_slug):
+        with self._lock:
+            self._cache = {
+                key: value
+                for key, value in self._cache.items()
+                if key[2] != workspace_slug
+            }
+
+    def forget_workspace(self, workspace_id):
+        with self._lock:
+            self._cache = {
+                key: value
+                for key, value in self._cache.items()
+                if canonical_id(value[0]) != canonical_id(workspace_id)
+            }
 
     async def resolve_off_loop(self, method, credential, workspace_slug):
         """Resolve as ``method`` would, without blocking the loop on a cache miss."""

@@ -30,18 +30,21 @@ import base64
 import binascii
 import builtins
 import sys
+import tracemalloc
 import types
 
 import numpy as np
 import pytest
 
 import visdom
+from testutils import recording_array
 from visdom import (
     _assert_opts,
     _axisformat,
     _axisformat3d,
     _dashCheck,
     _decode_binary_arrays,
+    _finite_range,
     _lineColorCheck,
     _markerColorCheck,
     _markerSizeCheck,
@@ -673,6 +676,7 @@ def test_assert_opts_accepts_a_fully_populated_opts():
             "columnnames": ["a"],
             "rownames": ["b"],
             "jpgquality": 100,
+            "compresslevel": 6,
             "opacity": 1,
             "fps": 30,
         }
@@ -704,6 +708,17 @@ def test_assert_opts_accepts_scalar_and_sequence_marker_sizes(markersize):
         ({"rownames": "abc"}, "rownames should be a list"),
         ({"jpgquality": "high"}, "JPG quality should be a number"),
         ({"jpgquality": 101}, "JPG quality should be number between 0 and 100"),
+        ({"compresslevel": 6.5}, "PNG compress level should be an integer"),
+        ({"compresslevel": "fast"}, "PNG compress level should be an integer"),
+        ({"compresslevel": True}, "PNG compress level should be an integer"),
+        (
+            {"compresslevel": 10},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
+        (
+            {"compresslevel": -1},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
         ({"opacity": "half"}, "opacity should be a number"),
         ({"opacity": 1.5}, "opacity should be a number between 0 and 1"),
         ({"fps": "fast"}, "fps should be a number"),
@@ -721,6 +736,8 @@ def test_assert_opts_rejects_bad_input(opts, message):
     [
         {"jpgquality": 100},
         {"jpgquality": 0},
+        {"compresslevel": 0},
+        {"compresslevel": 9},
         {"opacity": 0},
         {"opacity": 1},
         {"fps": 1},
@@ -730,7 +747,9 @@ def test_assert_opts_accepts_the_boundaries(opts):
     """The inclusive ends of each range are valid.
 
     ``opacity=0`` and ``jpgquality=0`` reach no assertion at all, since the
-    guards are ``if opts.get(...)`` and zero is falsy.
+    guards are ``if opts.get(...)`` and zero is falsy. ``compresslevel`` is
+    guarded on ``is not None`` instead, precisely because 0 is a level there
+    rather than an unset value, so its boundary really is validated.
     """
     _assert_opts(opts)
 
@@ -806,6 +825,98 @@ def test_decode_binary_arrays_yields_an_empty_list_for_junk_base64():
     with pytest.raises(binascii.Error):
         base64.b64decode("!!!", validate=True)
     assert _decode_binary_arrays({"dtype": "float64", "bdata": "!!!"}) == []
+
+
+# ----------------------------------------- vectorised per-point validators ----
+#
+# These three helpers used to walk their arguments one element at a time in
+# Python. The tests below pin the grouping and the expansion they produce, and
+# assert that none of them traverses an array element by element any more.
+
+
+def test_marker_color_check_keeps_each_label_s_points_in_input_order():
+    """Grouping by label must not reorder the points inside a label.
+
+    The browser pairs the Nth colour of a trace with the Nth point of that
+    trace, so a grouping that sorted the colours would silently recolour every
+    multi-label scatter.
+    """
+    result = _markerColorCheck(
+        np.array([0, 51, 102, 153, 204]),
+        _points(5),
+        np.array([2, 1, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == [
+        "rgba(0, 0, 255, %s)" % (51 / 255.0),
+        "rgba(0, 0, 255, %s)" % (153 / 255.0),
+    ]
+    assert result[2] == [
+        "rgba(0, 0, 255, 0.0)",
+        "rgba(0, 0, 255, %s)" % (102 / 255.0),
+        "rgba(0, 0, 255, %s)" % (204 / 255.0),
+    ]
+
+
+def test_marker_color_check_groups_a_long_single_label_run():
+    """One label holding every point is the worst case for the grouping.
+
+    Appending to the label's list is linear; rebuilding it per point, as the
+    helper used to, is quadratic -- 20k points took 0.8 s. Correctness is the
+    assertion here, the cost is covered by ``example/benchmarks``.
+    """
+    n = 2000
+    result = _markerColorCheck(
+        np.zeros(n, dtype=int), _points(n), np.ones(n, dtype=int), 1
+    )
+    assert list(result) == [1]
+    assert result[1] == ["rgba(0, 0, 255, 0.0)"] * n
+
+
+def test_marker_color_check_indexes_a_palette_by_label_not_by_position():
+    """A palette shorter than the point count is indexed by ``Y``.
+
+    Label ``k`` takes the ``k - 1``th palette entry for every one of its
+    points, which is what makes a palette distinguishable from a per-point
+    array of the same length.
+    """
+    result = _markerColorCheck(
+        np.array([[255, 0, 0], [0, 255, 0]]),
+        _points(4),
+        np.array([2, 2, 1, 2]),
+        2,
+    )
+    assert result[1] == ["#ff0000"]
+    assert result[2] == ["#00ff00"] * 3
+
+
+def test_marker_color_check_groups_without_indexing_the_label_vector():
+    """The label vector is read once, not once per point per lookup.
+
+    The grouping used to index ``Y`` three times for every point -- once to
+    expand the palette and twice to key the result dict.
+    """
+    labels = recording_array([2, 1, 2], dtype=int)
+    result = _markerColorCheck(np.array([0, 255]), _points(), labels, 2)
+    assert sorted(result) == [1, 2]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_marker_size_check_expands_a_palette_without_indexing_point_by_point():
+    """The per-label expansion is one numpy gather, not a loop over ``Y``."""
+    labels = recording_array([2, 1, 2, 1], dtype=int)
+    result = _markerSizeCheck(np.array([5.0, 10.0]), _points(4), labels)
+    assert result.tolist() == [10.0, 5.0, 10.0, 5.0]
+    assert labels.counts == {"iter": 0, "getitem": 0, "take": 0}
+
+
+def test_assert_opts_validates_a_marker_size_array_without_iterating_it():
+    """``_markerSizeCheck`` already scans the array in numpy; this was a second,
+    slower scan in Python, paid by every plot call that passes per-point sizes.
+    """
+    sizes = recording_array([1.0, 2.0, 3.0])
+    _assert_opts({"markersize": sizes})
+    assert sizes.counts["iter"] == 0
 
 
 # -- tensor unwrapping, without importing torch ------------------------------
@@ -998,3 +1109,108 @@ def test_torch_types_is_still_an_extension_point(monkeypatch):
     monkeypatch.setattr(visdom, "torch_types", [_FakeTensor])
     array = np.arange(3)
     assert _to_numpy(_FakeTensor(array)) is array
+
+
+# ------------------------------------------------------------ _finite_range ----
+
+
+def _reference_finite_range(ar):
+    """What the call sites did before ``_finite_range`` existed."""
+    finite = ar[np.isfinite(ar)]
+    if finite.size > 0:
+        return float(finite.min()), float(finite.max())
+    return None
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [1.0, 2.0, 3.0],
+        [-5.0, 0.0, 5.0],
+        [0.0],
+        [np.nan, 3.0, 1.0],
+        [np.nan],
+        [np.nan, np.nan],
+        [np.inf, 2.0, 1.0],
+        [-np.inf, 2.0, 1.0],
+        [-np.inf, np.inf],
+        [-np.inf, np.inf, 4.0],
+        [np.inf, np.nan],
+        [-np.inf, np.nan],
+        [np.inf, np.nan, -np.inf],
+        [np.inf],
+        [-np.inf],
+        [],
+        [1, 2, 3],
+    ],
+)
+def test_finite_range_matches_the_mask_it_replaces(values):
+    """Every combination of NaN, infinities and emptiness agrees with the mask.
+
+    ``fmin``/``fmax`` skip NaN but *propagate* infinities, which is the one
+    case the fast path cannot answer on its own -- so the interesting rows here
+    are the ones mixing an infinity with a finite value, and the ones holding
+    nothing finite at all.
+    """
+    ar = np.asarray(values, dtype=np.float64)
+    assert _finite_range(ar) == _reference_finite_range(ar)
+
+
+def test_finite_range_reads_a_multidimensional_array_whole():
+    """The reduction is over every axis, as the mask was."""
+    ar = np.arange(24, dtype=np.float64).reshape(2, 3, 4)
+    assert _finite_range(ar) == (0.0, 23.0)
+
+
+def test_finite_range_handles_an_integer_array():
+    """``histogram`` may be handed ints, which have no NaN to skip."""
+    assert _finite_range(np.array([3, -1, 7])) == (-1.0, 7.0)
+
+
+def test_finite_range_returns_floats_not_numpy_scalars():
+    """The call sites compare against Python floats and put them in payloads."""
+    low, high = _finite_range(np.array([1.5, 2.5], dtype=np.float32))
+    assert type(low) is float and type(high) is float
+
+
+def _peak_bytes(call):
+    """Peak allocation during ``call``, numpy's own buffers included."""
+    call()  # first call pays for any one-off import or cache
+    tracemalloc.start()
+    try:
+        call()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        lambda ar: ar[np.isfinite(ar)],
+        lambda ar: ar[~np.isnan(ar)],
+    ],
+    ids=["isfinite", "isnan"],
+)
+def test_finite_range_allocates_nothing_without_an_infinity(spelling):
+    """The whole point is that the common case allocates nothing.
+
+    The thing to protect is the *allocation*, not the absence of one named
+    function: asserting that ``np.isfinite`` goes uncalled would pin a single
+    spelling of the mask, and ``ar[~np.isnan(ar)]`` costs exactly as much while
+    slipping past it. So the budget is measured instead, and each mask spelling
+    is run against the same budget in the same test -- which is what proves the
+    budget is tight enough to catch one rather than merely generous.
+    """
+    ar = np.linspace(0.0, 1.0, 1 << 18)
+    ar[0] = np.nan
+    budget = ar.nbytes // 64  # a bare bool mask is eight times this, uncompacted
+
+    assert _finite_range(ar) == (ar[1], 1.0)
+    assert _peak_bytes(lambda: _finite_range(ar)) < budget
+    assert _peak_bytes(lambda: spelling(ar)) > budget
+
+
+def test_finite_range_falls_back_to_the_mask_for_an_infinity():
+    """The slow path is the only way to get the finite extremes past an inf."""
+    assert _finite_range(np.array([-np.inf, 1.0, 4.0, np.inf])) == (1.0, 4.0)
