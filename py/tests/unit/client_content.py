@@ -860,11 +860,12 @@ def test_replay_log_resends_an_offline_experiment(logging_client):
     ]
 
 
-def _stored(metrics=(), status="running"):
+def _stored(metrics=(), status="running", env="main"):
     """A search reply holding one experiment with ``metrics`` already logged."""
     return {
         "experiments": [
             {
+                "env_id": env,
                 "status": status,
                 "metrics": [
                     {"key": k, "value": v, "step": s, "timestamp": 0.0}
@@ -933,7 +934,9 @@ def test_replay_log_counts_env_id_aliases_together(logging_client):
     covers only one of the two logged copies."""
     for env in ("runs\\a", "runs_a"):
         logging_client.log_metrics({"acc": 0.9}, step=1, env=env)
-    sent, search = _replayed_metrics(logging_client, _stored([("acc", 0.9, 1)]))
+    sent, search = _replayed_metrics(
+        logging_client, _stored([("acc", 0.9, 1)], env="runs_a")
+    )
     assert sent == [("acc", 0.9, 1)]
     assert search.call_count == 1
 
@@ -1077,8 +1080,21 @@ def test_replay_log_keeps_a_bool_metric_apart_from_one(logging_client):
         {"experiments": [{"metrics": []}]},
         {"experiments": [{"status": "running", "metrics": [{"key": "acc"}]}]},
         {"experiments": [{"env_id": "other", "status": "running", "metrics": []}]},
+        {"experiments": [{"status": "running", "metrics": []}]},
+        {"experiments": [{"env_id": 7, "status": "running", "metrics": []}]},
+        {"experiments": [{"env_id": ["main"], "status": "running", "metrics": []}]},
     ],
-    ids=["not-a-list", "two", "no-metrics", "no-status", "bad-metric", "other-env"],
+    ids=[
+        "not-a-list",
+        "two",
+        "no-metrics",
+        "no-status",
+        "bad-metric",
+        "other-env",
+        "no-env-id",
+        "env-id-not-text",
+        "env-id-list",
+    ],
 )
 def test_replay_log_skips_an_experiment_whose_reply_cannot_be_trusted(
     logging_client, reply
@@ -1309,13 +1325,126 @@ def test_replay_log_asks_per_env_when_a_batch_reply_has_no_env_ids(logging_clien
 
     def search(query, limit=100):
         if " OR " in query:
-            return _stored([("acc", 0.5, 1)])  # no env_id: can't be split
-        return _stored([("acc", 0.5, 1)]) if '"a"' in query else {"experiments": []}
+            reply = _stored([("acc", 0.5, 1)])
+            del reply["experiments"][0]["env_id"]  # can't be split by env
+            return reply
+        if '"a"' in query:
+            return _stored([("acc", 0.5, 1)], env="a")
+        return {"experiments": []}
 
     sent, _ = _replay_lines(
         logging_client, open(logging_client.log_to_filename).readlines(), search
     )
     assert sent == [("experiments/log", "b")]
+
+
+def test_replay_log_asks_per_env_when_a_batch_reply_has_a_list_for_an_env_id(
+    logging_client,
+):
+    """A list can't be looked up among the env names; it used to raise."""
+    for env in ("a", "b"):
+        logging_client.log_metrics({"acc": 0.5}, step=1, env=env)
+
+    def search(query, limit=100):
+        if " OR " in query:
+            reply = _stored([("acc", 0.5, 1)])
+            reply["experiments"][0]["env_id"] = ["a"]
+            return reply
+        if '"a"' in query:
+            return _stored([("acc", 0.5, 1)], env="a")
+        return {"experiments": []}
+
+    sent, _ = _replay_lines(
+        logging_client, open(logging_client.log_to_filename).readlines(), search
+    )
+    assert sent == [("experiments/log", "b")]
+
+
+@pytest.mark.parametrize(
+    "eid", [None, 7, ["main"], {"env": "main"}], ids=["none", "number", "list", "dict"]
+)
+def test_replay_log_skips_an_experiment_call_that_names_no_env(logging_client, eid):
+    """Sent anyway, it would land in the replaying client's env, which was
+    never what it was compared with."""
+    nameless = {"action": "metrics", "metrics": {"acc": 0.7}, "step": 1}
+    if eid is not None:
+        nameless["eid"] = eid
+    lines = [
+        _entry("experiments/log", nameless),
+        _entry("experiments/log", dict(nameless, eid="main", step=2)),
+    ]
+    sent, warnings_ = _replay_lines(logging_client, lines)
+    assert sent == [("experiments/log", "main")]
+    assert [w[1] for w in warnings_ if "names no env" in w[0]] == [1]
+
+
+def test_replay_log_holds_one_batch_of_stored_metrics_at_a_time(logging_client):
+    """Each env's stored metrics are read when the replay reaches its batch
+    and dropped after its last call, not all kept until the end."""
+    import weakref
+
+    envs = ["trial_{:03d}".format(n) for n in range(250)]
+    with open(logging_client.log_to_filename, "w") as f:
+        for env in envs:
+            call = {"eid": env, "action": "metrics", "metrics": {"acc": 0.5}, "step": 1}
+            f.write(_entry("experiments/log", call))
+    held = [
+        dict(_stored([("acc", 0.4, 1)])["experiments"][0], env_id=env) for env in envs
+    ]
+    refs, peak = [], []
+
+    def alive():
+        return sum(ref() is not None for ref in refs)
+
+    real = visdom._stored_record
+
+    def tracked(experiment):
+        record = real(experiment)
+        if record is not None:
+            refs.append(weakref.ref(record[0]))
+        return record
+
+    def send(msg, endpoint="events", **_):
+        peak.append(alive())
+
+    logging_client.offline = False
+    with patch.object(visdom, "_stored_record", side_effect=tracked), patch.object(
+        logging_client, "search_experiments", side_effect=_search_like_the_server(held)
+    ), patch.object(logging_client, "_send", side_effect=send):
+        logging_client.replay_log(logging_client.log_to_filename)
+    assert len(peak) == 250
+    assert max(peak) <= visdom.REPLAY_LOOKUP_BATCH
+    assert len(refs) == 250 and alive() == 0
+
+
+def test_replay_log_does_not_hold_the_log_in_memory(logging_client):
+    """A long run's log can be far bigger than what one entry needs."""
+    import os
+    import tracemalloc
+
+    payload = "x" * 50000
+    with open(logging_client.log_to_filename, "w") as f:
+        for n in range(400):
+            f.write(
+                _entry("events", {"eid": "main", "win": "w%d" % n, "data": payload})
+            )
+    size = 400 * len(payload)
+    logging_client.offline = False
+    sends = []
+
+    def send(msg, endpoint="events", **_):
+        sends.append(endpoint)  # a Mock would keep every message alive
+
+    with patch.object(logging_client, "_send", new=send):
+        logging_client.replay_log(os.devnull)  # pays for one-off imports
+        tracemalloc.start()
+        try:
+            logging_client.replay_log(logging_client.log_to_filename)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+    assert len(sends) == 400
+    assert peak < size // 10
 
 
 def _search_like_the_server(records):

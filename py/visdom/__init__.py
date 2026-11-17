@@ -1014,6 +1014,12 @@ def _stored_record(experiment):
     return metrics, experiment["status"] != "running"
 
 
+def _env_of(record):
+    """The env a stored experiment record names, or None if it names none."""
+    env = record.get("env_id") if isinstance(record, dict) else None
+    return env if isinstance(env, str) else None
+
+
 def _confirms_finish(reply, eid):
     """Whether the reply to a replayed finish shows ``eid``'s experiment finished.
 
@@ -2275,11 +2281,50 @@ class Visdom(object):
         skipped with a warning. A logged finish counts only once the server
         confirms it; if it fails, the calls after it are still replayed, with
         a warning. A line that is not a whole entry, such as the
-        last one of a log cut short by a crash, is skipped with a warning.
+        last one of a log cut short by a crash, is skipped with a warning, and
+        so is an experiment call that names no env.
+
+        The log is read twice rather than held in memory, and each env's stored
+        metrics are read just before its first call and dropped after its last.
         """
         from visdom.utils.server_utils import extract_eid
 
-        entries = []
+        # The log is read twice instead of held: first for the envs it names
+        # and the line of each one's last experiment call.
+        last = {}
+        for number, endpoint, msg in self._log_entries(log_filename, warn=True):
+            if endpoint == "experiments/log":
+                last[extract_eid(msg)] = number
+        pending = {
+            eid: batch for batch in self._lookup_batches(list(last)) for eid in batch
+        }
+        stored, unsent = {}, Counter()
+        for number, endpoint, msg in self._log_entries(log_filename):
+            if endpoint != "experiments/log":
+                self._send(msg, endpoint, from_log=True)
+                continue
+            eid = extract_eid(msg)
+            if eid not in stored:
+                # Read before any of its calls is sent, so the replay's own
+                # sends can't change what it is compared against.
+                self._read_stored(pending.get(eid, [eid]), stored, pending)
+            self._replay_experiment_call(msg, eid, stored, unsent)
+            if last.get(eid) == number:
+                del stored[eid]  # nothing left to compare it with
+        for eid, count in unsent.items():
+            logger.warning(
+                "replay_log: the experiment for %r is finished, so %d logged"
+                " metric(s) it does not hold were not replayed",
+                eid,
+                count,
+            )
+
+    def _log_entries(self, log_filename, warn=False):
+        """``(line number, endpoint, msg)`` for each whole entry of a log.
+
+        An experiment call that names no env is left out too: replayed, it
+        would land in this client's env, not the one it was logged for.
+        """
         with open(log_filename) as f:
             for number, line in enumerate(f, 1):
                 if not line.strip():
@@ -2289,54 +2334,58 @@ class Visdom(object):
                     if not isinstance(endpoint, str) or not isinstance(msg, dict):
                         raise ValueError
                 except (ValueError, TypeError):
-                    logger.warning(
-                        "replay_log: skipping line %d of %s, which is not a whole"
-                        " entry",
-                        number,
-                        log_filename,
-                    )
+                    if warn:
+                        logger.warning(
+                            "replay_log: skipping line %d of %s, which is not a"
+                            " whole entry",
+                            number,
+                            log_filename,
+                        )
                     continue
-                # The id the server stores, so aliases share one stored record.
-                eid = extract_eid(msg) if endpoint == "experiments/log" else None
-                entries.append((endpoint, msg, eid))
-        # Read every stored experiment first, so later sends can't change what
-        # is compared against.
-        eids = list(dict.fromkeys(eid for _, _, eid in entries if eid is not None))
-        stored = self._stored_experiments(eids)
-        for eid in eids:
-            if stored[eid] is None:
+                if endpoint == "experiments/log" and not isinstance(
+                    msg.get("eid"), str
+                ):
+                    if warn:
+                        logger.warning(
+                            "replay_log: skipping line %d of %s, an experiment"
+                            " call that names no env",
+                            number,
+                            log_filename,
+                        )
+                    continue
+                yield number, endpoint, msg
+
+    def _read_stored(self, batch, stored, pending):
+        """Look up the envs of ``batch`` and file what the server holds."""
+        for eid, record in self._stored_batch(batch).items():
+            pending.pop(eid, None)
+            stored[eid] = record
+            if record is None:
                 logger.warning(
                     "replay_log: could not read the stored experiment for %r;"
                     " skipping its experiment calls so no metric is recorded"
                     " twice",
                     eid,
                 )
-        unsent = Counter()
-        for endpoint, msg, eid in entries:
-            if eid is not None:
-                msg = self._unreplayed(msg, eid, stored, unsent)
-                if msg is None:
-                    continue
-            reply = self._send(msg, endpoint, from_log=True)
-            if eid is not None and msg.get("action") == "finish" and not self.offline:
-                # Only once the server says so: a finish that did not go
-                # through leaves the experiment running, open to what follows.
-                if _confirms_finish(reply, eid):
-                    stored[eid] = (stored[eid][0], True)
-                else:
-                    logger.warning(
-                        "replay_log: the server did not confirm finishing the"
-                        " experiment for %r, so the calls logged after it are"
-                        " still replayed",
-                        eid,
-                    )
-        for eid, count in unsent.items():
-            logger.warning(
-                "replay_log: the experiment for %r is finished, so %d logged"
-                " metric(s) it does not hold were not replayed",
-                eid,
-                count,
-            )
+
+    def _replay_experiment_call(self, msg, eid, stored, unsent):
+        """Send the part of a logged experiment call the server lacks."""
+        msg = self._unreplayed(msg, eid, stored, unsent)
+        if msg is None:
+            return
+        reply = self._send(msg, "experiments/log", from_log=True)
+        if msg.get("action") == "finish" and not self.offline:
+            # Only once the server says so: a finish that did not go
+            # through leaves the experiment running, open to what follows.
+            if _confirms_finish(reply, eid):
+                stored[eid] = (stored[eid][0], True)
+            else:
+                logger.warning(
+                    "replay_log: the server did not confirm finishing the"
+                    " experiment for %r, so the calls logged after it are"
+                    " still replayed",
+                    eid,
+                )
 
     def _unreplayed(self, msg, eid, stored, unsent):
         """The part of a logged experiment call the server does not hold yet.
@@ -2377,22 +2426,21 @@ class Visdom(object):
             return None
         return dict(msg, metrics=missing) if missing else None
 
-    def _stored_experiments(self, eids):
-        """``_stored_experiment`` for each of ``eids``, several per request.
+    def _lookup_batches(self, eids):
+        """``eids`` grouped for ``_stored_batch``, several per search.
 
         A log can name thousands of envs (one per Optuna trial, say), so they
         are asked for in batches joined with OR, within the query length limit
-        and the server's default page size. A batch that fails, or whose reply
-        can't be split by ``env_id``, is asked for again one env at a time, so
-        one env the server can't answer for doesn't cost the rest.
+        and the server's default page size. An id too long to name in a query,
+        or any id while offline, goes on its own.
         """
         from visdom.experiments.query import MAX_QUERY_LENGTH
 
-        result, batches, batch, length = {}, [], [], 0
+        batches, batch, length = [], [], 0
         for eid in eids:
             term = "env_id = " + _query_string(eid)
             if len(term) > MAX_QUERY_LENGTH or self.offline:
-                result[eid] = self._stored_experiment(eid)
+                batches.append([eid])
                 continue
             if batch and (
                 len(batch) == REPLAY_LOOKUP_BATCH
@@ -2401,29 +2449,32 @@ class Visdom(object):
                 batches.append(batch)
                 batch, length = [], 0
             length += len(term) + (len(" OR ") if batch else 0)
-            batch.append((eid, term))
+            batch.append(eid)
         if batch:
             batches.append(batch)
-        for batch in batches:
-            if len(batch) == 1:
-                result[batch[0][0]] = self._stored_experiment(batch[0][0])
-                continue
-            found = self._search_stored(" OR ".join(term for _, term in batch))
-            names = {eid for eid, _ in batch}
-            if found is not None and all(
-                isinstance(e, dict) and e.get("env_id") in names for e in found
-            ):
-                for eid in names:
-                    mine = [e for e in found if e["env_id"] == eid]
-                    if len(mine) > 1:
-                        result[eid] = None
-                    else:
-                        result[eid] = (
-                            _stored_record(mine[0]) if mine else (Counter(), False)
-                        )
+        return batches
+
+    def _stored_batch(self, batch):
+        """``_stored_experiment`` for each env of ``batch``, in one search.
+
+        A batch that fails, or whose reply can't be split by ``env_id``, is
+        asked for again one env at a time, so one env the server can't answer
+        for doesn't cost the rest.
+        """
+        if len(batch) == 1:
+            return {batch[0]: self._stored_experiment(batch[0])}
+        found = self._search_stored(
+            " OR ".join("env_id = " + _query_string(eid) for eid in batch)
+        )
+        if found is None or not all(_env_of(e) in batch for e in found):
+            return {eid: self._stored_experiment(eid) for eid in batch}
+        result = {}
+        for eid in batch:
+            mine = [e for e in found if e["env_id"] == eid]
+            if len(mine) > 1:
+                result[eid] = None
             else:
-                for eid, _ in batch:
-                    result[eid] = self._stored_experiment(eid)
+                result[eid] = _stored_record(mine[0]) if mine else (Counter(), False)
         return result
 
     def _search_stored(self, query):
@@ -2454,11 +2505,10 @@ class Visdom(object):
             # Too long to name in full; narrow by a prefix and match below.
             query = "env_id contains " + _query_string(eid[: MAX_QUERY_LENGTH // 3])
         found = self._search_stored(query)
-        if found is None:
+        if found is None or any(_env_of(e) is None for e in found):
+            # A record that names no env can't be told apart from this one's.
             return None
-        matches = [
-            e for e in found if not isinstance(e, dict) or e.get("env_id", eid) == eid
-        ]
+        matches = [e for e in found if e["env_id"] == eid]
         if len(matches) > 1 or (exact and len(matches) != len(found)):
             return None
         return _stored_record(matches[0]) if matches else (Counter(), False)
