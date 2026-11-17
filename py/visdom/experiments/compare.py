@@ -81,7 +81,7 @@ def _same_value(a: Any, b: Any) -> bool:
     treat a bool as a number. Looser than ``==`` about NaN, which is never equal
     to itself: a metric that is NaN in every run agrees across them, and calling
     that a difference would bury the real ones. Apply these rules inside
-    JSON lists and dictionaries with an iterator stack, so deeply nested settings
+    lists, tuples, sets and dictionaries with an iterator stack, so deeply nested settings
     follow the same policy without consuming the Python call stack.
     """
     comparisons = [iter(((a, b),))]
@@ -93,10 +93,23 @@ def _same_value(a: Any, b: Any) -> bool:
         a, b = pair
         if isinstance(a, bool) != isinstance(b, bool):
             return False
-        if isinstance(a, list) and isinstance(b, list):
+        if (isinstance(a, list) and isinstance(b, list)) or (
+            isinstance(a, tuple) and isinstance(b, tuple)
+        ):
             if len(a) != len(b):
                 return False
             comparisons.append(zip(a, b))
+        elif isinstance(a, (set, frozenset)) and isinstance(b, (set, frozenset)):
+            if len(a) != len(b):
+                return False
+            unmatched = list(b)
+            for item in a:
+                for index, candidate in enumerate(unmatched):
+                    if _same_value(item, candidate):
+                        unmatched.pop(index)
+                        break
+                else:
+                    return False
         elif isinstance(a, dict) and isinstance(b, dict):
             if a.keys() != b.keys():
                 return False

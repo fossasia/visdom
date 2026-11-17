@@ -19,6 +19,10 @@ pytestmark = pytest.mark.unit
     "left,right",
     [
         ([True], [1]),
+        ((1, True), (1, 1)),
+        ({True}, {1}),
+        ({(1, True)}, {(1, 1)}),
+        ({"nested": ({False},)}, {"nested": ({0},)}),
         ({"enabled": False}, {"enabled": 0}),
         ({"layers": [{"enabled": True}]}, {"layers": [{"enabled": 1}]}),
         ([{"options": [False]}], [{"options": [0.0]}]),
@@ -42,6 +46,9 @@ def test_nested_boolean_settings_are_differing(left, right):
     [
         ({"layers": [1, 2.0], "enabled": True}, {"enabled": True, "layers": [1.0, 2]}),
         ([], []),
+        ((1, 2.0), (1.0, 2)),
+        ({1, 2.0}, {2, 1.0}),
+        ({(1, True), (2, False)}, {(2.0, False), (1.0, True)}),
         ({"value": [float("nan")]}, {"value": [float("nan")]}),
     ],
 )
