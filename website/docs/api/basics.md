@@ -163,7 +163,7 @@ vis.video(tensor=frames)
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `opts.fps` | `25` | FPS for the video (`integer` > 0) |
+| `opts.fps` | `25` | FPS for the video (`number` > 0, e.g. 30 or 29.97) |
 
 :::note
 Using `tensor` input requires that ffmpeg is installed and working. Your ability to play video may depend on the browser you use: your browser has to support the Theano codec in an OGG container (Chrome supports this).
