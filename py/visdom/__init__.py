@@ -31,7 +31,7 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 import logging
 import warnings
 import time
@@ -243,6 +243,30 @@ def loadfile(filename):
     str = fileobj.read()
     fileobj.close()
     return str
+
+
+def _finite_range(ar):
+    """Smallest and largest finite value in `ar`, or `None` if it has none.
+
+    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
+    materialise: the fancy index builds a compacted copy of every finite
+    element just to read two numbers off it, which on an image-sized array is
+    a second full array per call. `fmin`/`fmax` skip NaN the same way and
+    reduce in place, so only an infinity -- which they propagate rather than
+    skip -- needs the mask at all.
+    """
+    if ar.size == 0:
+        return None
+    ar_min = np.fmin.reduce(ar, axis=None)
+    ar_max = np.fmax.reduce(ar, axis=None)
+    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
+        return None
+    if np.isneginf(ar_min) or np.isposinf(ar_max):
+        finite = ar[np.isfinite(ar)]
+        if finite.size == 0:
+            return None
+        return float(finite.min()), float(finite.max())
+    return float(ar_min), float(ar_max)
 
 
 def _title2str(opts):
@@ -562,6 +586,19 @@ def _assert_opts(opts):
         assert (
             opts.get("jpgquality") > 0 and opts.get("jpgquality") <= 100
         ), "JPG quality should be number between 0 and 100"
+
+    # Unlike jpgquality, this one is guarded on None rather than on being
+    # truthy: 0 is a documented level (store, no compression), not an unset
+    # value.
+    if opts.get("compresslevel") is not None:
+        assert isinstance(
+            opts.get("compresslevel"), numbers.Integral
+        ) and not isinstance(
+            opts.get("compresslevel"), bool
+        ), "PNG compress level should be an integer"
+        assert (
+            0 <= opts.get("compresslevel") <= 9
+        ), "PNG compress level should be an integer between 0 and 9"
 
     if opts.get("opacity"):
         assert isnum(opts.get("opacity")), "opacity should be a number"
@@ -923,6 +960,103 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _without_userinfo(url):
+    """``url`` with any ``user:password@`` dropped from its host.
+
+    ``show()`` puts the server URL in markup a notebook saves and people
+    share, and ``__repr__`` prints it. A password typed into ``server=`` has
+    no business in either.
+    """
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = "[{0}]".format(host)
+    if parsed.port is not None:
+        host = "{0}:{1}".format(host, parsed.port)
+    return urlunparse((parsed.scheme, host, "", "", "", ""))
+
+
+def _url_eid(eid):
+    """An env id as the server keys it, for building a dashboard URL.
+
+    ``escape_eid`` is the server's own choke point for this, but it lives in
+    ``visdom.utils.server_utils`` and the client deliberately does not import
+    the server side; ``Visdom.__init__`` inlines the same replacements for
+    ``self.env`` for the same reason. Whitespace is stripped here because the
+    server strips it too, so ``"run 7 "`` is keyed -- and routed -- as
+    ``"run 7"``.
+    """
+    return (
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
+    )
+
+
+def _embed_size(value):
+    """An iframe dimension as a CSS length.
+
+    A number is pixels, matching the ``height=600`` default, and has to be
+    finite and positive; a string is the CSS the caller wants, such as
+    ``"100%"`` or ``"40vh"``. It has to be a length and nothing else -- these end up in a ``style`` attribute, and a
+    second declaration smuggled in after a semicolon would be styling the
+    notebook rather than sizing the frame.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        text = str(value).strip()
+        if not text or ";" in text:
+            raise ValueError(
+                "iframe dimensions must be a CSS length, got {0!r}".format(value)
+            )
+        return text
+    if not math.isfinite(value):
+        # nan and inf are Numbers that survive the comparison below -- nan
+        # fails every comparison, inf passes -- and would format into a
+        # 'nanpx' / 'infpx' length the browser drops on the floor.
+        raise ValueError("iframe dimensions must be finite, got {0!r}".format(value))
+    if value <= 0:
+        raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
+    if isinstance(value, numbers.Integral):
+        return "{0}px".format(int(value))
+    return "{0}px".format(value)
+
+
+class _NotebookEmbed:
+    """A dashboard URL that renders as an iframe in a notebook cell.
+
+    Jupyter, VS Code and every other notebook frontend call ``_repr_html_``
+    when the displayed object has one, so nothing here imports IPython. A
+    terminal has
+    no such hook and falls back to ``__repr__``, which is the URL itself rather
+    than a wall of markup.
+    """
+
+    def __init__(self, url, height=600, width="100%", note=None):
+        self.url = url
+        # Normalized up front so a bad dimension raises from the show() call
+        # that passed it, rather than later from whatever displays the result.
+        self.height = _embed_size(height)
+        self.width = _embed_size(width)
+        self.note = note
+
+    def __repr__(self):
+        return self.note if self.url is None else self.url
+
+    def _repr_html_(self):
+        if self.url is None:
+            return "<p>{0}</p>".format(html.escape(self.note))
+        # The sizes go in the style, not in width=/height=: the HTML attributes
+        # are a legacy length that reads '40vh' as 40 pixels and drops the unit.
+        style = "width:{0};height:{1};border:0".format(self.width, self.height)
+        return '<iframe src="{0}" style="{1}" frameborder="0"></iframe>'.format(
+            html.escape(self.url, quote=True), html.escape(style, quote=True)
+        )
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -994,6 +1128,8 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self.use_preflight_checks = use_preflight_checks
+        # Optional hook used by tracked clients to capture replay messages.
+        self._on_send = None
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1474,6 +1610,9 @@ class Visdom(object):
 
         if not from_log:
             self._log(msg, endpoint)
+
+        if self._on_send is not None:
+            self._on_send(msg, endpoint)
 
         if self.offline:
             # If offline, don't even try to post
@@ -2047,6 +2186,102 @@ class Visdom(object):
             endpoint, msg = json.loads(entry)
             self._send(msg, endpoint, from_log=True)
 
+    def restore_run(self, json_path, env=None, delay=None):
+        """Replay plots from a run recorded with ``record_data=True``.
+
+        ``json_path`` names the run's metadata file; its sibling
+        ``.events.jsonl`` file must also exist. Plots are sent in order to
+        ``env`` (or the recorded environment by default). Set ``delay`` to
+        wait between calls.
+
+        Returns a summary with the run details and replay results. Raises
+        ``RunRestoreError`` if the files contain no replayable calls and
+        ``ValueError`` if ``delay`` is invalid.
+        """
+        from visdom.tracking.restore import restore_run
+
+        return restore_run(json_path, self, env=env, delay=delay)
+
+    # Notebooks
+
+    def _dashboard_url(self, env=None):
+        """The browser URL for one of this server's environments.
+
+        ``env`` defaults to this client's own environment, as it does
+        everywhere else in the API. The server renders the dashboard at
+        ``/env/<eid>`` as well as at its root, so the URL deep-links straight
+        to that environment.
+        """
+        base = "{0}:{1}{2}".format(
+            _without_userinfo(self.server), self.port, self.base_url
+        )
+        eid = _url_eid(self.env if env is None else env)
+        return "{0}/env/{1}".format(base, quote(eid, safe=""))
+
+    def _repr_html_(self):
+        return self.show()._repr_html_()
+
+    def show(self, env=None, height=600, width="100%"):
+        """Embed the dashboard in a notebook cell.
+
+        Returns an object that renders as an iframe pointing at this client's
+        server, so displaying it in Jupyter or VS Code shows the live
+        dashboard where the plotting code is. A bare ``vis`` in a cell does
+        the same thing, by way of ``_repr_html_``.
+
+        Args:
+            env : str, optional
+                Environment to open; defaults to this client's own.
+            height : number or str, optional
+                Iframe height. A number is pixels; a string is a CSS length
+                such as ``"40vh"``. Both are applied as CSS.
+            width : number or str, optional
+                Iframe width. Defaults to the full cell width.
+
+        Nothing here imports IPython -- a notebook calls ``_repr_html_``
+        itself -- so this works without any extra dependency. Outside a
+        notebook the object prints the URL instead.
+
+        The environment has to exist on the server, which plotting into it is
+        what does: the dashboard answers ``404`` for an env it has never seen,
+        and that is what the frame would show.
+
+        The URL is built from this client's own ``server``, ``port`` and
+        ``base_url``, so it has to be an address the *browser* can reach --
+        which is the kernel's own machine when the notebook runs where you
+        are. A kernel somewhere else (a remote host, or a hosted notebook
+        such as Colab or Kaggle) serves its frontend from another origin, so
+        ``localhost`` there names the browser's machine and the frame stays
+        blank; that needs a port forward or a reverse proxy, and the client
+        pointed at that address.
+
+        Three things the embed cannot do anything about: a server started with
+        ``-enable_login`` serves the login form inside the frame, a JupyterLab
+        reached over HTTPS blocks a plain-HTTP frame to another port, and a
+        workspace-scoped client gets the server's default view because a
+        browser frame cannot send the header that selects a workspace.
+        """
+        if self.offline:
+            return _NotebookEmbed(
+                None,
+                height,
+                width,
+                note=(
+                    "This Visdom client is offline, so there is no server to "
+                    "embed. Point a client at a running server to see its "
+                    "dashboard here."
+                ),
+            )
+        if self.workspace:
+            logger.warning(
+                "This client is scoped to workspace %r, but a browser frame "
+                "cannot carry the X-Visdom-Workspace header that scoping "
+                "needs. The embedded dashboard shows the server's default "
+                "view, not this workspace.",
+                self.workspace,
+            )
+        return _NotebookEmbed(self._dashboard_url(env), height, width)
+
     # Content
 
     def text(self, text, win=None, env=None, opts=None, append=False):
@@ -2458,6 +2693,7 @@ class Visdom(object):
 
         - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
@@ -2465,9 +2701,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2519,6 +2755,8 @@ class Visdom(object):
         if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -2591,6 +2829,7 @@ class Visdom(object):
         - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
         - `opts.caption`:  caption below the image (`string`; optional)
         - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
         """
         opts = {} if opts is None else dict(opts)
@@ -2601,9 +2840,9 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2688,6 +2927,8 @@ class Visdom(object):
         if jpgquality is not None:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
         im.save(buf, format=image_type.upper(), **imsave_args)
         b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
 
@@ -2771,18 +3012,44 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
-        k = 0
-        for y in range(ymaps):
-            for x in range(xmaps):
-                if k >= nmaps:
-                    break
-                h_start = y * height + offset
-                h_end = h_start + tensor.shape[2]
-                w_start = x * width + offset
-                w_end = w_start + tensor.shape[3]
-                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
-                k += 1
+        # The grid has always been float64, which `image()` then takes through
+        # its float branch: eight bytes a pixel for what is usually a uint8
+        # batch, plus that branch's full-size temporaries. Staying in uint8 is
+        # only *identical* while that branch does no scaling, and it has two
+        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
+        # which includes the fill value of 1 itself -- so a uint8 batch holding
+        # nothing above 1 keeps the float grid, and with it the stretch pinned
+        # by `test_images_padding_colour_follows_the_input_dtype`. And
+        # `opts.normalize` asks for the min-max stretch explicitly, which the
+        # branch is the only thing that implements: a uint8 grid never reaches
+        # it, so the option would silently do nothing. Deciding this costs one
+        # C-speed pass over the batch and saves a copy of it at eight times the
+        # width.
+        normalize = opts is not None and opts.get("normalize", False)
+        grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+            grid = np.ones(grid_shape, dtype=np.uint8)
+        else:
+            grid = np.ones(grid_shape)
+
+        # One strided write per row of cells instead of one per tile: the grid
+        # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
+        # tile's slot at once, and a view is all of reshape/transpose/slice, so
+        # assigning into it writes straight through to `grid`.
+        cells = grid.reshape(tensor.shape[1], ymaps, height, xmaps, width).transpose(
+            1, 3, 0, 2, 4
+        )
+        slots = cells[
+            ..., offset : offset + tensor.shape[2], offset : offset + tensor.shape[3]
+        ]
+        full_rows = nmaps // xmaps
+        if full_rows:
+            slots[:full_rows] = tensor[: full_rows * xmaps].reshape(
+                full_rows, xmaps, *tensor.shape[1:]
+            )
+        remainder = nmaps - full_rows * xmaps
+        if remainder:
+            slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
         return self.image(grid, win, env, opts)
 
@@ -2791,7 +3058,9 @@ class Visdom(object):
         """
         This function plays audio. It takes as input the filename of the audio
         file or an `N` tensor containing the waveform (use an `Nx2` matrix for
-        stereo audio). The function does not support any plot-specific `opts`.
+        stereo audio). The `(channels, N)` layout that torchaudio and librosa
+        return (`1xN` or `2xN`) is accepted too. The function does not support
+        any plot-specific `opts`.
 
         The following `opts` are supported:
 
@@ -2806,9 +3075,16 @@ class Visdom(object):
             tensor is not None or audiofile is not None
         ), "should specify audio tensor or file"
         if tensor is not None:
+            # torchaudio and librosa give (channels, N); scipy writes (N, channels).
+            # (N, 2) already is stereo, so only other shapes are turned around.
+            if tensor.ndim == 2 and tensor.shape[1] != 2:
+                if tensor.shape[0] == 2:
+                    tensor = tensor.T
+                elif 1 in tensor.shape:
+                    tensor = tensor.reshape(-1)
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
-            ), "tensor should be 1D vector or 2D matrix with 2 columns"
+            ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
@@ -4075,9 +4351,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        finite = X[np.isfinite(X)]
-        if finite.size > 0:
-            minx, maxx = float(finite.min()), float(finite.max())
+        finite_range = _finite_range(X)
+        if finite_range is not None:
+            minx, maxx = finite_range
         else:
             minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]

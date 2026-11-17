@@ -47,6 +47,7 @@ from visdom import (
     _Event,
     _EventHandler,
     _ExperimentQueryReply,
+    _ExperimentReply,
     _OptOps,
     _OptStr,
     _SendReturn,
@@ -322,6 +323,9 @@ class AsyncVisdom:
         self, timeout_seconds: Union[int, float] = ...
     ) -> bool: ...
     async def replay_log(self, log_filename: Text) -> None: ...
+    async def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
     async def text(
         self,
         text: Text,
