@@ -988,8 +988,10 @@ def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
         (np.sin(np.arange(64)), 2**31 - 1),
         (np.sin(np.arange(128)).reshape(64, 2), 2**30 - 1),
         (np.array([[0.5, -0.5]]), 2**30 - 1),
+        (np.sin(np.arange(128)).reshape(2, 64), 2**30 - 1),
+        (np.sin(np.arange(64)).reshape(1, 64), 2**31 - 1),
     ],
-    ids=["mono", "stereo", "one_stereo_frame"],
+    ids=["mono", "stereo", "one_stereo_frame", "channels_first", "one_channel_first"],
 )
 def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
     """Bytes per second (rate * channels * 2) must fit the 32-bit header too."""
@@ -1009,10 +1011,10 @@ def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
     [
         ({}, "should specify audio tensor or file"),
         (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
-        (dict(tensor=np.zeros((2, 64))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((3, 64))), "tensor should be 1D vector or 2D matrix"),
         (dict(tensor=np.zeros((4, 2, 2))), "tensor should be 1D vector or 2D matrix"),
     ],
-    ids=["nothing", "three_columns", "channels_first", "3d"],
+    ids=["nothing", "three_columns", "three_channels_first", "3d"],
 )
 def test_audio_checks_the_tensor_before_the_sample_rate(
     offline_client, kwargs, message
