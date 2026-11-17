@@ -48,8 +48,9 @@ def test_scatter_remaps_large_labels_without_corrupting_trace_names(
     np.testing.assert_array_equal(labels, original)
 
 
-def test_remapped_large_labels_support_legends_and_color_palettes(capture_send):
-    labels = np.array([2**64 - 1, 1, 2**64 - 1, 1], dtype=np.uint64)
+@pytest.mark.parametrize("large", [2**62, 2**64 - 1])
+def test_remapped_large_labels_support_legends_and_color_palettes(capture_send, large):
+    labels = np.array([large, 1, large, 1], dtype=np.uint64)
     sent = capture_send(
         lambda v: v.scatter(
             np.arange(8, dtype=float).reshape(4, 2),
