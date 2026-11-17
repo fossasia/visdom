@@ -33,11 +33,15 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import random
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+
+import visdom
+from visdom.experiments.query import MAX_QUERY_LENGTH, parse_query
 
 pytestmark = pytest.mark.unit
 
@@ -789,6 +793,197 @@ def test_finish_experiment_defaults_to_finished(offline_client):
     assert msg["status"] == "finished"
 
 
+@pytest.fixture
+def logging_client(offline_client, tmp_path):
+    """An offline client writing a replay log, as on a machine with no server."""
+    offline_client.offline = True
+    offline_client.log_to_filename = str(tmp_path / "run.log")
+    return offline_client
+
+
+def _logged(client):
+    try:
+        with open(client.log_to_filename) as f:
+            return [json.loads(line) for line in f]
+    except FileNotFoundError:
+        return []
+
+
+@pytest.mark.parametrize(
+    "call, endpoint",
+    [
+        (lambda v: v.experiment(name="r", params={"lr": 0.1}), "experiments/log"),
+        (lambda v: v.log_metrics({"acc": 0.9}, step=1), "experiments/log"),
+        (lambda v: v.finish_experiment(), "experiments/log"),
+        (lambda v: v.set_tags({"dataset": "cifar10"}), "experiments/tags"),
+        (lambda v: v.hparams(win="hp"), "experiments/hparams"),
+        (lambda v: v.update_hparams(win="hp"), "experiments/hparams/update"),
+    ],
+    ids=[
+        "experiment",
+        "log_metrics",
+        "finish_experiment",
+        "set_tags",
+        "hparams",
+        "update_hparams",
+    ],
+)
+def test_offline_log_keeps_experiment_writes(logging_client, call, endpoint):
+    """replay_log() can only rebuild what was written to the log."""
+    call(logging_client)
+    assert [logged[0] for logged in _logged(logging_client)] == [endpoint]
+
+
+def test_offline_log_leaves_reads_out(logging_client):
+    """Replaying a read would only ask the question again."""
+    logging_client.get_tags()
+    logging_client.search_experiments("lr < 0.1")
+    logging_client.compare_experiments(["a", "b"])
+    assert _logged(logging_client) == []
+
+
+def test_replay_log_resends_an_offline_experiment(logging_client):
+    logging_client.experiment(name="r", params={"lr": 0.1})
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.set_tags({"dataset": "cifar10"})
+    logging_client.finish_experiment()
+
+    with echoes(logging_client) as send:
+        logging_client.replay_log(logging_client.log_to_filename)
+
+    replayed = [(c.args[1], c.args[0]["action"]) for c in send.call_args_list]
+    assert replayed == [
+        ("experiments/log", "log"),
+        ("experiments/log", "metrics"),
+        ("experiments/tags", "set"),
+        ("experiments/log", "finish"),
+    ]
+
+
+def _stored(metrics=(), status="running", env="main"):
+    """A search reply holding one experiment with ``metrics`` already logged."""
+    return {
+        "experiments": [
+            {
+                "env_id": env,
+                "status": status,
+                "metrics": [
+                    {"key": k, "value": v, "step": s, "timestamp": 0.0}
+                    for k, v, s in metrics
+                ],
+            }
+        ]
+    }
+
+
+def _replayed_metrics(client, stored):
+    client.offline = False  # replayed by an online client, as in practice
+    with patch.object(client, "search_experiments", return_value=stored) as search:
+        with echoes(client) as send:
+            client.replay_log(client.log_to_filename)
+    sent = [
+        (key, value, c.args[0].get("step"))
+        for c in send.call_args_list
+        if c.args[0].get("action") == "metrics"
+        for key, value in c.args[0]["metrics"].items()
+    ]
+    return sent, search
+
+
+def test_replay_log_skips_metrics_the_server_already_holds(logging_client):
+    """Metrics are appended, so resending a stored one would record it twice."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    sent, _ = _replayed_metrics(logging_client, _stored([("acc", 0.7, 1)]))
+    assert sent == [("acc", 0.8, 2)]
+
+
+def test_replay_log_sends_only_the_missing_keys_of_a_call(logging_client):
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.6, "loss": 0.4}, step=1)
+    sent, _ = _replayed_metrics(logging_client, _stored([("acc", 0.6, 1)]))
+    assert sent == [("loss", 0.4, 1)]
+
+
+def test_replay_log_keeps_a_value_that_was_logged_twice(logging_client):
+    """Each stored entry covers one logged entry, not every copy of it."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"loss": 0.5})
+    logging_client.log_metrics({"loss": 0.5})
+    sent, _ = _replayed_metrics(logging_client, _stored([("loss", 0.5, None)]))
+    assert sent == [("loss", 0.5, None)]
+
+
+def test_replay_log_sends_nothing_to_a_finished_experiment(logging_client):
+    """The server refuses any further log, metric or finish once finished."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.finish_experiment()
+    logging_client.offline = False
+    with patch.object(
+        logging_client, "search_experiments", return_value=_stored(status="finished")
+    ):
+        with echoes(logging_client) as send:
+            logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+
+
+def test_replay_log_counts_env_id_aliases_together(logging_client):
+    """ "runs\\a" and "runs_a" are one env on the server, so one stored entry
+    covers only one of the two logged copies."""
+    for env in ("runs\\a", "runs_a"):
+        logging_client.log_metrics({"acc": 0.9}, step=1, env=env)
+    sent, search = _replayed_metrics(
+        logging_client, _stored([("acc", 0.9, 1)], env="runs_a")
+    )
+    assert sent == [("acc", 0.9, 1)]
+    assert search.call_count == 1
+
+
+def _replayed_endpoints(client, search):
+    client.offline = False
+    with patch.object(client, "search_experiments", side_effect=search):
+        with echoes(client) as send, patch("visdom.logger.warning") as warning:
+            client.replay_log(client.log_to_filename)
+    return [(c.args[1], c.args[0].get("eid")) for c in send.call_args_list], warning
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [False, "<html>404: Not Found</html>", {"error": "x"}, ConnectionError("down")],
+    ids=["no-reply", "no-endpoint", "error", "unreachable"],
+)
+def test_replay_log_keeps_replaying_windows_when_the_lookup_fails(
+    logging_client, reply
+):
+    """Treating a failed lookup as "nothing stored" would resend metrics, so
+    only that env's experiment calls are skipped."""
+    logging_client.text("hello", win="w1")
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.text("bye", win="w2")
+    sent, warning = _replayed_endpoints(logging_client, [reply])
+    assert sent == [("events", "main"), ("events", "main")]
+    assert "could not read" in warning.call_args.args[0]
+
+
+def test_offline_replay_does_not_look_anything_up(logging_client):
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    with patch.object(logging_client, "search_experiments") as search:
+        with echoes(logging_client) as send:
+            logging_client.replay_log(logging_client.log_to_filename)
+    search.assert_not_called()
+    assert len(send.call_args_list) == 1
+
+
+def test_replay_log_looks_up_the_escaped_env_id(logging_client):
+    """The server stores "a\\b" as "a_b"; asking for the raw id finds nothing."""
+    logging_client.env = "runs\\a"
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    _, search = _replayed_metrics(logging_client, {"experiments": []})
+    assert search.call_args.kwargs["query"] == 'env_id = "runs_a"'
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -815,3 +1010,503 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+def _append_log(client, msg):
+    with open(client.log_to_filename, "a") as f:
+        f.write(json.dumps(["experiments/log", msg]) + "\n")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"metrics": {"acc": [0.1, 0.2]}, "step": 1},
+        {"metrics": {"acc": {"v": 0.1}}, "step": 1},
+        {"metrics": {"acc": 0.1}, "step": [1]},
+        {"metrics": [["acc", 0.1]], "step": 1},
+        {"metrics": "acc", "step": 1},
+    ],
+    ids=["list-value", "dict-value", "list-step", "list-metrics", "str-metrics"],
+)
+def test_replay_log_skips_a_malformed_metric_and_keeps_going(logging_client, bad):
+    """A bad entry is skipped with a warning instead of stopping the replay."""
+    logging_client.experiment(name="r")
+    _append_log(logging_client, dict(bad, eid="main", action="metrics"))
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    with patch("visdom.logger.warning") as warning:
+        sent, _ = _replayed_metrics(logging_client, _stored())
+    assert sent == [("acc", 0.8, 2)]
+    assert warning.called
+
+
+def test_replay_log_sends_the_valid_keys_next_to_a_bad_one(logging_client):
+    logging_client.experiment(name="r")
+    _append_log(
+        logging_client,
+        {"eid": "main", "action": "metrics", "metrics": {"acc": [1], "loss": 0.3}},
+    )
+    with patch("visdom.logger.warning"):
+        sent, _ = _replayed_metrics(logging_client, _stored())
+    assert sent == [("loss", 0.3, None)]
+
+
+def test_replay_log_ignores_a_non_scalar_metric_on_the_server(logging_client):
+    """A list stored server side cannot match anything, but must not crash."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    sent, _ = _replayed_metrics(
+        logging_client, _stored([("acc", [0.7], 1), ("acc", 0.7, 1)])
+    )
+    assert sent == []
+
+
+def test_replay_log_keeps_a_bool_metric_apart_from_one(logging_client):
+    """True == 1 in Python, but they are different observations."""
+    logging_client.experiment(name="r")
+    _append_log(
+        logging_client,
+        {"eid": "main", "action": "metrics", "metrics": {"ok": True}, "step": 1},
+    )
+    sent, _ = _replayed_metrics(logging_client, _stored([("ok", 1, 1)]))
+    assert sent == [("ok", True, 1)]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"experiments": None},
+        {"experiments": [{"status": "running"}, {"status": "running"}]},
+        {"experiments": [{"status": "running"}]},
+        {"experiments": [{"metrics": []}]},
+        {"experiments": [{"status": "running", "metrics": [{"key": "acc"}]}]},
+        {"experiments": [{"env_id": "other", "status": "running", "metrics": []}]},
+        {"experiments": [{"status": "running", "metrics": []}]},
+        {"experiments": [{"env_id": 7, "status": "running", "metrics": []}]},
+        {"experiments": [{"env_id": ["main"], "status": "running", "metrics": []}]},
+    ],
+    ids=[
+        "not-a-list",
+        "two",
+        "no-metrics",
+        "no-status",
+        "bad-metric",
+        "other-env",
+        "no-env-id",
+        "env-id-not-text",
+        "env-id-list",
+    ],
+)
+def test_replay_log_skips_an_experiment_whose_reply_cannot_be_trusted(
+    logging_client, reply
+):
+    logging_client.text("hello", win="w1")
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    sent, warning = _replayed_endpoints(logging_client, [reply])
+    assert sent == [("events", "main")]
+    assert warning.called
+
+
+def test_a_failed_lookup_skips_only_that_envs_experiment_calls(logging_client):
+    logging_client.text("hello", win="w1")
+    logging_client.log_metrics({"acc": 0.9}, step=1, env="first")
+    logging_client.log_metrics({"acc": 0.8}, step=1, env="second")
+    logging_client.set_tags({"k": "v"}, env="second")
+
+    def search(query, limit=100):
+        # Fails for any query naming "second", as a server would for a batch.
+        return "<html>error</html>" if '"second"' in query else {"experiments": []}
+
+    sent, _ = _replayed_endpoints(logging_client, search)
+    assert sent == [
+        ("events", "main"),
+        ("experiments/log", "first"),
+        ("experiments/tags", "second"),
+    ]
+
+
+def _accepts_finish(msg):
+    """The server's reply to a finish it took: the experiment, now finished."""
+    from visdom.utils.server_utils import extract_eid
+
+    return json.dumps(
+        {"env_id": extract_eid(msg), "status": msg["status"], "metrics": []}
+    )
+
+
+def _replay_lines(client, lines, search=None, finish=_accepts_finish):
+    """Replay a log holding ``lines`` as written; the sends and the warnings.
+
+    A finish is answered by ``finish``; every other call is echoed back.
+    """
+    with open(client.log_to_filename, "w") as f:
+        f.write("".join(lines))
+    client.offline = False
+    search = search or (lambda query, limit=100: {"experiments": []})
+
+    def answer(msg, endpoint="events", **_):
+        if endpoint == "experiments/log" and msg.get("action") == "finish":
+            return finish(msg)
+        return msg, endpoint
+
+    with patch.object(client, "search_experiments", side_effect=search):
+        with patch.object(client, "_send", side_effect=answer) as send, patch(
+            "visdom.logger.warning"
+        ) as warning:
+            client.replay_log(client.log_to_filename)
+    sent = [(c.args[1], c.args[0].get("eid")) for c in send.call_args_list]
+    return sent, [c.args for c in warning.call_args_list]
+
+
+def _entry(endpoint, msg):
+    return json.dumps([endpoint, msg]) + "\n"
+
+
+def test_replay_log_skips_a_line_cut_short_by_a_crash(logging_client):
+    """The last line of a log can be half written when the run is killed."""
+    lines = [
+        _entry("events", {"eid": "main", "win": "w1"}),
+        _entry(
+            "experiments/log", {"eid": "r", "action": "metrics", "metrics": {"a": 1}}
+        ),
+        '["events", {"eid": "main", "wi',
+    ]
+    sent, warnings_ = _replay_lines(logging_client, lines)
+    assert sent == [("events", "main"), ("experiments/log", "r")]
+    assert [w[1:2] for w in warnings_ if "line" in w[0]] == [(3,)]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '[1, {"eid": "x"}]\n',
+        '"text"\n',
+        "[]\n",
+        '["events"]\n',
+        '["events", 5]\n',
+        "{}\n",
+    ],
+    ids=[
+        "number_endpoint",
+        "string",
+        "empty_list",
+        "no_message",
+        "message_not_dict",
+        "dict",
+    ],
+)
+def test_replay_log_skips_a_line_that_is_not_an_entry(logging_client, line):
+    lines = [
+        _entry("events", {"eid": "main"}),
+        line,
+        "\n",
+        _entry("events", {"eid": "b"}),
+    ]
+    sent, warnings_ = _replay_lines(logging_client, lines)
+    assert sent == [("events", "main"), ("events", "b")]
+    assert [w[1] for w in warnings_ if "not a whole entry" in w[0]] == [2]
+
+
+def test_replay_log_warns_about_metrics_a_finished_experiment_lacks(logging_client):
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    logging_client.log_metrics({"acc": 0.9}, step=3)
+    logging_client.offline = False
+    stored = _stored([("acc", 0.7, 1)], status="finished")
+    with patch.object(logging_client, "search_experiments", return_value=stored):
+        with echoes(logging_client) as send, patch("visdom.logger.warning") as warning:
+            logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+    message, *args = warning.call_args.args
+    assert "is finished" in message and args == ["main", 2]
+
+
+def test_replay_log_is_quiet_about_a_finished_experiment_it_already_matches(
+    logging_client,
+):
+    """Replaying the same log twice is the common case; nothing is missing."""
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.finish_experiment()
+    logging_client.offline = False
+    stored = _stored([("acc", 0.7, 1)], status="finished")
+    with patch.object(logging_client, "search_experiments", return_value=stored):
+        with echoes(logging_client) as send, patch("visdom.logger.warning") as warning:
+            logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+    warning.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["finished", "failed"])
+def test_replay_log_sends_nothing_after_a_logged_finish(logging_client, status):
+    """An offline log can hold calls after finish; the server would refuse them."""
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.finish_experiment(status=status)
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    logging_client.experiment(name="again")
+    sent, warnings_ = _replay_lines(
+        logging_client, open(logging_client.log_to_filename).readlines()
+    )
+    actions = [a for a in sent if a[0] == "experiments/log"]
+    assert len(actions) == 2  # the first metric and the finish
+    assert [w[1:] for w in warnings_ if "is finished" in w[0]] == [("main", 1)]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        False,
+        "<html><title>409: Conflict</title></html>",
+        '{"error": "readonly"}',
+        "",
+        None,
+        True,
+        json.dumps({"env_id": "main", "status": "running", "metrics": []}),
+        json.dumps({"env_id": "other", "status": "finished", "metrics": []}),
+        json.dumps({"env_id": "main", "status": "finished"}),
+    ],
+    ids=[
+        "connection_lost",
+        "error_page",
+        "refused",
+        "empty",
+        "no_reply",
+        "not_a_reply",
+        "still_running",
+        "other_env",
+        "not_an_experiment",
+    ],
+)
+def test_replay_log_keeps_replaying_after_a_finish_that_failed(logging_client, reply):
+    """Until the server confirms the finish, the experiment is still running."""
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.finish_experiment()
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    logging_client.experiment(name="again")
+    sent, warnings_ = _replay_lines(
+        logging_client,
+        open(logging_client.log_to_filename).readlines(),
+        finish=lambda msg: reply,
+    )
+    actions = [a for a in sent if a[0] == "experiments/log"]
+    assert len(actions) == 4  # both metrics, the finish and the log after it
+    assert not [w for w in warnings_ if "is finished" in w[0]]
+    assert [w[1:] for w in warnings_ if "did not confirm" in w[0]] == [("main",)]
+
+
+def test_offline_replay_does_not_ask_for_a_confirmed_finish(logging_client):
+    """Offline there is no server to confirm anything, so nothing is warned."""
+    logging_client.finish_experiment()
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    with echoes(logging_client) as send, patch("visdom.logger.warning") as warning:
+        logging_client.replay_log(logging_client.log_to_filename)
+    assert len(send.call_args_list) == 2
+    warning.assert_not_called()
+
+
+def test_replay_log_looks_up_many_envs_in_a_few_requests(logging_client):
+    """One search per env made a log of 250 trials cost 250 requests."""
+    envs = ["trial_{:03d}".format(n) for n in range(250)]
+    for env in envs:
+        logging_client.log_metrics({"acc": 0.5}, step=1, env=env)
+    held = [
+        dict(_stored([("acc", 0.5, 1)])["experiments"][0], env_id=env)
+        for env in envs[::2]
+    ]
+    search = Mock(side_effect=_search_like_the_server(held))
+    sent, _ = _replay_lines(
+        logging_client, open(logging_client.log_to_filename).readlines(), search
+    )
+    assert search.call_count == 3  # batches of 100
+    assert [eid for _, eid in sent] == envs[1::2]
+
+
+def test_replay_log_asks_per_env_when_a_batch_reply_has_no_env_ids(logging_client):
+    for env in ("a", "b"):
+        logging_client.log_metrics({"acc": 0.5}, step=1, env=env)
+
+    def search(query, limit=100):
+        if " OR " in query:
+            reply = _stored([("acc", 0.5, 1)])
+            del reply["experiments"][0]["env_id"]  # can't be split by env
+            return reply
+        if '"a"' in query:
+            return _stored([("acc", 0.5, 1)], env="a")
+        return {"experiments": []}
+
+    sent, _ = _replay_lines(
+        logging_client, open(logging_client.log_to_filename).readlines(), search
+    )
+    assert sent == [("experiments/log", "b")]
+
+
+def test_replay_log_asks_per_env_when_a_batch_reply_has_a_list_for_an_env_id(
+    logging_client,
+):
+    """A list can't be looked up among the env names; it used to raise."""
+    for env in ("a", "b"):
+        logging_client.log_metrics({"acc": 0.5}, step=1, env=env)
+
+    def search(query, limit=100):
+        if " OR " in query:
+            reply = _stored([("acc", 0.5, 1)])
+            reply["experiments"][0]["env_id"] = ["a"]
+            return reply
+        if '"a"' in query:
+            return _stored([("acc", 0.5, 1)], env="a")
+        return {"experiments": []}
+
+    sent, _ = _replay_lines(
+        logging_client, open(logging_client.log_to_filename).readlines(), search
+    )
+    assert sent == [("experiments/log", "b")]
+
+
+@pytest.mark.parametrize(
+    "eid", [None, 7, ["main"], {"env": "main"}], ids=["none", "number", "list", "dict"]
+)
+def test_replay_log_skips_an_experiment_call_that_names_no_env(logging_client, eid):
+    """Sent anyway, it would land in the replaying client's env, which was
+    never what it was compared with."""
+    nameless = {"action": "metrics", "metrics": {"acc": 0.7}, "step": 1}
+    if eid is not None:
+        nameless["eid"] = eid
+    lines = [
+        _entry("experiments/log", nameless),
+        _entry("experiments/log", dict(nameless, eid="main", step=2)),
+    ]
+    sent, warnings_ = _replay_lines(logging_client, lines)
+    assert sent == [("experiments/log", "main")]
+    assert [w[1] for w in warnings_ if "names no env" in w[0]] == [1]
+
+
+def test_replay_log_holds_one_batch_of_stored_metrics_at_a_time(logging_client):
+    """Each env's stored metrics are read when the replay reaches its batch
+    and dropped after its last call, not all kept until the end."""
+    import weakref
+
+    envs = ["trial_{:03d}".format(n) for n in range(250)]
+    with open(logging_client.log_to_filename, "w") as f:
+        for env in envs:
+            call = {"eid": env, "action": "metrics", "metrics": {"acc": 0.5}, "step": 1}
+            f.write(_entry("experiments/log", call))
+    held = [
+        dict(_stored([("acc", 0.4, 1)])["experiments"][0], env_id=env) for env in envs
+    ]
+    refs, peak = [], []
+
+    def alive():
+        return sum(ref() is not None for ref in refs)
+
+    real = visdom._stored_record
+
+    def tracked(experiment):
+        record = real(experiment)
+        if record is not None:
+            refs.append(weakref.ref(record[0]))
+        return record
+
+    def send(msg, endpoint="events", **_):
+        peak.append(alive())
+
+    logging_client.offline = False
+    with patch.object(visdom, "_stored_record", side_effect=tracked), patch.object(
+        logging_client, "search_experiments", side_effect=_search_like_the_server(held)
+    ), patch.object(logging_client, "_send", side_effect=send):
+        logging_client.replay_log(logging_client.log_to_filename)
+    assert len(peak) == 250
+    assert max(peak) <= visdom.REPLAY_LOOKUP_BATCH
+    assert len(refs) == 250 and alive() == 0
+
+
+def test_replay_log_does_not_hold_the_log_in_memory(logging_client):
+    """A long run's log can be far bigger than what one entry needs."""
+    import os
+    import tracemalloc
+
+    payload = "x" * 50000
+    with open(logging_client.log_to_filename, "w") as f:
+        for n in range(400):
+            f.write(
+                _entry("events", {"eid": "main", "win": "w%d" % n, "data": payload})
+            )
+    size = 400 * len(payload)
+    logging_client.offline = False
+    sends = []
+
+    def send(msg, endpoint="events", **_):
+        sends.append(endpoint)  # a Mock would keep every message alive
+
+    with patch.object(logging_client, "_send", new=send):
+        logging_client.replay_log(os.devnull)  # pays for one-off imports
+        tracemalloc.start()
+        try:
+            logging_client.replay_log(logging_client.log_to_filename)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+    assert len(sends) == 400
+    assert peak < size // 10
+
+
+def _search_like_the_server(records):
+    """A search that runs the query through the server's own parser."""
+
+    def search(query, limit=100):
+        node = parse_query(query)
+        found = [r for r in records if node.matches(r)]
+        return {"experiments": found, "total": len(found)}
+
+    return search
+
+
+def _tricky_ids():
+    rng = random.Random(0)
+    ids = [
+        "ünïcödé",
+        "日本語",
+        "😀 run",
+        "á",
+        "​zero-width",
+        " sep",
+        'quo"te',
+        "back\\slash",
+        "back\\nslash",
+        "tab\tbed",
+        "ctl\x01x",
+        "\x07\x08\x0b\x0c\x1b\x7f",
+        "\x00nul",
+        "'single'",
+        "x" * 5000,
+    ]
+    for _ in range(1000):
+        ids.append("".join(chr(rng.randint(1, 0x2FFF)) for _ in range(12)))
+    return ids
+
+
+def test_the_lookup_query_finds_any_env_id():
+    """``json.dumps`` writes "\\x01" as "\\u0001", which the query language
+    reads as six characters, so the lookup missed the run and every metric
+    was sent again."""
+    for eid in _tricky_ids():
+        query = "env_id = " + visdom._query_string(eid)
+        if len(query) <= MAX_QUERY_LENGTH:
+            assert parse_query(query).matches({"env_id": eid}), ascii(eid)
+
+
+@pytest.mark.parametrize(
+    "eid",
+    ["ctl\x01x", "form\x0cfeed", "😀 run", "x" * 5000],
+    ids=["control-char", "form-feed", "emoji", "too-long-to-query"],
+)
+def test_replay_log_skips_a_stored_metric_for_any_env_id(logging_client, eid):
+    logging_client.log_metrics({"acc": 0.9}, step=1, env=eid)
+    stored = dict(_stored([("acc", 0.9, 1)])["experiments"][0], env_id=eid)
+    neighbour = dict(stored, env_id=eid + "-2", metrics=[])
+    logging_client.offline = False
+    with patch.object(
+        logging_client,
+        "search_experiments",
+        side_effect=_search_like_the_server([stored, neighbour]),
+    ):
+        with echoes(logging_client) as send:
+            logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
