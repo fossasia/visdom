@@ -4704,7 +4704,7 @@ class Visdom(object):
             if Y is None:
                 raise ValueError("opts.max_experiments requires Y to be provided")
             if N > max_exp:
-                top_idx = np.lexsort((-Y, np.isnan(Y)))[:max_exp]
+                top_idx = np.argsort(-Y, kind="stable")[:max_exp]
                 X = X[top_idx]
                 Y = Y[top_idx]
                 N = len(Y)
