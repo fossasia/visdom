@@ -126,7 +126,8 @@ def meta_weight(record):
 class JSONStore(DataStore):
     """DataStore backed by one ``<eid>.json`` file per environment.
 
-    Environments too long to use as a filename are stored under a
+    Environments too long to use as a filename, or whose filenames collide
+    by case on the current filesystem, are stored under a
     ``hash_<sha256>.json`` fallback with their real id kept inside the file.
     When ``env_path`` is ``None`` persistence is disabled and the store behaves
     as a no-op (matching Visdom's in-memory-only mode).
@@ -198,7 +199,8 @@ class JSONStore(DataStore):
     def _primary_path(self, eid):
         """Return the canonical ``<env_path>/<eid>.json`` path for ``eid``.
 
-        Returns ``None`` if the resolved path would escape ``env_path`` (guards
+        Returns ``None`` if the filename belongs to another case variant or
+        the resolved path would escape ``env_path`` (guards
         against path traversal via a crafted env id). Every read, write and
         delete resolves through here, so the containment check is the single
         point where an id stops being user input and becomes a path.
@@ -217,7 +219,20 @@ class JSONStore(DataStore):
         path = os.path.abspath(os.path.join(base, "{0}.json".format(safe_eid)))
         if not path.startswith(os.path.join(base, "")):
             return None
+        if self._case_conflict(path):
+            return None
         return path
+
+    @staticmethod
+    def _case_conflict(path):
+        """An existing file with different spelling belongs to another env.
+
+        Check the directory's actual spelling only when the path exists.
+        On case-sensitive disks two case variants can both use plain files.
+        """
+        return os.path.exists(path) and os.path.basename(path) not in os.listdir(
+            os.path.dirname(path)
+        )
 
     def _hash_path(self, eid):
         """Return the ``hash_<sha256>.json`` fallback path for ``eid``.
@@ -316,10 +331,14 @@ class JSONStore(DataStore):
         else:
             payload = env_data
 
-        primary = self._primary_path(eid)
+        # Keep using a fallback after the conflicting plain file is deleted.
+        primary = self._resolve_existing(eid) or self._primary_path(eid)
+        hashed = self._hash_path(eid)
+        if primary is None or primary == hashed:
+            primary = hashed
+            payload = copy_json_data(payload)
+            payload["name"] = self._safe_eid(eid)
         try:
-            if primary is None:
-                raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
             self._atomic_write(primary, json.dumps(payload, cls=NanSafeEncoder))
         except OSError as e:
             if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
@@ -652,13 +671,16 @@ class JSONStore(DataStore):
         """Return ``(undo_dir, plain_path, hashed_path)`` for ``eid``'s undo file.
 
         ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose
-        plain filename would exceed the filesystem limit.
+        plain filename would exceed the filesystem limit. A case collision
+        selects the hash path for both reads and writes, including deletion.
         """
         safe_eid = self._safe_eid(eid)
         undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
         plain = os.path.join(undo_dir, "{0}.json".format(safe_eid))
         hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
         hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
+        if os.path.exists(hashed) or self._case_conflict(plain):
+            plain = hashed
         return undo_dir, plain, hashed
 
     def load_undo(self, eid):

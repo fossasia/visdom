@@ -50,6 +50,88 @@ def test_save_then_load_round_trip(store):
     assert store.load_env("main") == env
 
 
+@pytest.fixture
+def case_insensitive_store(store, tmp_path):
+    probe = tmp_path / "CaseProbe"
+    probe.touch()
+    if not (tmp_path / "caseprobe").exists():
+        pytest.skip("requires a case-insensitive filesystem")
+    probe.unlink()
+    return store
+
+
+def test_case_variant_is_not_an_existing_env(case_insensitive_store):
+    store = case_insensitive_store
+    store.save_env("Train", _env("original"))
+    store = JSONStore(store.env_path)  # restart with no resident envs
+    assert not store.env_exists("train")
+    assert store.load_env("train") == {}
+    assert store.load_experiment("train") is None
+    assert not store.delete_env("train")
+    assert store.load_env("Train") == _env("original")
+
+
+@pytest.mark.parametrize("deleted", ["Train", "train"])
+def test_case_variant_envs_survive_restart_and_deletion(
+    case_insensitive_store, deleted
+):
+    store = case_insensitive_store
+    original = _env("original")
+    variant = dict(_env("variant"), experiment={"name": "second run"})
+    store.save_env("Train", original)
+    store = JSONStore(store.env_path)
+    store.save_env("train", variant)
+    store = JSONStore(store.env_path)
+    assert store.list_envs() == ["Train", "train"]
+    assert store.load_env("Train") == original
+    assert store.load_env("train") == variant
+    assert store.load_experiment("train") == variant["experiment"]
+    assert "name" not in variant  # fallback bookkeeping must not mutate input
+    assert store.delete_env(deleted)
+    remaining = "train" if deleted == "Train" else "Train"
+    expected = variant if remaining == "train" else original
+    store.save_env(remaining, expected)
+    store = JSONStore(store.env_path)
+    assert store.list_envs() == [remaining]
+    assert store.load_env(remaining) == expected
+    assert store.load_env(deleted) == {}
+
+
+@pytest.mark.parametrize("cleared", ["Train", "train"])
+def test_case_variant_undo_stacks_stay_separate(case_insensitive_store, cleared):
+    store = case_insensitive_store
+    first = [["first", {"id": "first"}]]
+    second = [["second", {"id": "second"}]]
+    store.save_undo("Train", first)
+    assert store.load_undo("train") == []
+    store.clear_undo("train")
+    assert store.load_undo("Train") == first
+    store.save_undo("train", second)
+    store = JSONStore(store.env_path)
+    assert store.load_undo("Train") == first
+    assert store.load_undo("train") == second
+    store.clear_undo(cleared)
+    remaining = "train" if cleared == "Train" else "Train"
+    expected = second if remaining == "train" else first
+    store.save_undo(remaining, expected)
+    assert store.load_undo(remaining) == expected
+    assert store.load_undo(cleared) == []
+
+
+def test_case_variants_use_plain_files_on_case_sensitive_disk(store, tmp_path):
+    probe = tmp_path / "CaseProbe"
+    probe.touch()
+    if (tmp_path / "caseprobe").exists():
+        pytest.skip("requires a case-sensitive filesystem")
+    probe.unlink()
+    store.save_env("Train", _env("first"))
+    store.save_env("train", _env("second"))
+    assert (tmp_path / "Train.json").exists()
+    assert (tmp_path / "train.json").exists()
+    assert store.load_env("Train") == _env("first")
+    assert store.load_env("train") == _env("second")
+
+
 def test_save_writes_expected_file(store, env_path):
     """save_env writes the env to <env_path>/<eid>.json on disk."""
     store.save_env("main", _env())
