@@ -586,9 +586,9 @@ def test_lazy_env_setitem_materialises_first(store):
 
 
 def test_lazy_env_raises_value_error_for_a_malformed_env(store, env_path):
-    """A file that is not a valid env becomes a ValueError naming the id."""
+    """A file that parses but is not an env becomes a ValueError naming the id."""
     with open(os.path.join(env_path, "broken.json"), "w") as fn:
-        fn.write("{not valid json")
+        fn.write(json.dumps({"windows": {}}))
 
     lazy = LazyEnvData(store, "broken")
     with pytest.raises(ValueError, match="broken"):
@@ -1246,3 +1246,64 @@ def test_a_forked_store_starts_cold(store):
     assert fork.env_path == store.env_path
     assert fork._meta_cache == {}
     assert fork.load_experiment("run") == _experiment_env()["experiment"]
+
+
+# -- An env file that does not parse ------------------------------------------
+
+
+def _write_corrupt_env(store, env_path, eid="run"):
+    """Save a real env, then cut its file short the way a full disk would."""
+    store.save_env(eid, _env())
+    path = os.path.join(env_path, eid + ".json")
+    with open(path, "rb") as fn:
+        damaged = fn.read()[:-10]
+    with open(path, "wb") as fn:
+        fn.write(damaged)
+    return path, damaged
+
+
+def test_a_corrupt_env_file_is_set_aside_and_the_env_starts_empty(store, env_path):
+    """The file is renamed with its bytes untouched, and the env loads empty."""
+    path, damaged = _write_corrupt_env(store, env_path)
+
+    assert store.load_env("run") == {"jsons": {}, "reload": {}}
+
+    assert not os.path.exists(path)
+    (moved,) = [n for n in os.listdir(env_path) if n.startswith("run.json.corrupt-")]
+    with open(os.path.join(env_path, moved), "rb") as fn:
+        assert fn.read() == damaged
+    # The set-aside copy is not mistaken for an env.
+    assert "run" not in store.list_envs()
+
+
+def test_a_file_that_cannot_be_opened_is_not_moved(store, env_path, monkeypatch):
+    """Only a file that was read and found damaged is set aside.
+
+    A failed open can be transient (no file descriptors left, a network drive
+    that dropped out), so it says nothing about the file and must not move it.
+    """
+    store.save_env("run", _env())
+    monkeypatch.setattr(
+        json_store_module,
+        "read_json_file",
+        lambda path, default=UNREADABLE_JSON, corrupt=None: default,
+    )
+
+    assert store.load_env("run") == {}
+    assert os.listdir(env_path) == ["run.json"]
+
+
+def test_a_corrupt_file_that_cannot_be_moved_is_left_alone(
+    store, env_path, monkeypatch
+):
+    """If the rename fails the env is not started empty over the old file."""
+    path, damaged = _write_corrupt_env(store, env_path)
+
+    def refuse(src, dst):
+        raise PermissionError(errno.EACCES, "read-only", src)
+
+    monkeypatch.setattr(json_store_module.os, "rename", refuse)
+
+    assert store.load_env("run") == {}
+    with open(path, "rb") as fn:
+        assert fn.read() == damaged

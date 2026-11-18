@@ -15,8 +15,14 @@ import logging
 import os
 import re
 import threading
+import time
 
-from visdom.data_model.base import DataStore, read_json_file, UNREADABLE_JSON
+from visdom.data_model.base import (
+    CORRUPT_JSON,
+    DataStore,
+    read_json_file,
+    UNREADABLE_JSON,
+)
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
 from visdom.utils.server_utils import escape_eid, LazyEnvData
 from visdom.utils.shared_utils import copy_json_data, ensure_dir_exists, NanSafeEncoder
@@ -352,13 +358,60 @@ class JSONStore(DataStore):
         path = self._resolve_existing(eid)
         if path is None:
             return {}
-        data = read_json_file(path, default=None)
+        data = read_json_file(path, default=None, corrupt=CORRUPT_JSON)
+        if data is CORRUPT_JSON:
+            return self._set_aside_corrupt_env(eid, path)
         if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
             return {}
         env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
         if "experiment" in data:
             env["experiment"] = data["experiment"]
         return env
+
+    def _set_aside_corrupt_env(self, eid, path):
+        """Move an env file that does not parse out of the way; start it empty.
+
+        A file cut short by a full disk, a crash or a sync tool used to leave
+        its env unwritable: every load failed, so every write to it answered
+        500 for as long as the file stayed there. Starting the env empty in
+        place would be worse -- its next save would overwrite the file and
+        whatever could still be recovered from it. So the file is renamed,
+        never edited or deleted, to a name ``list_envs`` does not pick up, the
+        new name is logged, and the env starts empty so logging can continue.
+
+        If the file cannot be moved, nothing is pretended: ``{}`` is returned
+        as before, and the env stays unwritable rather than overwriting it.
+        """
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = "{0}.corrupt-{1}".format(path, stamp)
+        n = 1
+        while os.path.exists(target):
+            target = "{0}.corrupt-{1}-{2}".format(path, stamp, n)
+            n += 1
+        try:
+            os.rename(path, target)
+        except OSError as e:
+            if os.path.exists(path):
+                logging.error(
+                    "Environment %r cannot be read: %s is not valid JSON, and "
+                    "could not be moved aside (%s). Writes to it will fail "
+                    "until the file is fixed or moved.",
+                    eid,
+                    path,
+                    e,
+                )
+                return {}
+            # Another reader moved it first; it has already been logged.
+        else:
+            logging.error(
+                "Environment %r could not be read: %s is not valid JSON. It was "
+                "moved to %s and the environment starts empty.",
+                eid,
+                path,
+                target,
+            )
+        self._forget_meta(path)
+        return {"jsons": {}, "reload": {}}
 
     def _forget_meta(self, path):
         """Drop ``path``'s cached metadata, if any."""
