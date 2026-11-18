@@ -2639,7 +2639,7 @@ class Visdom(object):
             endpoint="events",
         )
 
-        Y = do_tsne(features)
+        Y = do_tsne(np.asarray(features))
 
         labels_normalized, _, _ = _normalize_labels(labels)
         points = [
