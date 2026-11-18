@@ -76,6 +76,10 @@ setup(
     include_package_data=True,
     zip_safe=False,
     install_requires=requirements,
+    # Nothing in visdom imports IPython: the %visdom magic is registered
+    # against the shell IPython hands it. This extra is for installing a
+    # notebook alongside visdom in one command.
+    extras_require={"notebook": ["ipython"]},
     entry_points={
         "console_scripts": ["visdom=visdom.server.run_server:download_scripts_and_run"]
     },

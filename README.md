@@ -426,6 +426,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
 - [`vis.show`](#visshow): embed the dashboard in a Jupyter or VS Code notebook cell
+- [`%visdom`](#visdom-notebook-magic): notebook magic that embeds a dashboard in the output cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1703,6 +1704,37 @@ inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
 the server's default view, because a browser frame cannot send the
 `X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
 is the case.
+
+The environment has to exist on the server before the frame can show it, and
+plotting into it is what creates it: the dashboard answers `404` for an
+environment it has never seen, and that `404` is what the frame shows. The
+`%visdom` magic below registers the environment for you.
+
+#### %visdom (notebook magic)
+
+`vis.show` embeds a dashboard you already have a client for. The `%visdom`
+magic is for the other order: it embeds the dashboard first, and builds the
+client that names the environment the frame opens.
+
+```
+%load_ext visdom.notebook
+%visdom --env run-7
+```
+
+Flags:
+- `--port`: server port. Default `8097`.
+- `--server`: server url, without the port. Default `http://localhost`.
+- `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with.
+- `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels, anything else is CSS.
+
+Re-running the cell embeds the same dashboard and reuses the same client rather
+than building a second one: every `Visdom` starts a session reaper that loops
+for the life of the process and holds its client while it does, so a client per
+cell execution is a thread per cell execution that never goes away.
+
+IPython is not a visdom dependency: the magic is registered against the shell
+IPython hands `%load_ext`, and nothing in `visdom` imports IPython. For
+convenience `pip install visdom[notebook]` installs it alongside visdom.
 
 ### Experiments
 
