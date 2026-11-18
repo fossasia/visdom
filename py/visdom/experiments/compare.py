@@ -91,6 +91,8 @@ def _same_value(a: Any, b: Any) -> bool:
             comparisons.pop()
             continue
         a, b = pair
+        if a is b and isinstance(a, (list, tuple, set, frozenset, dict)):
+            continue
         if isinstance(a, bool) != isinstance(b, bool):
             return False
         if (isinstance(a, list) and isinstance(b, list)) or (
