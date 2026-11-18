@@ -296,8 +296,11 @@ class VisdomXGBLogger(TrainingCallback):
 
     def before_training(self, model):
         # Decided on the first logged round, so a run without evals changes nothing.
-        self._run_start = self._rounds(model)
-        self._start_trees = self._last_trees(model, self._run_start)
+        self._run_start = start = self._rounds(model)
+        self._start_trees = None
+        # Only a model ending where the curve does can continue it, so dump only then.
+        if start in (self._next_round, self._silent_end):
+            self._start_trees = self._last_trees(model, start)
         self._run_pending = True
         return model
 

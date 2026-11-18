@@ -444,6 +444,20 @@ class TestContinuationIsMatchedByModel(unittest.TestCase):
         self.assertEqual([c.kwargs["X"][0] for c in later], [3, 4])
         self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
 
+    def test_only_a_model_ending_where_the_curve_does_is_dumped(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", return_value="win1"):
+            first = self._train(3, callbacks=[logger])
+        longer = xgb.train(self.PARAMS, self.dtrain, 5)
+        get_dump = xgb.Booster.get_dump
+        with patch.object(
+            xgb.Booster, "get_dump", autospec=True, side_effect=get_dump
+        ) as dump:
+            logger.before_training(longer)  # can't continue a 3-round curve
+            self.assertFalse(dump.called)
+            logger.before_training(first)
+            self.assertTrue(dump.called)
+
 
 class TestContinuedTraining(unittest.TestCase):
     """Training on from xgb_model extends the curve instead of wiping it."""
