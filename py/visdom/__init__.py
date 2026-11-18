@@ -2562,13 +2562,13 @@ class Visdom(object):
                 img = np.transpose(img, (1, 2, 0))
                 im = Image.fromarray(img, mode="RGBA")
             else:
-                hint = ""
                 # Only when the first two sides look like an image's and the
                 # last like its channels: CxHxW with 2 channels, or many channels
                 # and only a few rows (a feature map), is not channels last.
                 if img.shape[0] > 4 and img.shape[1] > 4 and img.shape[2] in (1, 3, 4):
-                    hint = (
-                        f" Shape {img.shape} looks like HxWxC (channels last), but"
+                    # The first side is the height, so no channel count is given.
+                    raise ValueError(
+                        f"Shape {img.shape} looks like HxWxC (channels last), but"
                         " vis.image expects CxHxW: use img.transpose(2, 0, 1)"
                         " (numpy), img.permute(2, 0, 1) (torch) or"
                         " np.transpose(img, (2, 0, 1)) (plain list) first."
@@ -2576,7 +2576,6 @@ class Visdom(object):
                 raise ValueError(
                     f"Unsupported number of image channels: {nchannels}. "
                     "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
-                    + hint
                 )
         else:
             raise ValueError(
@@ -2837,9 +2836,9 @@ class Visdom(object):
             and tensor.shape[3] in (1, 3, 4)
             and tensor.size
         ):
+            # The second side is the height, so no channel count is given.
             raise ValueError(
-                f"Unsupported number of image channels: {tensor.shape[1]}."
-                f" Shape {tensor.shape} looks like NxHxWxC (channels last), but"
+                f"Shape {tensor.shape} looks like NxHxWxC (channels last), but"
                 " vis.images expects NxCxHxW: use batch.transpose(0, 3, 1, 2)"
                 " (numpy) or batch.permute(0, 3, 1, 2) (torch) first, or for a"
                 " list pass [img.transpose(2, 0, 1) for img in images]."

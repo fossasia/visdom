@@ -289,8 +289,12 @@ def test_image_rejects_unsupported_shapes(offline_client, img, message):
 )
 def test_image_points_a_channels_last_array_to_transpose(offline_client, shape):
     """PIL, OpenCV and matplotlib give HxWxC; say so instead of '224 channels'."""
-    with pytest.raises(ValueError, match=r"looks like HxWxC.*transpose\(2, 0, 1\)"):
+    with pytest.raises(ValueError) as error:
         offline_client.image(np.zeros(shape, dtype=np.uint8))
+    message = str(error.value)
+    assert message.startswith("Shape {} looks like HxWxC".format(shape))
+    assert "img.transpose(2, 0, 1)" in message
+    assert "number of image channels" not in message
 
 
 def test_image_points_a_channels_last_list_to_a_fix_it_can_run(offline_client):
@@ -353,7 +357,8 @@ def test_images_points_a_channels_last_batch_to_transpose(offline_client, batch)
     with pytest.raises(ValueError) as error:
         offline_client.images(batch)
     message = str(error.value)
-    assert "looks like NxHxWxC" in message
+    assert message.startswith("Shape {} looks like NxHxWxC".format(np.shape(batch)))
+    assert "number of image channels" not in message
     assert "batch.transpose(0, 3, 1, 2)" in message
     assert "[img.transpose(2, 0, 1) for img in images]" in message
 
