@@ -1419,7 +1419,11 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
-            self.set_secure_cookie("user_password", self.application.session_token)
+            # The dashboard never reads this cookie from JavaScript, so a
+            # script injected into the page should not be able to either.
+            self.set_secure_cookie(
+                "user_password", self.application.session_token, httponly=True
+            )
         else:
             self.set_status(400)
 
