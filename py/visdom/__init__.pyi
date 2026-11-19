@@ -13,7 +13,9 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
-_OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
+# A required file path, with `Path`, custom `os.PathLike`, and `bytes` accepted.
+_Path = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]
+_OptPath = Optional[_Path]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -217,7 +219,7 @@ class Visdom:
     def svg(
         self,
         svgstr: _OptStr = ...,
-        svgfile: _OptStr = ...,
+        svgfile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -226,14 +228,14 @@ class Visdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     def save_plotly_figure(
-        self, figure: Any, filepath: Text, **kwargs: Any
+        self, figure: Any, filepath: _Path, **kwargs: Any
     ) -> None: ...
     def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptStr = ...,
+        save_path: _OptPath = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(

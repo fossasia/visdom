@@ -1074,8 +1074,8 @@ to support the Theano codec in an OGG container (Chrome supports this).
 
 #### vis.svg
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
-the name of an SVG file `svgfile`. The function does not support any specific
-`opts`.
+the name or `pathlib.Path` of an SVG file `svgfile` (`os.PathLike` and `bytes`
+paths are accepted too). The function does not support any specific `opts`.
 
 #### vis.matplot
 This function draws a Matplotlib `plot`. The function supports
@@ -1093,7 +1093,7 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
-**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. Both require the optional `kaleido` package: `pip install kaleido`.
+**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. `save_path` and the `filepath` argument accept `pathlib.Path`, `os.PathLike`, and `bytes` paths, not just strings. Both methods require the optional `kaleido` package: `pip install kaleido`.
 
 ```python
 import plotly.graph_objects as go
