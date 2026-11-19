@@ -1143,6 +1143,9 @@ class Visdom(object):
                     self._session.close()
                 except Exception:
                     pass
+                # Drop the closed session, so a failed login below does not
+                # leave it in place to be returned by the next call.
+                self._session = None
             self._pid = current_pid
             logger.warning("Setting up a new session...")
             sess = _KeySession()

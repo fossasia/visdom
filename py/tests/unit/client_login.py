@@ -117,6 +117,27 @@ def test_a_refused_login_closes_its_session(monkeypatch, closed_sessions):
     assert client._session is None
 
 
+def test_a_failed_relogin_after_a_fork_drops_the_old_session(
+    monkeypatch, closed_sessions
+):
+    refused = requests.Response()
+    refused.status_code = 401
+    monkeypatch.setattr(visdom._KeySession, "post", lambda *a, **k: refused)
+    client = _client(1)
+    old = visdom._KeySession()
+    client._session = old
+    client._pid = -1  # session was made by another process
+
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        client.session
+    assert old in closed_sessions
+    assert client._session is None
+
+    # The next call tries to log in again instead of reusing the closed session.
+    with pytest.raises(RuntimeError, match="Authentication failed"):
+        client.session
+
+
 def test_a_successful_login_keeps_its_session(monkeypatch, closed_sessions):
     accepted = requests.Response()
     accepted.status_code = 200
