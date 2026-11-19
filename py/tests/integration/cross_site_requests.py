@@ -18,6 +18,9 @@ header and must keep working, as must reads.
 import json
 
 import pytest
+from tornado.httpclient import HTTPClientError, HTTPRequest
+from tornado.testing import gen_test
+from tornado.websocket import websocket_connect
 
 from testutils.http import VisdomHTTPTestCase
 
@@ -97,17 +100,30 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         )
         self.assertEqual(resp.code, 200)
 
-    def test_same_host_on_another_scheme_is_refused(self):
-        # http://host and https://host are different origins, even though the
-        # host part matches.
+    def test_an_http_page_is_refused_by_an_https_server(self):
+        # http://host and https://host are different origins. An http page is
+        # the one a network attacker can tamper with, so it must not reach a
+        # server the browser talks to over https.
         resp = self.post_from(
             "/delete_env",
             {"eid": "victim"},
-            Origin="https://localhost:%d" % self.get_http_port(),
-            Host="localhost:%d" % self.get_http_port(),
+            Origin="http://visdom.example.org",
+            **{
+                "X-Forwarded-Host": "visdom.example.org",
+                "X-Forwarded-Proto": "https",
+            },
         )
         self.assertEqual(resp.code, 403)
         self.assertTrue(self.env_exists("victim"))
+
+    def test_https_behind_a_proxy_that_sets_no_forwarded_proto_is_allowed(self):
+        # The proxy ends TLS and forwards plain http, keeping Host but not
+        # saying which scheme the browser used.
+        here = "localhost:%d" % self.get_http_port()
+        resp = self.post_from(
+            "/delete_env", {"eid": "victim"}, Origin="https://" + here, Host=here
+        )
+        self.assertEqual(resp.code, 200)
 
     def test_clients_without_browser_headers_are_unaffected(self):
         # What the python client and curl send: no Origin, no Sec-Fetch-Site.
@@ -144,3 +160,25 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         resp = self.fetch("/socket_wrap", headers={"Sec-Fetch-Site": "same-origin"})
         self.assertEqual(resp.code, 200)
         self.assertTrue(json.loads(resp.body)["success"])
+
+    # WebSockets are covered by tornado itself: WebSocketHandler.check_origin
+    # refuses a handshake whose Origin is not this server's own host.
+
+    async def open_socket(self, path, origin):
+        here = "127.0.0.1:%d" % self.get_http_port()
+        request = HTTPRequest("ws://%s%s" % (here, path), headers={"Origin": origin})
+        return await websocket_connect(request)
+
+    @gen_test
+    async def test_cross_site_websockets_are_refused(self):
+        for path in ("/socket", "/vis_socket"):
+            with self.assertRaises(HTTPClientError) as refused:
+                await self.open_socket(path, "http://attacker.example")
+            self.assertEqual(refused.exception.code, 403, path)
+
+    @gen_test
+    async def test_own_websockets_are_allowed(self):
+        here = "http://127.0.0.1:%d" % self.get_http_port()
+        for path in ("/socket", "/vis_socket"):
+            connection = await self.open_socket(path, here)
+            connection.close()

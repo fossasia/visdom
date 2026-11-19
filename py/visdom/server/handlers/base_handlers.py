@@ -77,9 +77,18 @@ def is_cross_site_request(request, get_changes_state=False):
     # proxy allow-list: a page cannot set them on a cross-site request without
     # a CORS preflight, which visdom does not grant, and callers that can set
     # them freely (curl, scripts) are not stopped by this check anyway.
-    scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
+    forwarded_scheme = _first_forwarded(request, "X-Forwarded-Proto")
+    schemes = {forwarded_scheme or request.protocol}
+    if not forwarded_scheme and request.protocol == "http":
+        # A proxy that ends TLS without setting X-Forwarded-Proto passes an
+        # https page's requests on over plain http. Accepting https here is
+        # safe: the reverse, an http page posting to an https server, is the
+        # downgrade a network attacker could use, and it stays refused.
+        schemes.add("https")
     hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
-    allowed = {"{0}://{1}".format(scheme, host) for host in hosts if host}
+    allowed = {
+        "{0}://{1}".format(scheme, host) for scheme in schemes for host in hosts if host
+    }
     return origin.lower() not in allowed
 
 
