@@ -895,6 +895,50 @@ def test_check_connection_is_false_rather_than_raising(offline_client, status):
         assert offline_client.check_connection() is False
 
 
+def _construct(answer, **kwargs):
+    """Create an online client whose server answers its first POST with ``answer``.
+
+    ``answer`` is ``(status, reason, text)``, as for ``_answering``.
+    """
+    status, reason, text = answer
+    response = Mock(status_code=status, reason=reason, text=text)
+    with (
+        patch("requests.Session.post", return_value=response),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        return visdom.Visdom(use_incoming_socket=False, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "status, reason, answered",
+    [(404, "Not Found", "404 Not Found"), (500, None, "500"), (502, "Bad", "502 Bad")],
+    ids=["404", "500_without_reason", "502"],
+)
+def test_the_constructor_raises_connection_error_for_an_error_status(
+    status, reason, answered
+):
+    """So ``except ConnectionError`` around ``Visdom()`` still catches it."""
+    with pytest.raises(ConnectionError) as caught:
+        _construct((status, reason, "<html>"), raise_exceptions=True)
+    assert str(caught.value) == (
+        "Could not connect to server at http://localhost:8097: "
+        "it answered {}.".format(answered)
+    )
+    assert isinstance(caught.value.__cause__, visdom.ServerError)
+    assert caught.value.__cause__.status == status
+
+
+@pytest.mark.parametrize(
+    "raise_exceptions, status",
+    [(True, s) for s in visdom.REFUSED_STATUSES] + [(False, 502), (None, 502)],
+    ids=["refused_%d" % s for s in visdom.REFUSED_STATUSES] + ["false", "none"],
+)
+def test_the_constructor_still_builds_otherwise(raise_exceptions, status):
+    client = _construct((status, "why", "<html>"), raise_exceptions=raise_exceptions)
+    assert client.raise_exceptions is raise_exceptions
+
+
 @pytest.mark.parametrize("status", [400, 404, 500, 502])
 def test_win_exists_raises_for_an_error_status(offline_client, status):
     """Only check_connection() turns a server error into an answer."""

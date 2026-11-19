@@ -831,6 +831,17 @@ class TestAsyncVisdomErrors(tornado.testing.AsyncTestCase):
         assert await client.check_connection() is False
 
     @gen_test
+    async def test_create_raises_connection_error_for_an_error_status(self):
+        transport = self._answering_transport()
+        transport.answer = (502, b"<html>")
+        with pytest.raises(ConnectionError, match="it answered 502 ") as caught:
+            await AsyncVisdom.create(
+                transport=transport, raise_exceptions=True, use_incoming_socket=False
+            )
+        assert isinstance(caught.value.__cause__, ServerError)
+        assert caught.value.__cause__.status == 502
+
+    @gen_test
     async def test_the_transport_raises_for_an_error_status(self):
         transport = self._answering_transport()
         transport.raise_exceptions = True

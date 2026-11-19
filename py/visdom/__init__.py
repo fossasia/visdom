@@ -220,7 +220,8 @@ class ServerError(Exception):
     Raised by a client created with ``raise_exceptions=True``. ``status`` and
     ``reason`` are the server's own, and ``body`` is the error page a client
     without ``raise_exceptions`` returns instead. A refusal (401, 402, 403)
-    never raises it; it is only warned about.
+    never raises it; it is only warned about. The constructor raises
+    ``ConnectionError`` for it instead, as it does for a server it can't reach.
     """
 
     def __init__(self, status, reason="", body=""):
@@ -1212,7 +1213,16 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        result = self._send({"eid": env}, endpoint="env/" + env)
+        try:
+            result = self._send({"eid": env}, endpoint="env/" + env)
+        except ServerError as e:
+            # An error status here (a wrong base_url, a proxy, a crash) leaves no
+            # usable server either, so it raises the same ConnectionError.
+            raise ConnectionError(
+                "Could not connect to server at {}:{}: it answered {}.".format(
+                    self.server, self.port, e
+                )
+            ) from e
         if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
