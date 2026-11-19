@@ -1,0 +1,51 @@
+name: Thank contributor on merge
+
+# Posts a thank-you comment with an OpenTechSummit ticket invite
+# whenever a pull request is merged.
+#
+# Uses pull_request_target so it can comment on PRs from forks.
+# This is safe here because the workflow never checks out or runs PR code.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  thank-you:
+    # Only merged PRs, and skip bots like dependabot
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post thank-you comment
+        uses: actions/github-script@v7
+        env:
+          # Edit these two values
+          SIGNUP_URL: "https://eventyay.com/fossasia/ots2026/redeem/?voucher=FOSSASIA-CONTRIBUTOR"
+          LAST_DAY_TO_POST: "2026-11-04"
+        with:
+          script: |
+            // Stop posting once the event has passed
+            const today = new Date().toISOString().slice(0, 10);
+            if (today > process.env.LAST_DAY_TO_POST) {
+              core.info('Event has passed, no comment posted.');
+              return;
+            }
+
+            const author = context.payload.pull_request.user.login;
+            const body = [
+              `Thank you for your contribution, @${author}! The FOSSASIA team will be at **OpenTechSummit India** in Mumbai on **5 November 2026**, and if you're around, we'd love to connect with you in person.`,
+              ``,
+              `Sign up here to receive a complimentary ticket: ${process.env.SIGNUP_URL}`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });

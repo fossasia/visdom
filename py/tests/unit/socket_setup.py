@@ -23,6 +23,8 @@ def _client():
     client.event_handlers = {}
     client.socket_alive = False
     client.socket_connection_achieved = False
+    client.api_key = None
+    client.workspace = None
     return client
 
 
