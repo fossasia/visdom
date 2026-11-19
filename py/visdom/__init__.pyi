@@ -6,7 +6,19 @@
 
 import io
 import os
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Text,
+    Tuple,
+    Union,
+)
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -17,8 +29,14 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 # A required file path, with `Path`, custom `os.PathLike`, and `bytes` accepted.
 _Path = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]
 _OptPath = Optional[_Path]
-# Plotly's write_image also accepts writable binary streams.
-_PlotlyTarget = Union[_Path, io.BufferedIOBase, io.RawIOBase]
+
+
+class _WritableBinary(Protocol):
+    def write(self, s: bytes, /) -> Any: ...
+
+
+# Plotly's write_image also accepts writable binary streams and file-like targets.
+_PlotlyTarget = Union[_Path, io.BufferedIOBase, io.RawIOBase, _WritableBinary]
 _OptPlotlyTarget = Optional[_PlotlyTarget]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
