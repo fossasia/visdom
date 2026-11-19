@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import io
 import os
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
 
@@ -16,6 +17,9 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 # A required file path, with `Path`, custom `os.PathLike`, and `bytes` accepted.
 _Path = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]
 _OptPath = Optional[_Path]
+# Plotly's write_image also accepts writable binary streams.
+_PlotlyTarget = Union[_Path, io.BufferedIOBase, io.RawIOBase]
+_OptPlotlyTarget = Optional[_PlotlyTarget]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -228,14 +232,14 @@ class Visdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     def save_plotly_figure(
-        self, figure: Any, filepath: _Path, **kwargs: Any
+        self, figure: Any, filepath: _PlotlyTarget, **kwargs: Any
     ) -> None: ...
     def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptPath = ...,
+        save_path: _OptPlotlyTarget = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(
