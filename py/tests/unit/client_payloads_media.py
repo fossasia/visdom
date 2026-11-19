@@ -36,7 +36,7 @@ import base64
 import io
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -1075,7 +1075,7 @@ def test_svg_accepts_non_ascii_path(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
-def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client):
+def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client, tmp_path):
     class DummyFigure:
         def __init__(self):
             self.saved_to = None
@@ -1092,6 +1092,31 @@ def test_save_plotly_figure_decodes_bytes_and_pathlike(offline_client):
         offline_client.save_plotly_figure(fig, _BytesPath("figure.svg"))
         assert fig.saved_to == "figure.svg"
         assert isinstance(fig.saved_to, str)
+
+        path = tmp_path / "chart.png"
+        offline_client.save_plotly_figure(fig, path)
+        assert fig.saved_to == str(path)
+        assert isinstance(fig.saved_to, str)
+
+        stream = io.BytesIO()
+        offline_client.save_plotly_figure(fig, stream)
+        assert fig.saved_to is stream
+
+
+def test_plotlyplot_delegates_save_path(capture_send, tmp_path):
+    class DummyFigure(dict):
+        def write_image(self, filepath, **kwargs):
+            self["saved_to"] = filepath
+
+    fig = DummyFigure({"data": [], "layout": {}})
+    path = tmp_path / "plot.png"
+    mock_plotly = MagicMock()
+    with patch.dict(sys.modules, {"plotly": mock_plotly}):
+        with patch(
+            "visdom.json.dumps", return_value='{"data": [], "layout": {}}'
+        ):
+            capture_send(lambda v: v.plotlyplot(fig, save_path=path))
+    assert fig["saved_to"] == str(path)
 
 
 @pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
