@@ -1724,7 +1724,7 @@ client that names the environment the frame opens.
 Flags:
 - `--port`: server port. Default `8097`.
 - `--server`: server url, without the port. Default `http://localhost`.
-- `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with.
+- `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with. A server started with `-readonly` refuses that registration, as it refuses every write, so name an environment that already exists there or create it before the server goes read-only.
 - `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels, anything else is CSS.
 
 Re-running the cell embeds the same dashboard and reuses the same client rather

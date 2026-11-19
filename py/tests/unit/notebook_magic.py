@@ -18,6 +18,7 @@ interpreter and so runs in a subprocess.
 """
 
 import os
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -102,9 +103,22 @@ class TestParsing:
         with pytest.raises(ValueError):
             _parse(line)
 
-    def test_a_nonpositive_dimension_is_a_usage_error(self):
+    @pytest.mark.parametrize("line", ["--height 0", "--height -1", "--height=-400"])
+    def test_a_nonpositive_dimension_is_a_usage_error(self, line):
+        # A signed number is a number: '-1' used to pass the digit test, go
+        # through as a CSS length and reach the browser as 'height:-1'.
         with pytest.raises(ValueError):
-            _parse("--height 0")
+            _parse(line)
+
+    @pytest.mark.parametrize("line", ["--height ''", "--width ';display:none'"])
+    def test_a_dimension_the_embed_would_refuse_is_refused_here(self, line):
+        # show() is what rejects these, and the env is registered between the
+        # parse and the embed -- so a dimension checked only there would have
+        # created an env on the server on its way to the error.
+        with pytest.raises(ValueError, match="CSS length"):
+            notebook._build_parser().parse_args(shlex.split(line))
+
+        assert _FakeVisdom.built == []
 
     @pytest.mark.parametrize(
         "line,wanted",
@@ -112,6 +126,8 @@ class TestParsing:
             ("--port 99999", "between 1 and 65535"),
             ("--port eight", "port must be a number"),
             ("--height 0", "must be positive"),
+            ("--height -1", "must be positive"),
+            ("--height ''", "must be a CSS length"),
         ],
     )
     def test_a_bad_value_is_explained_rather_than_named(self, line, wanted):
@@ -119,7 +135,7 @@ class TestParsing:
         # ValueError's with "invalid _port value: ...", which leaks the
         # converter's own name and loses the explanation.
         with pytest.raises(ValueError, match=wanted):
-            _parse(line)
+            notebook._build_parser().parse_args(shlex.split(line))
 
     def test_an_unknown_flag_does_not_end_the_kernel(self):
         # argparse would answer this with SystemExit, which in a notebook reads
@@ -127,11 +143,17 @@ class TestParsing:
         with pytest.raises(ValueError, match="--logdir"):
             _parse("--logdir runs")
 
-    def test_help_is_returned_rather_than_raised(self):
-        printed = notebook.visdom_magic("--help")
+    def test_help_is_printed_rather_than_raised(self, capsys):
+        # Printed, not returned: a cell displays a returned string through its
+        # repr, which shows the usage in quotes with literal '\n' escapes
+        # where the line breaks should be.
+        assert notebook.visdom_magic("--help") is None
 
+        printed = capsys.readouterr().out
         assert "%visdom" in printed
         assert "--env" in printed
+        assert "\\n" not in printed
+        assert printed.count("\n") > 1
         assert _FakeVisdom.built == []
 
 
@@ -145,12 +167,30 @@ class TestServerUrl:
             ("https://visdom.example.com", "https://visdom.example.com"),
             ("http://localhost/", "http://localhost"),
             ("http://localhost/ignored", "http://localhost"),
+            ("  http://localhost  ", "http://localhost"),
+            ("localhost:8097", "http://localhost:8097"),
         ],
     )
     def test_it_is_shaped_the_way_the_client_keeps_it(self, given, expected):
         # The port is appended to this, so anything after the host would land
         # in the middle of the url.
         assert notebook._normalize_server(given) == expected
+
+    @pytest.mark.parametrize(
+        "given", ["htps://gpu-box.example.com", "ftp://gpu-box.example.com", "://box"]
+    )
+    def test_a_scheme_that_is_not_http_is_refused(self, given):
+        # The http fallback is for a bare host only. Re-parsing these as one
+        # reads 'htps://box' as the host 'htps:' and drops the rest, so the
+        # client was handed an address nothing could ever answer at.
+        with pytest.raises(ValueError, match="http or https"):
+            notebook._normalize_server(given)
+
+    def test_a_scheme_typo_never_reaches_the_client(self):
+        with pytest.raises(ValueError, match="http or https"):
+            notebook.visdom_magic("--server htps://gpu-box.example.com")
+
+        assert _FakeVisdom.built == []
 
 
 class TestEmbedding:
@@ -263,6 +303,20 @@ class TestExtension:
 
     def test_a_shell_without_a_magics_manager_is_tolerated(self):
         notebook.unload_ipython_extension(object())
+
+    def test_unload_leaves_a_magic_something_else_registered(self):
+        # Unloading this extension is not a licence to remove the %visdom
+        # someone else put there after it loaded.
+        shell = _FakeShell()
+        notebook.load_ipython_extension(shell)
+
+        def replacement(line=""):
+            return None
+
+        shell.register_magic_function(replacement, "line", "visdom")
+        notebook.unload_ipython_extension(shell)
+
+        assert shell.magics_manager.magics["line"]["visdom"] is replacement
 
 
 def test_the_magic_costs_nothing_until_it_is_loaded():

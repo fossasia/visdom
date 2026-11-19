@@ -20,10 +20,11 @@ the import cost of ``import visdom`` is unchanged.
 """
 
 import argparse
+import re
 import shlex
 from urllib.parse import urlparse, urlunparse
 
-from visdom import Visdom
+from visdom import Visdom, _embed_size
 from visdom.server.defaults import DEFAULT_PORT
 
 DEFAULT_SERVER = "http://localhost"
@@ -33,6 +34,9 @@ DEFAULT_WIDTH = "100%"
 # run_server's own port validator sits behind a tornado import, which %load_ext
 # should not pay for.
 MAX_PORT = 65535
+# A dimension that is a plain number, sign and all: '-1' is a number the embed
+# refuses, not a CSS length to hand the browser.
+_INTEGER = re.compile(r"[+-]?[0-9]+\Z")
 
 # Clients this kernel built, as (server, port, env) -> client. Reused
 # because a Visdom's session reaper lives as long as the process and holds its
@@ -75,22 +79,43 @@ def _port(value):
 
 
 def _dimension(value):
-    """An iframe dimension from the command line: digits are pixels, else CSS."""
-    if not value.lstrip("+").isdigit():
-        return value
-    pixels = int(value)
-    if pixels <= 0:
-        raise argparse.ArgumentTypeError(
-            "iframe dimensions must be positive, got {0}".format(value)
-        )
-    return pixels
+    """An iframe dimension from the command line: a number is pixels, else CSS.
+
+    Checked by ``show()``'s own ``_embed_size`` rather than by a rule of its
+    own, so the command line cannot accept a dimension the embed then refuses.
+    It is checked here, at parse time, because registering the environment
+    happens between the two: a dimension rejected by the embed would otherwise
+    have created an environment on the server on its way to the error.
+    """
+    text = value.strip()
+    dimension = int(text) if _INTEGER.match(text) else value
+    try:
+        _embed_size(dimension)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+    return dimension
 
 
 def _normalize_server(server):
-    """A server url with a scheme and nothing after the host, as ``Visdom`` keeps it."""
-    parsed = urlparse(server)
-    if parsed.scheme not in ("http", "https"):
-        parsed = urlparse("http://{0}".format(server))
+    """A server url with a scheme and nothing after the host, as ``Visdom`` keeps it.
+
+    ``http://`` is filled in for a bare host, but only for a bare host: an
+    explicit scheme has to be one a browser frame and the client can both
+    speak. Re-parsing any other scheme as a host reads ``htps://box`` as the
+    host ``htps:`` and drops the rest of the line, so a typo in the scheme
+    became an address nothing is listening on.
+    """
+    text = server.strip()
+    if "://" in text:
+        parsed = urlparse(text)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                "%visdom: --server must be an http or https url, got {0!r}".format(
+                    server
+                )
+            )
+    else:
+        parsed = urlparse("http://{0}".format(text))
     return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
 
 
@@ -156,7 +181,11 @@ def visdom_magic(line=""):
     parser = _build_parser()
     args = parser.parse_args(shlex.split(line))
     if args.help:
-        return parser.format_help()
+        # Printed rather than returned: a cell displays a returned string
+        # through its repr, which puts the usage in quotes with its line
+        # breaks spelled '\n'.
+        print(parser.format_help(), end="")
+        return None
 
     server = _normalize_server(args.server)
     client = _client_for(server, args.port, args.env)
@@ -169,7 +198,15 @@ def load_ipython_extension(ipython):
 
 
 def unload_ipython_extension(ipython):
-    """Unregister ``%visdom``. IPython calls this for ``%unload_ext``."""
+    """Unregister ``%visdom``. IPython calls this for ``%unload_ext``.
+
+    Only this extension's own entry: if a user or another extension has taken
+    the name over since ``%load_ext``, unloading this extension is not a
+    licence to remove what they registered.
+    """
     manager = getattr(ipython, "magics_manager", None)
-    if manager is not None:
-        manager.magics.get("line", {}).pop("visdom", None)
+    if manager is None:
+        return
+    line_magics = manager.magics.get("line", {})
+    if line_magics.get("visdom") is visdom_magic:
+        del line_magics["visdom"]

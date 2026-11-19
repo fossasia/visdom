@@ -962,8 +962,9 @@ def _without_userinfo(url):
     """``url`` with any ``user:password@`` dropped from its host.
 
     ``show()`` puts the server URL in markup a notebook saves and people
-    share, and ``__repr__`` prints it. A password typed into ``server=`` has
-    no business in either.
+    share, ``__repr__`` prints it, and the connection diagnostics name it in
+    a warning the same notebook saves. A password typed into ``server=`` has
+    no business in any of them.
     """
     parsed = urlparse(url)
     if "@" not in parsed.netloc:
@@ -1181,18 +1182,16 @@ class Visdom(object):
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
         if result is False:
+            # Without the userinfo: this names the server in a message that is
+            # printed, logged, and -- in a notebook -- saved into the .ipynb,
+            # none of which is a place for a password typed into server=.
+            unreachable = "Could not connect to server at {}:{}.".format(
+                _without_userinfo(self.server), self.port
+            )
             if self.raise_exceptions:
-                raise ConnectionError(
-                    "Could not connect to server at {}:{}.".format(
-                        self.server, self.port
-                    )
-                )
+                raise ConnectionError(unreachable)
             else:
-                logger.warning(
-                    "Could not connect to server at {}:{}.".format(
-                        self.server, self.port
-                    )
-                )
+                logger.warning(unreachable)
         # when talking to a server, get a backchannel
         if use_incoming_socket:
             self.setup_socket()
@@ -1629,7 +1628,7 @@ class Visdom(object):
                 "If using a self-signed certificate, pass ssl_verify=False. "
                 "If using mkcert, run: "
                 "export REQUESTS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem".format(
-                    self.server, self.port
+                    _without_userinfo(self.server), self.port
                 )
             )
             if self.raise_exceptions:
