@@ -565,6 +565,21 @@ class TestPipelineHistory(unittest.TestCase):
         logger = self.log(est, y=self.X[:, 0])
         self.assertIn("GradientBoostingRegressor train_score_", self.titles(logger))
 
+    def test_a_hist_gradient_boosting_step_keeps_its_zero_based_curves(self):
+        """The model's own axis and validation curve, in the Pipeline's panes."""
+        hgb = HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=10, random_state=0
+        )
+        est = self.pipeline(hgb).fit(self.X, self.y)
+        logger = self.log(est)
+        plots = {
+            c.kwargs["opts"]["title"]: c.kwargs for c in logger.viz.line.call_args_list
+        }
+        for attr in ("train_score_", "validation_score_"):
+            plot = plots["HistGradientBoostingClassifier " + attr]
+            self.assertEqual(plot["X"], list(range(len(getattr(est[-1], attr)))))
+            self.assertEqual(plot["win"], logger._win(est, attr))
+
     def test_a_nested_pipeline_is_unwrapped_to_the_model(self):
         mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
         est = self.pipeline(self.pipeline(mlp)).fit(self.X, self.y)
