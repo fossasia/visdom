@@ -54,6 +54,7 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     broadcast_tags,
     escape_eid,
+    label_number,
     legend_slots,
     compare_envs,
     load_env,
@@ -81,44 +82,42 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
-def pair_traces(pdata, new_data):
+def pair_traces(pdata, new_data, legend=None):
     """Pair each entry of an unnamed update with the trace it updates.
 
     Returns ``(index, entry)`` pairs, with ``index`` None for an entry that
     should become a new trace.
 
-    A labelled scatter append only carries the labels present in that batch,
-    so pairing by position put a batch holding only "dog" into the "cat"
-    trace. Entries are matched by name, and one naming no existing trace
-    becomes a new trace. Two cases stay positional: entries without names,
-    and entries named "1", "2", ... in order sent to a line whose traces were
-    renamed -- the client's default naming for a line whose legend renamed
-    some or all of its traces.
+    Each entry goes to the trace of its own label, and a label the plot hasn't
+    seen becomes a new trace. A name is the label itself, except for a label
+    number k sent without a legend: on a plot named from ``legend`` it means
+    the trace named ``legend[k - 1]``. If the traces carry other names, or
+    none, and there's no legend, nothing says which trace k is, so the entries
+    are paired by position, as they always were.
     """
+    positional = list(zip(range(len(pdata)), new_data))
     by_name = {}
     for i, trace in enumerate(pdata):
         by_name.setdefault(trace.get("name"), []).append(i)
-    names = [entry.get("name") for entry in new_data]
-    defaults = [str(i + 1) for i in range(len(new_data))]
-    unnamed = all(n is None for n in names)
-    # Traces named only by numbers were never renamed, so a "1" sent to them
-    # is a label the plot hasn't seen yet, not a line's default name.
-    renamed = not all(str(n).isdigit() for n in by_name if n is not None)
-    # A default name that is still on the plot must sit at its own position,
-    # and a marker-only scatter trace means "1" is a new label, not a line.
-    if unnamed or (
-        names == defaults
-        and renamed
-        and all(i in by_name.get(n, [i]) for i, n in enumerate(names))
-        and all(
-            "lines" in str(trace.get("mode") or "lines")
-            for trace in pdata[: len(names)]
-        )
-    ):
-        return list(zip(range(len(pdata)), new_data))
-    pairs = []
+    if all(entry.get("name") is None for entry in new_data):
+        return positional
+    legend = list(legend) if isinstance(legend, (list, tuple)) else None
+    numbered = all(label_number(n) is not None for n in by_name)
+    keys = []
     for entry in new_data:
-        free = by_name.get(entry.get("name"))
+        name = entry.get("name")
+        k = label_number(name)
+        if name in by_name or k is None:
+            keys.append(name)
+        elif legend is not None:
+            keys.append(legend[k - 1] if k <= len(legend) else name)
+        elif numbered:
+            keys.append(name)
+        else:
+            return positional
+    pairs = []
+    for key, entry in zip(keys, new_data):
+        free = by_name.get(key)
         pairs.append((free.pop(0) if free else None, entry))
     return pairs
 
@@ -190,6 +189,19 @@ class UpdateHandler(BaseHandler):
         if name is None:
             return list(range(len(pdata)))
         return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
+
+    @staticmethod
+    def trace_pairs(p, pdata, args, idxs, new_data):
+        """``(index, entry)`` pairs for ``args``, as ``update`` applies them.
+
+        A named update goes to the traces with that name. An unnamed one is
+        paired by ``pair_traces``, with the pane's legend unless the update
+        sent its own, whose names its entries then already carry.
+        """
+        if args.get("name") is not None:
+            return list(zip(idxs, new_data))
+        sent = (args.get("opts") or {}).get("legend")
+        return pair_traces(pdata, new_data, None if sent else p.get("legend"))
 
     @staticmethod
     def window_args_are_noops(p, args):
@@ -298,10 +310,7 @@ class UpdateHandler(BaseHandler):
         # Pair the entries exactly as ``update`` will, so only the traces it
         # touches are checked. An entry that becomes a new trace has no index
         # patch, so it takes the general path.
-        pairs = (
-            zip(idxs, new_data) if name is not None else pair_traces(pdata, new_data)
-        )
-        for i, new_trace in pairs:
+        for i, new_trace in UpdateHandler.trace_pairs(p, pdata, args, idxs, new_data):
             if i is None:
                 return False
             target = pdata[i]
@@ -712,10 +721,7 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        pairs = (
-            zip(idxs, new_data) if name is not None else pair_traces(pdata, new_data)
-        )
-        for idx, new_trace in pairs:
+        for idx, new_trace in UpdateHandler.trace_pairs(p, pdata, args, idxs, new_data):
             if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             if idx is None:

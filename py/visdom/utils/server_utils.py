@@ -598,11 +598,17 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def label_number(name):
+    """k for a trace the client named by its label (or line) number k, else None."""
+    if isinstance(name, str) and name.isascii() and name.isdigit() and name[0] != "0":
+        return int(name)
+    return None
+
+
 def _label_slot(name, legend):
     """The legend entry a trace still named by its label number takes."""
-    if isinstance(name, str) and name.isdecimal() and 1 <= int(name) <= len(legend):
-        return int(name) - 1
-    return None
+    k = label_number(name)
+    return k - 1 if k is not None and k <= len(legend) else None
 
 
 def legend_slots(names, legend, old_legend=None):

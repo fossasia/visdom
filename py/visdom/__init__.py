@@ -3368,9 +3368,10 @@ class Visdom(object):
 
         Appended points join the trace of their own label, and a label the
         plot hasn't seen yet gets a new trace. String labels name their own
-        traces, so they need no legend. With integer labels 1..K and
-        `opts.legend`, pass the same legend when appending so each label maps
-        to its legend name.
+        traces, so they need no legend. Integer labels 1..K keep the names
+        `opts.legend` gave them, whether or not the legend is passed again.
+        Points appended to traces named some other way, or not at all, are
+        added to them in order.
 
         The following `opts` are supported:
 

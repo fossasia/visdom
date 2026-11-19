@@ -834,6 +834,25 @@ def test_a_labelled_batch_patches_the_trace_of_its_label():
     assert all(path.startswith("/content/data/1/") for path in paths), paths
 
 
+def test_a_label_number_patches_the_trace_its_legend_named():
+    pane = plot_pane(traces=2, names=["cat", "dog"])
+    pane["legend"] = ["cat", "dog"]
+    args = labelled_args("2")
+
+    assert UpdateHandler.appendable(pane, args) is True
+    ops = assert_patches_agree(pane, args)
+    paths = [op["path"] for op in ops if op["op"] == "add"]
+    assert all(path.startswith("/content/data/1/") for path in paths), paths
+
+
+def test_label_numbers_on_unnamed_traces_take_the_fast_path_in_order():
+    pane = plot_pane(traces=2)
+    args = labelled_args("1", "2")
+
+    assert UpdateHandler.appendable(pane, args) is True
+    assert_patches_agree(pane, args)
+
+
 def test_a_batch_of_only_new_labels_keeps_the_diffed_path():
     """A new trace has no index patch, so the fast path would announce nothing."""
     pane = plot_pane(traces=2, names=["cat", "dog"])

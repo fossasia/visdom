@@ -11,6 +11,7 @@
 import pytest
 
 from visdom.server.handlers.web_handlers import pair_traces
+from visdom.utils.server_utils import label_number
 
 pytestmark = pytest.mark.unit
 
@@ -19,8 +20,8 @@ def traces(*names):
     return [{"name": n} for n in names]
 
 
-def paired(pdata, new_data):
-    return [(i, e["name"]) for i, e in pair_traces(pdata, new_data)]
+def paired(pdata, new_data, legend=None):
+    return [(i, e["name"]) for i, e in pair_traces(pdata, new_data, legend)]
 
 
 def test_a_matching_name_wins_over_position():
@@ -49,9 +50,22 @@ def test_default_names_on_a_partly_renamed_line_stay_positional():
     assert pairs == [(0, "1"), (1, "2")]
 
 
-def test_default_names_on_a_marker_scatter_are_new_labels():
+def test_a_label_number_on_traces_named_otherwise_stays_positional():
+    """Nothing says which of "cat" and "dog" label 1 is, so it isn't a new trace."""
     pdata = [{"name": n, "mode": "markers"} for n in ("cat", "dog")]
-    assert paired(pdata, traces("1")) == [(None, "1")]
+    assert paired(pdata, traces("1")) == [(0, "1")]
+
+
+def test_a_label_number_on_a_trace_given_its_own_name_stays_positional():
+    """``scatter(X, name="foo")``, then appended to without a name."""
+    pdata = [{"name": "foo", "mode": "markers"}]
+    assert paired(pdata, traces("1")) == [(0, "1")]
+
+
+def test_label_numbers_on_unnamed_traces_stay_positional():
+    pdata = [{"x": [0]}, {"x": [1]}]
+    assert paired(pdata, traces("2")) == [(0, "2")]
+    assert paired(pdata, traces("1", "2")) == [(0, "1"), (1, "2")]
 
 
 def test_default_names_on_a_line_with_markers_stay_positional():
@@ -69,9 +83,58 @@ def test_a_batch_of_only_new_classes_becomes_new_traces():
     assert paired(traces("cat", "dog"), traces("bird")) == [(None, "bird")]
 
 
-def test_non_default_names_with_no_match_become_new_traces():
-    """Only "1", "2", ... in order is the client's default naming."""
-    assert paired(traces("a", "b"), traces("2")) == [(None, "2")]
+@pytest.mark.parametrize(
+    "labels, expected",
+    [(["2"], [1]), (["1", "2"], [0, 1]), (["2", "1"], [1, 0])],
+    ids=["one", "both", "reversed"],
+)
+def test_a_label_number_joins_the_trace_its_legend_entry_named(labels, expected):
+    """A plot created with a legend, appended to without it."""
+    pairs = paired(traces("cat", "dog"), traces(*labels), legend=["cat", "dog"])
+    assert [i for i, _ in pairs] == expected
+
+
+def test_a_label_past_the_legend_becomes_a_new_trace():
+    pairs = paired(traces("cat", "dog"), traces("3"), legend=["cat", "dog"])
+    assert pairs == [(None, "3")]
+
+
+def test_a_legend_entry_without_a_trace_yet_becomes_a_new_trace():
+    pairs = paired(traces("cat", "dog"), traces("3"), legend=["cat", "dog", "bird"])
+    assert pairs == [(None, "3")]
+
+
+def test_a_trace_added_under_its_number_keeps_that_label():
+    pairs = paired(traces("cat", "dog", "3"), traces("3"), legend=["cat", "dog"])
+    assert pairs == [(2, "3")]
+
+
+def test_names_still_match_by_name_on_a_plot_with_a_legend():
+    pairs = paired(traces("cat", "dog"), traces("dog", "bird"), legend=["cat", "dog"])
+    assert pairs == [(1, "dog"), (None, "bird")]
+
+
+def test_a_legend_that_is_not_a_list_is_ignored():
+    assert paired(traces("cat", "dog"), traces("2"), legend="cat") == [(0, "2")]
+
+
+@pytest.mark.parametrize(
+    "name, number",
+    [
+        ("1", 1),
+        ("12", 12),
+        ("0", None),
+        ("01", None),
+        ("-1", None),
+        ("1.0", None),
+        ("\u0663", None),
+        ("", None),
+        (3, None),
+        (None, None),
+    ],
+)
+def test_label_number_is_only_the_clients_own_numbering(name, number):
+    assert label_number(name) == number
 
 
 def test_entries_without_names_stay_positional():

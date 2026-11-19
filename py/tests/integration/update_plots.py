@@ -303,7 +303,8 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
         self.append(win, ("1", 5), ("2", 50))
         self.assertEqual(self.xs(win), {"1": [1, 5], "val": [1, 50]})
 
-    def test_a_numeric_label_on_a_marker_scatter_becomes_its_own_trace(self):
+    def test_a_numeric_label_on_traces_named_otherwise_stays_positional(self):
+        """Nothing says which trace label 1 is, so it isn't made a new one."""
         win = self.create_window(
             [
                 {"type": "scatter", "x": [1], "y": [1], "name": n, "mode": "markers"}
@@ -312,7 +313,30 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
             layout={"title": "classes"},
         )
         self.append(win, ("1", 9))
-        self.assertEqual(self.xs(win), {"cat": [1], "dog": [1], "1": [9]})
+        self.assertEqual(self.xs(win), {"cat": [1, 9], "dog": [1]})
+
+    def test_a_numeric_label_joins_the_trace_its_creation_legend_named(self):
+        """A scatter created with a legend, appended to without it."""
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [x], "y": [x], "name": n, "mode": "markers"}
+                for n, x in (("cat", 1), ("dog", 2))
+            ],
+            opts={"legend": ["cat", "dog"]},
+            layout={"title": "classes"},
+        )
+        self.append(win, ("2", 9))
+        self.append(win, ("1", 8), ("2", 7))
+        self.assertEqual(self.xs(win), {"cat": [1, 8], "dog": [2, 9, 7]})
+
+    def test_numeric_labels_on_unnamed_traces_stay_positional(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [x], "y": [x]} for x in (1, 2)],
+            layout={"title": "unnamed"},
+        )
+        self.append(win, ("1", 8), ("2", 9))
+        self.append(win, ("2", 7))
+        self.assertEqual([t["x"] for t in self.traces(win)], [[1, 8, 7], [2, 9]])
 
     def test_a_new_numeric_label_becomes_its_own_trace(self):
         """Traces named "2" and "3" were never renamed, so "1" is new."""
