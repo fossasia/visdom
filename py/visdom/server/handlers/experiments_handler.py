@@ -117,8 +117,12 @@ def _resident_experiments(state, env_ids=None):
     never edited in place once it is stored: :class:`ExperimentStore` writes one
     by rebinding ``env["experiment"]`` to a freshly built ``to_dict``, and
     ``retarget_experiment`` only ever rewrites one belonging to an env that was
-    just deep-copied. The worker therefore reads a blob the loop can replace
-    but cannot alter, so the most it can see is a slightly older experiment.
+    just deep-copied. That rebound dict is shallow, so it can share the metric
+    series of the blob it replaced; the series is append-only and copied before
+    it is appended to (:class:`~visdom.experiments.models.LazyMetricList`), so a
+    list reachable from a stored blob never grows underneath a reader either.
+    The worker therefore reads a blob the loop can replace but cannot alter, so
+    the most it can see is a slightly older experiment.
 
     ``env_ids`` bounds the walk to the ids a selection can reach: an
     ``env_ids`` spec names its destinations up front, so there is no reason to

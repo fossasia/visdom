@@ -31,11 +31,12 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 import logging
 import warnings
 import time
 import errno
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -55,9 +56,18 @@ if sys.version_info < (3, 12):
 
 
 def _normalize_tsne(Y):
+    """Rescale 2-D t-SNE coordinates to [-1, 1], ignoring NaN when finding bounds."""
     Y = np.asarray(Y)
-    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
-    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xmin, xmax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 0]))
+        else (np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0]))
+    )
+    ymin, ymax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 1]))
+        else (np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1]))
+    )
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
@@ -80,41 +90,75 @@ def _get_perplexity(num_entities):
     return min(base, max_perplexity)
 
 
-try:
-    from openTSNE import TSNE as TSNE_OPEN
+NO_TSNE_BACKEND = (
+    "In order to use the embeddings feature, you'll "
+    "need to install a backend to support the calculation. "
+    "Currently we support openTSNE "
+    "(https://github.com/pavlin-policar/openTSNE) for "
+    "t-SNE computation, or the bhtsne implementation at "
+    "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+    "pip install openTSNE, or install bhtsne by cloning it into "
+    "the /py/visdom/extra_deps/ directory and running the "
+    "installation steps as listed on that github "
+    "in the created /py/visdom/extra_deps/bhtsne directory."
+)
 
-    def do_tsne(X):
-        perplexity = _get_perplexity(len(X))
-        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
-        Y = tsne.fit(X)
-        return _normalize_tsne(Y)
+#: The t-SNE backend, resolved on first use and kept. ``None`` means the
+#: search has not run yet, which is not the same as having run and found
+#: nothing -- that is recorded as a function that raises.
+_tsne_backend = None
 
-except ImportError:
+
+def _resolve_tsne_backend():
+    """Pick a t-SNE backend, preferring openTSNE over the bundled bhtsne.
+
+    The search used to run at import time, which meant every ``import visdom``
+    paid for openTSNE -- and so for scikit-learn and SciPy underneath it --
+    to support ``embeddings()``, the one call that needs them. Running it here
+    keeps the same preference order and the same error, and charges it to the
+    callers that actually reach for a backend.
+    """
+    try:
+        from openTSNE import TSNE as TSNE_OPEN
+    except ImportError:
+        pass
+    else:
+
+        def with_opentsne(X):
+            perplexity = _get_perplexity(len(X))
+            tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+            Y = tsne.fit(X)
+            return _normalize_tsne(Y)
+
+        return with_opentsne
+
     try:
         import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    except ImportError:
+        pass
+    else:
 
-        def do_tsne(X):
+        def with_bhtsne(X):
             perplexity = _get_perplexity(len(X))
             Y = bhtsne.run_bh_tsne(
                 X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
             )
             return _normalize_tsne(Y)
 
-    except ImportError:
+        return with_bhtsne
 
-        def do_tsne(X):
-            raise Exception(
-                "In order to use the embeddings feature, you'll "
-                "need to install a backend to support the calculation. "
-                "Currently we support openTSNE "
-                "(https://github.com/pavlin-policar/openTSNE) for "
-                "t-SNE computation, or the bhtsne implementation at "
-                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
-                "pip install openTSNE, or install bhtsne by cloning it into "
-                "the /py/visdom/extra_deps/ directory and running the "
-                "installation steps as listed on that github "
-                "in the created /py/visdom/extra_deps/bhtsne directory."
-            )
+    def without_a_backend(X):
+        raise Exception(NO_TSNE_BACKEND)
+
+    return without_a_backend
+
+
+def do_tsne(X):
+    """Embed ``X`` in two dimensions with whichever backend is installed."""
+    global _tsne_backend
+    if _tsne_backend is None:
+        _tsne_backend = _resolve_tsne_backend()
+    return _tsne_backend(X)
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -128,6 +172,30 @@ except Exception:
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
+REFUSED_STATUSES = (401, 402, 403)
+REFUSALS_REMEMBERED = 100
+
+
+def _one_line(text):
+    return "".join(ch for ch in " ".join(text.split()) if ch.isprintable())
+
+
+def _refusal_reason(body):
+    """The reason a server gave for turning a request down, as one line."""
+    text = (body or "").strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("detail", "error", "message"):
+            if isinstance(parsed.get(key), str) and _one_line(parsed[key]):
+                return _one_line(parsed[key])[:200]
+    if not text or text.startswith("<"):
+        return "no reason given"
+    return _one_line(text)[:200]
+
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
@@ -178,12 +246,34 @@ from visdom.utils.shared_utils import NanSafeEncoder
 
 
 def loadfile(filename):
+    filename = os.fsdecode(filename)
     assert os.path.isfile(filename), "could not find file %s" % filename
-    fileobj = open(filename, "rb")
-    assert fileobj, "could not open file %s" % filename
-    str = fileobj.read()
-    fileobj.close()
-    return str
+    with open(filename, "rb") as fileobj:
+        return fileobj.read()
+
+
+def _finite_range(ar):
+    """Smallest and largest finite value in `ar`, or `None` if it has none.
+
+    This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
+    materialise: the fancy index builds a compacted copy of every finite
+    element just to read two numbers off it, which on an image-sized array is
+    a second full array per call. `fmin`/`fmax` skip NaN the same way and
+    reduce in place, so only an infinity -- which they propagate rather than
+    skip -- needs the mask at all.
+    """
+    if ar.size == 0:
+        return None
+    ar_min = np.fmin.reduce(ar, axis=None)
+    ar_max = np.fmax.reduce(ar, axis=None)
+    if np.isnan(ar_min):  # fmin only returns NaN when every value is NaN
+        return None
+    if np.isneginf(ar_min) or np.isposinf(ar_max):
+        finite = ar[np.isfinite(ar)]
+        if finite.size == 0:
+            return None
+        return float(finite.min()), float(finite.max())
+    return float(ar_min), float(ar_max)
 
 
 def _title2str(opts):
@@ -381,16 +471,17 @@ def _markerColorCheck(mc, X, Y, L):
     mc = np.uint8(mc)
 
     if mc.ndim == 1:
-        markercolor = ["rgba(0, 0, 255, %s)" % (mc[i] / 255.0) for i in range(len(mc))]
+        markercolor = ["rgba(0, 0, 255, %s)" % alpha for alpha in (mc / 255.0).tolist()]
     else:
-        markercolor = ["#%02x%02x%02x" % (i[0], i[1], i[2]) for i in mc]
+        markercolor = ["#%02x%02x%02x" % (r[0], r[1], r[2]) for r in mc.tolist()]
 
+    labels = Y.tolist()
     if mc.shape[0] != X.shape[0]:
-        markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]
+        markercolor = [markercolor[label - 1] for label in labels]
 
     ret = {}
-    for k, v in enumerate(markercolor):
-        ret[Y[k]] = ret.get(Y[k], []) + [v]
+    for label, color in zip(labels, markercolor):
+        ret.setdefault(label, []).append(color)
 
     return ret
 
@@ -412,7 +503,10 @@ def _markerSizeCheck(ms, X, Y):
         "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+    if len(Y) == 0:
+        return np.array([], dtype=float)
+
+    return ms[np.asarray(Y) - 1].astype(float)
 
 
 def _lineColorCheck(lc, K):
@@ -475,7 +569,7 @@ def _assert_opts(opts):
     if opts.get("markersize") is not None:
         ms = opts.get("markersize")
         if isinstance(ms, (list, tuple, np.ndarray)):
-            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+            assert np.all(np.asarray(ms) > 0), "all marker sizes must be positive"
         else:
             assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
@@ -499,6 +593,19 @@ def _assert_opts(opts):
         assert (
             opts.get("jpgquality") > 0 and opts.get("jpgquality") <= 100
         ), "JPG quality should be number between 0 and 100"
+
+    # Unlike jpgquality, this one is guarded on None rather than on being
+    # truthy: 0 is a documented level (store, no compression), not an unset
+    # value.
+    if opts.get("compresslevel") is not None:
+        assert isinstance(
+            opts.get("compresslevel"), numbers.Integral
+        ) and not isinstance(
+            opts.get("compresslevel"), bool
+        ), "PNG compress level should be an integer"
+        assert (
+            0 <= opts.get("compresslevel") <= 9
+        ), "PNG compress level should be an integer between 0 and 9"
 
     if opts.get("opacity"):
         assert isnum(opts.get("opacity")), "opacity should be a number"
@@ -552,22 +659,53 @@ def _assert_sunburst_opts(opts):
         ), "branchvalues must be 'total' or 'remainder'"
 
 
+#: Extra types ``_to_numpy`` should unwrap, beyond the torch ones it finds on
+#: its own. Left here as the extension point the module-scope list used to be.
 torch_types = []
-try:
-    import torch
 
-    torch_types.append(torch.Tensor)
-    torch_types.append(torch.nn.Parameter)
-except (ImportError, AttributeError):
-    pass
+
+def _resolve_torch_types():
+    """Return the torch tensor types to unwrap, without importing torch.
+
+    ``import torch`` at module scope cost every ``import visdom`` well over a
+    second, to build an isinstance tuple. It is not needed: a caller cannot be
+    holding a tensor unless they imported torch themselves, so torch being
+    absent from ``sys.modules`` is proof there is nothing here to unwrap. When
+    it is present this is three attribute reads, not an import.
+
+    The types are read fresh every call rather than cached. A cache would have
+    to be invalidated whenever torch rebinds them -- a reload keeps the same
+    module object, and a torch caught mid-import has no ``nn`` yet but grows
+    one moments later -- and a stale entry there is silent: tensors would stop
+    being converted and reach the server as unserialisable objects. Rereading
+    costs a dict lookup per plotted argument, which is what the old
+    module-scope list cost to iterate.
+
+    Each type is resolved on its own. A partially initialised torch -- an
+    ``import visdom`` from inside torch's own import, or a stub standing in
+    for it -- can have ``Tensor`` without ``nn`` yet, and dropping the type it
+    does have would pass a real tensor through unconverted, to reach the
+    server as an object it cannot serialise.
+    """
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return ()
+    nn = getattr(torch, "nn", None)
+    kinds = (getattr(torch, "Tensor", None), getattr(nn, "Parameter", None))
+    return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    for kind in torch_types:
-        if isinstance(a, kind):
-            return a.detach().cpu().numpy()
+    # one isinstance against the whole tuple rather than a Python loop: this
+    # runs per argument of every plot call, and with no torch imported and
+    # nothing registered in torch_types it is a single dict lookup.
+    kinds = _resolve_torch_types()
+    if torch_types:
+        kinds = tuple(torch_types) + kinds
+    if kinds and isinstance(a, kinds):
+        return a.detach().cpu().numpy()
     return a
 
 
@@ -734,13 +872,44 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
 
     label_to_idx = {label: i for i, label in enumerate(labels)}
     n = len(labels)
-    cm = np.zeros((n, n), dtype=int)
-    skipped = 0
-    for t, p in zip(y_true, y_pred):
-        if t in label_to_idx and p in label_to_idx:
-            cm[label_to_idx[t], label_to_idx[p]] += 1
-        else:
-            skipped += 1
+
+    def label_indices(values):
+        """Map a value vector to label indices, -1 where the label is unknown.
+
+        The dict is consulted once per *distinct* value rather than once per
+        sample, so a long run of a few labels costs a sort and a gather.
+        Object arrays may hold values that cannot be ordered against each
+        other (``None`` beside numbers, numbers beside strings), which the
+        sort inside ``np.unique`` rejects, so those keep the per-sample
+        lookup, which only ever needs the labels to be hashable.
+        """
+        if values.dtype == object:
+            return np.fromiter(
+                (label_to_idx.get(value, -1) for value in values.tolist()),
+                dtype=np.intp,
+                count=values.shape[0],
+            )
+        uniq, inverse = np.unique(values, return_inverse=True)
+        lookup = np.fromiter(
+            (label_to_idx.get(value, -1) for value in uniq.tolist()),
+            dtype=np.intp,
+            count=uniq.shape[0],
+        )
+        return lookup[inverse.ravel()]
+
+    true_idx = label_indices(y_true)
+    pred_idx = label_indices(y_pred)
+    counted = (true_idx >= 0) & (pred_idx >= 0)
+    skipped = int(counted.shape[0] - np.count_nonzero(counted))
+
+    cm = (
+        np.bincount(
+            true_idx[counted] * n + pred_idx[counted],
+            minlength=n * n,
+        )
+        .reshape(n, n)
+        .astype(int)
+    )
     if skipped > 0:
         warnings.warn(
             "{} samples had labels not in the provided labels list "
@@ -788,14 +957,114 @@ def _decode_binary_arrays(obj):
                     base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
                 )
                 if "shape" in obj:
-                    arr = arr.reshape(obj["shape"])
+                    shape = obj["shape"]
+                    if isinstance(shape, str):
+                        shape = tuple(int(dim) for dim in shape.split(","))
+                    arr = arr.reshape(shape)
                 return arr.tolist()
-            except (binascii.Error, ValueError, TypeError):
+            except (binascii.Error, ValueError, TypeError, OverflowError):
                 return obj
         return {k: _decode_binary_arrays(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _without_userinfo(url):
+    """``url`` with any ``user:password@`` dropped from its host.
+
+    ``show()`` puts the server URL in markup a notebook saves and people
+    share, and ``__repr__`` prints it. A password typed into ``server=`` has
+    no business in either.
+    """
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = "[{0}]".format(host)
+    if parsed.port is not None:
+        host = "{0}:{1}".format(host, parsed.port)
+    return urlunparse((parsed.scheme, host, "", "", "", ""))
+
+
+def _url_eid(eid):
+    """An env id as the server keys it, for building a dashboard URL.
+
+    ``escape_eid`` is the server's own choke point for this, but it lives in
+    ``visdom.utils.server_utils`` and the client deliberately does not import
+    the server side; ``Visdom.__init__`` inlines the same replacements for
+    ``self.env`` for the same reason. Whitespace is stripped here because the
+    server strips it too, so ``"run 7 "`` is keyed -- and routed -- as
+    ``"run 7"``.
+    """
+    return (
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
+    )
+
+
+def _embed_size(value):
+    """An iframe dimension as a CSS length.
+
+    A number is pixels, matching the ``height=600`` default, and has to be
+    finite and positive; a string is the CSS the caller wants, such as
+    ``"100%"`` or ``"40vh"``. It has to be a length and nothing else -- these end up in a ``style`` attribute, and a
+    second declaration smuggled in after a semicolon would be styling the
+    notebook rather than sizing the frame.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        text = str(value).strip()
+        if not text or ";" in text:
+            raise ValueError(
+                "iframe dimensions must be a CSS length, got {0!r}".format(value)
+            )
+        return text
+    if not math.isfinite(value):
+        # nan and inf are Numbers that survive the comparison below -- nan
+        # fails every comparison, inf passes -- and would format into a
+        # 'nanpx' / 'infpx' length the browser drops on the floor.
+        raise ValueError("iframe dimensions must be finite, got {0!r}".format(value))
+    if value <= 0:
+        raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
+    if isinstance(value, numbers.Integral):
+        return "{0}px".format(int(value))
+    return "{0}px".format(value)
+
+
+class _NotebookEmbed:
+    """A dashboard URL that renders as an iframe in a notebook cell.
+
+    Jupyter, VS Code and every other notebook frontend call ``_repr_html_``
+    when the displayed object has one, so nothing here imports IPython. A
+    terminal has
+    no such hook and falls back to ``__repr__``, which is the URL itself rather
+    than a wall of markup.
+    """
+
+    def __init__(self, url, height=600, width="100%", note=None):
+        self.url = url
+        # Normalized up front so a bad dimension raises from the show() call
+        # that passed it, rather than later from whatever displays the result.
+        self.height = _embed_size(height)
+        self.width = _embed_size(width)
+        self.note = note
+
+    def __repr__(self):
+        return self.note if self.url is None else self.url
+
+    def _repr_html_(self):
+        if self.url is None:
+            return "<p>{0}</p>".format(html.escape(self.note))
+        # The sizes go in the style, not in width=/height=: the HTML attributes
+        # are a legacy length that reads '40vh' as 40 pixels and drops the unit.
+        style = "width:{0};height:{1};border:0".format(self.width, self.height)
+        return '<iframe src="{0}" style="{1}" frameborder="0"></iframe>'.format(
+            html.escape(self.url, quote=True), html.escape(style, quote=True)
+        )
 
 
 class Visdom(object):
@@ -869,6 +1138,8 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self.use_preflight_checks = use_preflight_checks
+        # Optional hook used by tracked clients to capture replay messages.
+        self._on_send = None
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1253,6 +1524,35 @@ class Visdom(object):
                         + "\n"
                     )
 
+    def _note_refusal(self, status, body):
+        """Say so when the server turns a request down.
+
+        A hosted server answers 401, 402 or 403 for a key that is wrong,
+        revoked or read-only, for a workspace this key may not reach, and for a
+        plan that is out of storage. The body still goes back to the caller,
+        as it does for any status, but on its own it reads as a window id, so a
+        script whose every plot was refused ran to the end looking as if it had
+        worked.
+
+        A warning and never an exception, whatever ``raise_exceptions`` says:
+        a refused write has to look the way it does for ``requests``, which
+        does not raise on a 4xx. Each distinct reason is logged once, so a
+        training loop is not flooded.
+        """
+        if status not in REFUSED_STATUSES:
+            return
+        message = "The visdom server refused this request ({0}): {1}".format(
+            status, _refusal_reason(body)
+        )
+        seen = self.__dict__.setdefault("_refusals_seen", OrderedDict())
+        if message in seen:
+            seen.move_to_end(message)
+            return
+        seen[message] = True
+        if len(seen) > REFUSALS_REMEMBERED:
+            seen.popitem(last=False)
+        logger.warning(message)
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1265,6 +1565,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
             raise
@@ -1280,6 +1581,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
+            self._note_refusal(r.status_code, r.text)
             return r.text
 
     def _send(
@@ -1318,6 +1620,9 @@ class Visdom(object):
 
         if not from_log:
             self._log(msg, endpoint)
+
+        if self._on_send is not None:
+            self._on_send(msg, endpoint)
 
         if self.offline:
             # If offline, don't even try to post
@@ -1891,6 +2196,102 @@ class Visdom(object):
             endpoint, msg = json.loads(entry)
             self._send(msg, endpoint, from_log=True)
 
+    def restore_run(self, json_path, env=None, delay=None):
+        """Replay plots from a run recorded with ``record_data=True``.
+
+        ``json_path`` names the run's metadata file; its sibling
+        ``.events.jsonl`` file must also exist. Plots are sent in order to
+        ``env`` (or the recorded environment by default). Set ``delay`` to
+        wait between calls.
+
+        Returns a summary with the run details and replay results. Raises
+        ``RunRestoreError`` if the files contain no replayable calls and
+        ``ValueError`` if ``delay`` is invalid.
+        """
+        from visdom.tracking.restore import restore_run
+
+        return restore_run(json_path, self, env=env, delay=delay)
+
+    # Notebooks
+
+    def _dashboard_url(self, env=None):
+        """The browser URL for one of this server's environments.
+
+        ``env`` defaults to this client's own environment, as it does
+        everywhere else in the API. The server renders the dashboard at
+        ``/env/<eid>`` as well as at its root, so the URL deep-links straight
+        to that environment.
+        """
+        base = "{0}:{1}{2}".format(
+            _without_userinfo(self.server), self.port, self.base_url
+        )
+        eid = _url_eid(self.env if env is None else env)
+        return "{0}/env/{1}".format(base, quote(eid, safe=""))
+
+    def _repr_html_(self):
+        return self.show()._repr_html_()
+
+    def show(self, env=None, height=600, width="100%"):
+        """Embed the dashboard in a notebook cell.
+
+        Returns an object that renders as an iframe pointing at this client's
+        server, so displaying it in Jupyter or VS Code shows the live
+        dashboard where the plotting code is. A bare ``vis`` in a cell does
+        the same thing, by way of ``_repr_html_``.
+
+        Args:
+            env : str, optional
+                Environment to open; defaults to this client's own.
+            height : number or str, optional
+                Iframe height. A number is pixels; a string is a CSS length
+                such as ``"40vh"``. Both are applied as CSS.
+            width : number or str, optional
+                Iframe width. Defaults to the full cell width.
+
+        Nothing here imports IPython -- a notebook calls ``_repr_html_``
+        itself -- so this works without any extra dependency. Outside a
+        notebook the object prints the URL instead.
+
+        The environment has to exist on the server, which plotting into it is
+        what does: the dashboard answers ``404`` for an env it has never seen,
+        and that is what the frame would show.
+
+        The URL is built from this client's own ``server``, ``port`` and
+        ``base_url``, so it has to be an address the *browser* can reach --
+        which is the kernel's own machine when the notebook runs where you
+        are. A kernel somewhere else (a remote host, or a hosted notebook
+        such as Colab or Kaggle) serves its frontend from another origin, so
+        ``localhost`` there names the browser's machine and the frame stays
+        blank; that needs a port forward or a reverse proxy, and the client
+        pointed at that address.
+
+        Three things the embed cannot do anything about: a server started with
+        ``-enable_login`` serves the login form inside the frame, a JupyterLab
+        reached over HTTPS blocks a plain-HTTP frame to another port, and a
+        workspace-scoped client gets the server's default view because a
+        browser frame cannot send the header that selects a workspace.
+        """
+        if self.offline:
+            return _NotebookEmbed(
+                None,
+                height,
+                width,
+                note=(
+                    "This Visdom client is offline, so there is no server to "
+                    "embed. Point a client at a running server to see its "
+                    "dashboard here."
+                ),
+            )
+        if self.workspace:
+            logger.warning(
+                "This client is scoped to workspace %r, but a browser frame "
+                "cannot carry the X-Visdom-Workspace header that scoping "
+                "needs. The embedded dashboard shows the server's default "
+                "view, not this workspace.",
+                self.workspace,
+            )
+        return _NotebookEmbed(self._dashboard_url(env), height, width)
+
     # Content
 
     def text(self, text, win=None, env=None, opts=None, append=False):
@@ -2302,6 +2703,7 @@ class Visdom(object):
 
         - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
@@ -2309,9 +2711,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2363,6 +2765,8 @@ class Visdom(object):
         if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -2435,6 +2839,7 @@ class Visdom(object):
         - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
         - `opts.caption`:  caption below the image (`string`; optional)
         - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
         """
         opts = {} if opts is None else dict(opts)
@@ -2445,9 +2850,9 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite = img[np.isfinite(img)]
-            if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+            finite_range = _finite_range(img)
+            if finite_range is not None:
+                img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
@@ -2490,13 +2895,15 @@ class Visdom(object):
                     heatmap.shape, H, W
                 )
             )
-        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        h_min, h_max = float(heatmap.min()), float(heatmap.max())
-        if h_min < 0.0 or h_max > 1.0:
+        finite = np.isfinite(heatmap)
+        h_min = float(np.min(heatmap, where=finite, initial=np.inf))
+        h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
+        if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.zeros_like(heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
         try:
@@ -2532,6 +2939,8 @@ class Visdom(object):
         if jpgquality is not None:
             image_type = "jpeg"
             imsave_args["quality"] = jpgquality
+        elif opts.get("compresslevel") is not None:
+            imsave_args["compress_level"] = int(opts["compresslevel"])
         im.save(buf, format=image_type.upper(), **imsave_args)
         b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
 
@@ -2615,27 +3024,55 @@ class Visdom(object):
         # raised, so drop the offset in that case.
         offset = padding + 1 if padding > 0 else 0
 
-        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
-        k = 0
-        for y in range(ymaps):
-            for x in range(xmaps):
-                if k >= nmaps:
-                    break
-                h_start = y * height + offset
-                h_end = h_start + tensor.shape[2]
-                w_start = x * width + offset
-                w_end = w_start + tensor.shape[3]
-                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
-                k += 1
+        # The grid has always been float64, which `image()` then takes through
+        # its float branch: eight bytes a pixel for what is usually a uint8
+        # batch, plus that branch's full-size temporaries. Staying in uint8 is
+        # only *identical* while that branch does no scaling, and it has two
+        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
+        # which includes the fill value of 1 itself -- so a uint8 batch holding
+        # nothing above 1 keeps the float grid, and with it the stretch pinned
+        # by `test_images_padding_colour_follows_the_input_dtype`. And
+        # `opts.normalize` asks for the min-max stretch explicitly, which the
+        # branch is the only thing that implements: a uint8 grid never reaches
+        # it, so the option would silently do nothing. Deciding this costs one
+        # C-speed pass over the batch and saves a copy of it at eight times the
+        # width.
+        normalize = opts is not None and opts.get("normalize", False)
+        grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+            grid = np.ones(grid_shape, dtype=np.uint8)
+        else:
+            grid = np.ones(grid_shape)
+
+        # One strided write per row of cells instead of one per tile: the grid
+        # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
+        # tile's slot at once, and a view is all of reshape/transpose/slice, so
+        # assigning into it writes straight through to `grid`.
+        cells = grid.reshape(tensor.shape[1], ymaps, height, xmaps, width).transpose(
+            1, 3, 0, 2, 4
+        )
+        slots = cells[
+            ..., offset : offset + tensor.shape[2], offset : offset + tensor.shape[3]
+        ]
+        full_rows = nmaps // xmaps
+        if full_rows:
+            slots[:full_rows] = tensor[: full_rows * xmaps].reshape(
+                full_rows, xmaps, *tensor.shape[1:]
+            )
+        remainder = nmaps - full_rows * xmaps
+        if remainder:
+            slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
         return self.image(grid, win, env, opts)
 
     @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
-        This function plays audio. It takes as input the filename of the audio
-        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
-        stereo audio). The function does not support any plot-specific `opts`.
+        This function plays audio. It takes as input the filename or `pathlib.Path`
+        of the audio file (`os.PathLike` supported) or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        stereo audio). The `(channels, N)` layout that torchaudio and librosa
+        return (`1xN` or `2xN`) is accepted too. The function does not support
+        any plot-specific `opts`.
 
         The following `opts` are supported:
 
@@ -2650,9 +3087,16 @@ class Visdom(object):
             tensor is not None or audiofile is not None
         ), "should specify audio tensor or file"
         if tensor is not None:
+            # torchaudio and librosa give (channels, N); scipy writes (N, channels).
+            # (N, 2) already is stereo, so only other shapes are turned around.
+            if tensor.ndim == 2 and tensor.shape[1] != 2:
+                if tensor.shape[0] == 2:
+                    tensor = tensor.T
+                elif 1 in tensor.shape:
+                    tensor = tensor.reshape(-1)
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
-            ), "tensor should be 1D vector or 2D matrix with 2 columns"
+            ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
@@ -2661,6 +3105,9 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
+            # Non-finite samples (NaN, +/-inf) would make max_val, and the
+            # whole scaled tensor, non-finite. Treat them as silence.
+            tensor = np.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
@@ -2669,6 +3116,7 @@ class Visdom(object):
                 tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
+        audiofile = os.fsdecode(audiofile)
         extension = audiofile.split(".")[-1].lower()
         mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
         mimetype = mimetypes.get(extension)
@@ -2734,8 +3182,8 @@ class Visdom(object):
         self, tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None
     ):
         """
-        This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        This function plays a video. It takes as input the filename or `pathlib.Path`
+        of the video `videofile` (`os.PathLike` supported) or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
         the frames of the video as input, as specified in `dim`. The color
         channels must be in BGR order.
 
@@ -2762,6 +3210,7 @@ class Visdom(object):
         ), "should specify video tensor or file"
 
         if tensor is None:
+            videofile = os.fsdecode(videofile)
             extension = videofile.split(".")[-1].lower()
             mimetypes = {"mp4": "mp4", "ogv": "ogg", "avi": "avi", "webm": "webm"}
             mimetype = mimetypes.get(extension)
@@ -3062,9 +3511,30 @@ class Visdom(object):
         )
         lc = opts.get("linecolor")
 
-        for k in labels:
-            ind = np.equal(Y, k)
-            if ind.any():
+        # Each coordinate column is extracted once here rather than once per
+        # trace, and the points are grouped by label in a single pass: both
+        # used to be redone for every label, so an M-trace plot walked all N
+        # points M times.
+        columns = [X.take(axis, 1) for axis in range(X.shape[1])]
+        if len(labels) == 1:
+            # One trace holding every point, which is what every unlabelled
+            # plot (``line`` included) reduces to. No grouping work at all.
+            runs = [slice(None)]
+            run_lengths = [X.shape[0]]
+        else:
+            # ``labels`` is ``np.unique(Y)``, so it is sorted and covers every
+            # value in ``Y``: one stable argsort lays the points out in
+            # contiguous per-label runs, in their original order, and the left
+            # boundaries alone partition it.
+            grouped = np.argsort(Y, kind="stable")
+            bounds = np.searchsorted(Y[grouped], labels, side="left").tolist()
+            bounds.append(X.shape[0])
+            runs = [grouped[bounds[i] : bounds[i + 1]] for i in range(len(labels))]
+            run_lengths = [len(run) for run in runs]
+
+        for position, k in enumerate(labels):
+            ind = runs[position]
+            if run_lengths[position]:
                 if "legend" in opts:
                     trace_name = opts.get("legend")[k - 1]
                 elif len(labels) == 1 and name is not None:
@@ -3078,8 +3548,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": X.take(0, 1)[ind].tolist(),
-                    "y": X.take(1, 1)[ind].tolist(),
+                    "x": columns[0][ind].tolist(),
+                    "y": columns[1][ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -3109,7 +3579,7 @@ class Visdom(object):
                     _data["fill"] = "tonexty"
 
                 if is3d:
-                    _data["z"] = X.take(2, 1)[ind].tolist()
+                    _data["z"] = columns[2][ind].tolist()
 
                 if trace_name in trace_opts:
                     # Normalized here rather than over the finished trace below:
@@ -3705,15 +4175,15 @@ class Visdom(object):
 
         raw_cm = cm.copy()
         if normalize == "true":
-            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums = cm.sum(axis=1, keepdims=True, dtype=float)
             row_sums[row_sums == 0] = 1
             cm = cm.astype(float) / row_sums
         elif normalize == "pred":
-            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums = cm.sum(axis=0, keepdims=True, dtype=float)
             col_sums[col_sums == 0] = 1
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
-            total = float(cm.sum())
+            total = float(cm.sum(dtype=float))
             if total == 0:
                 warnings.warn(
                     "confusion matrix sum is zero; normalized values will be zero",
@@ -3747,7 +4217,7 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
-        raw_total = float(raw_cm.sum())
+        raw_total = float(raw_cm.sum(dtype=float))
         raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
@@ -3764,7 +4234,7 @@ class Visdom(object):
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        pct = float(raw_cm[i, j]) / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
@@ -3898,9 +4368,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        finite = X[np.isfinite(X)]
-        if finite.size > 0:
-            minx, maxx = float(finite.min()), float(finite.max())
+        finite_range = _finite_range(X)
+        if finite_range is not None:
+            minx, maxx = finite_range
         else:
             minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
@@ -4591,13 +5061,20 @@ class Visdom(object):
         Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
+        if X.ndim == 2 and X.shape[1] == 1:
+            # The shapes match, so all three are column vectors holding one
+            # value per row, which the ``float(value)`` loop this replaced
+            # flattened implicitly. Every other 2-D shape still fails the
+            # assertion below.
+            X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
+        assert X.ndim == 1, "values of X should be one-dimensional"
         if opts is None:
             opts = {}
             opts["height"] = 300
             opts["width"] = 500
-        X = [float(value) for value in X]
-        Y1 = [float(value) for value in Y1]
-        Y2 = [float(value) for value in Y2]
+        X = X.astype(float).tolist()
+        Y1 = Y1.astype(float).tolist()
+        Y2 = Y2.astype(float).tolist()
         trace1 = {
             "x": X,
             "y": Y1,
