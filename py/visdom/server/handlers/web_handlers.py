@@ -1419,7 +1419,16 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
-            self.set_secure_cookie("user_password", username + password)
+            # The dashboard never reads this cookie from JavaScript, so a
+            # script injected into the page should not be able to either.
+            # SameSite=Lax keeps a page on another site from sending it with
+            # a POST or a fetch, while following a link to Visdom still works.
+            self.set_secure_cookie(
+                "user_password",
+                self.application.session_token,
+                httponly=True,
+                samesite="Lax",
+            )
         else:
             self.set_status(400)
 

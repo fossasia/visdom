@@ -21,6 +21,7 @@ import tornado.websocket
 
 from visdom.server.server_state import StateAccessorsMixin
 from visdom.server.workspace_manager import WorkspaceAuthError
+from visdom.utils.server_utils import current_session_user
 from visdom.utils.shared_utils import NanSafeEncoder
 
 # POST endpoints that mutate environment state; viewers are denied these.
@@ -160,10 +161,7 @@ class BaseWebSocketHandler(
         based the value of cookies that set in POST method
         at IndexHandler by self.set_secure_cookie
         """
-        app = getattr(self, "application", None)
-        if not app or not app.settings.get("cookie_secret"):
-            return None
-        return self.get_secure_cookie("user_password")
+        return current_session_user(self)
 
     def write_message(self, message, binary=False):
         try:
@@ -311,10 +309,7 @@ class BaseHandler(
         based the value of cookies that set in POST method
         at IndexHandler by self.set_secure_cookie
         """
-        app = getattr(self, "application", None)
-        if not app or not app.settings.get("cookie_secret"):
-            return None
-        return self.get_secure_cookie("user_password")
+        return current_session_user(self)
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
