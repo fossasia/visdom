@@ -8,7 +8,6 @@
 
 """Normalize key/value tags used by the environment tagging API."""
 
-
 MAX_TAG_LENGTH = 50
 MAX_TAGS_PER_ENV = 20
 
