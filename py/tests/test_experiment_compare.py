@@ -84,6 +84,18 @@ def make_experiment(env_id, params=None, metrics=None, tags=None):
     return experiment
 
 
+class _ExperimentWithoutShortcut:
+    """Experiment-shaped down to ``to_dict``, minus ``latest_metric_values``."""
+
+    def __init__(self, env_id, metrics):
+        self._experiment = make_experiment(env_id, metrics=metrics)
+
+    def __getattr__(self, name):
+        if name == "latest_metric_values":
+            raise AttributeError(name)
+        return getattr(self._experiment, name)
+
+
 class TestBuildComparison(unittest.TestCase):
     """build_comparison diffs experiment objects without touching storage."""
 
@@ -129,6 +141,19 @@ class TestBuildComparison(unittest.TestCase):
                 make_experiment("a", metrics=[("acc", 0.5), ("acc", 0.9)]),
                 make_experiment("b", metrics=[("acc", 0.9)]),
             ]
+        )
+        self.assertEqual(comparison["metrics"]["shared"], {"acc": 0.9})
+
+    def test_an_experiment_without_the_metric_shortcut_compares(self):
+        """Answering for the series is an optimisation, not a requirement.
+
+        ``latest_metric_values`` lets an experiment read from a blob skip
+        building an object per observation. Anything experiment-shaped may
+        decline to offer it and is then diffed off its metric series.
+        """
+        walked = _ExperimentWithoutShortcut("a", [("acc", 0.5), ("acc", 0.9)])
+        comparison = build_comparison(
+            [walked, make_experiment("b", metrics=[("acc", 0.9)])]
         )
         self.assertEqual(comparison["metrics"]["shared"], {"acc": 0.9})
 
