@@ -1183,9 +1183,6 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
-            if self.readonly:
-                reject_readonly(self)
-                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 if self.readonly:
