@@ -302,12 +302,44 @@ class ExperimentStore:
 
     def log_metric(self, env_id, key, value, step=None):
         """Append a metric to ``env_id``'s experiment, creating it if needed."""
+        return self.log_metrics(env_id, ((key, value),), step=step)
+
+    def log_metrics(self, env_id, observations, step=None):
+        """Append several observations in one read-append-write, creating as needed.
+
+        ``observations`` is a mapping or an iterable of ``(key, value)`` pairs,
+        all recorded at the same ``step``. A request logging three metrics at
+        one step used to be three read-append-writes, each of them re-reading
+        and re-persisting the series the other two were appending to; they now
+        share one.
+
+        Sharing the write costs the caller nothing, because an observation
+        cannot be refused on its own: everything that can reject this call --
+        an experiment that will not read, one already in a terminal state --
+        is decided before the first observation is appended, so either every
+        one of them is recorded or none is and nothing is written at all. That
+        is what lets ``/experiments/log`` go on reporting a rejection only
+        after what applied has been persisted; there is no "what applied" left
+        to lose.
+
+        A batch with nothing in it records nothing, so it creates nothing and
+        writes nothing: an experiment is brought into being by an observation,
+        and a run that was never logged to has no business appearing in a
+        search. A terminal experiment still refuses the call, because what is
+        being refused is the attempt, not the observations it carried.
+        """
+        items = list(
+            observations.items() if hasattr(observations, "items") else observations
+        )
         env, experiment = self._read(env_id)
+        if experiment is not None:
+            self._reject_if_terminal(env_id, experiment)
+        if not items:
+            return experiment
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
-        else:
-            self._reject_if_terminal(env_id, experiment)
-        experiment.add_metric(key, value, step)
+        for key, value in items:
+            experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
     def update_tags(self, env_id, tags, append=False, env_data=None):

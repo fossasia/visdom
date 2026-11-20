@@ -79,29 +79,43 @@ def parents_of(tree):
     return parents
 
 
+def is_gather(node):
+    func = node.func
+    return isinstance(func, ast.Attribute) and func.attr == "gather"
+
+
 def is_consumed(node, parents):
     """Whether the value of ``node`` is awaited, directly or by ``gather``.
 
-    ``asyncio.gather(...)`` is the documented way to run several calls at once,
-    and the coroutines it is handed are awaited by it rather than by the
-    caller -- but only the ones it is handed as positional arguments, directly
-    or unpacked with ``*`` from a generator or list. A list passed as-is is one
-    argument that is not awaitable, so the coroutines inside it never run.
+    Only two consumers count. ``await vis.<method>()`` must await the call
+    itself: an ``await`` further up, as in ``await asyncio.sleep(vis.line())``,
+    awaits something else and leaves the coroutine unrun. And
+    ``asyncio.gather(...)``, the documented way to run several calls at once,
+    awaits the coroutines it is handed -- but only as positional arguments,
+    directly or unpacked with ``*`` from a generator or list. A list passed
+    as-is is one argument that is not awaitable, so the coroutines inside it
+    never run.
     """
-    origin = node
-    current = node
-    while current in parents:
-        parent = parents[current]
-        if isinstance(parent, ast.Await):
-            return True
-        if isinstance(parent, ast.Call):
-            func = parent.func
-            if isinstance(func, ast.Attribute) and func.attr == "gather":
-                return any(argument is current for argument in parent.args) and (
-                    current is origin or isinstance(current, ast.Starred)
-                )
-        current = parent
-    return False
+    parent = parents.get(node)
+    if isinstance(parent, ast.Await):
+        return parent.value is node
+    if isinstance(parent, ast.Call):
+        return is_gather(parent) and any(argument is node for argument in parent.args)
+    if isinstance(parent, ast.GeneratorExp):
+        unpacked = parent.elt is node
+    elif isinstance(parent, (ast.List, ast.Tuple)):
+        unpacked = any(element is node for element in parent.elts)
+    else:
+        return False
+    starred = parents.get(parent)
+    if not (unpacked and isinstance(starred, ast.Starred)):
+        return False
+    call = parents.get(starred)
+    return (
+        isinstance(call, ast.Call)
+        and is_gather(call)
+        and any(argument is starred for argument in call.args)
+    )
 
 
 def client_uses(source, receiver="vis"):
@@ -342,6 +356,22 @@ def test_gather_of_a_bare_generator_is_not_awaiting():
         "async def f(vis):\n"
         "    await asyncio.gather(vis.line(Y=[i]) for i in range(2))\n"
     )
+    assert list(client_uses(source)) == [("line", True, False)]
+
+
+def test_unrelated_await_is_not_awaiting():
+    """The ``await`` belongs to ``sleep``; the plot coroutine is never run."""
+    source = "async def f(vis):\n    await asyncio.sleep(vis.line(Y=[1]))\n"
+    assert list(client_uses(source)) == [("line", True, False)]
+
+
+def test_call_nested_inside_a_gather_argument_is_not_awaiting():
+    source = "async def f(vis):\n    await asyncio.gather(g(vis.line(Y=[1])))\n"
+    assert list(client_uses(source)) == [("line", True, False)]
+
+
+def test_call_nested_inside_an_unpacked_element_is_not_awaiting():
+    source = "async def f(vis):\n    await asyncio.gather(*[g(vis.line(Y=[1]))])\n"
     assert list(client_uses(source)) == [("line", True, False)]
 
 
