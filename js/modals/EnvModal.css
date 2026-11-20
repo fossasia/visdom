@@ -1,0 +1,30 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+.env-delete-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  align-items: baseline;
+}
+
+.env-delete-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.env-delete-hint {
+  font-size: 12px;
+  color: #6b6b6b;
+}
+
+.env-modal-divider {
+  margin: 24px 0 20px;
+}
