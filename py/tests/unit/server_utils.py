@@ -14,8 +14,15 @@ No server needed — these test pure functions directly.
 from unittest import mock
 
 import pytest
+import tornado.web
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from visdom.data_model.json_store import JSONStore
+from visdom.server.handlers.web_handlers import _resolve_win_key, _validate_win
 from visdom.utils import server_utils, shared_utils
 from visdom.utils.server_utils import (
     LazyEnvData,
@@ -96,11 +103,49 @@ def test_escape_eid_collapses_whitespace_only_differing_ids(padded):
         ({"eid": "test"}, "test"),
         ({"eid": "a/b"}, "a_b"),
         ({"eid": "main "}, "main"),
+        ({"eid": 123}, "123"),
+        ({"eid": 45.6}, "45.6"),
     ],
-    ids=["default", "none_value", "with_value", "escapes_value", "strips_whitespace"],
+    ids=[
+        "default",
+        "none_value",
+        "with_value",
+        "escapes_value",
+        "strips_whitespace",
+        "coerces_int",
+        "coerces_float",
+    ],
 )
 def test_extract_eid(args, eid):
     assert extract_eid(args) == eid
+
+
+@pytest.mark.parametrize(
+    "invalid_eid",
+    [
+        True,
+        False,
+        [1, 2],
+        {"nested": "dict"},
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+    ids=[
+        "bool_true",
+        "bool_false",
+        "list",
+        "dict",
+        "float_nan",
+        "float_inf",
+        "float_neg_inf",
+    ],
+)
+def test_extract_eid_rejects_non_string_or_number(invalid_eid):
+    with pytest.raises(tornado.web.HTTPError) as exc_info:
+        extract_eid({"eid": invalid_eid})
+    assert exc_info.value.status_code == 400
+    assert "'eid' must be a string or number" in exc_info.value.reason
 
 
 # ----------------------------------------------------------- hash_password ----
@@ -476,3 +521,81 @@ def test_send_to_sources_with_no_sources_does_not_encode():
         send_to_sources(handler, {"event_type": "close", "pane_data": list(range(100))})
 
     assert calls == []
+
+
+# ------------------------------------------------------------- _validate_win ----
+
+
+@pytest.mark.parametrize(
+    "valid_win",
+    [
+        "w1",
+        "42",
+        "window_name",
+        42,
+        42.5,
+        0,
+        -1,
+        *(
+            [np.int64(42), np.int32(10), np.float64(3.14), np.float32(2.5)]
+            if np is not None
+            else []
+        ),
+    ],
+)
+def test_validate_win_accepts_valid_identifiers(valid_win):
+    """String and finite real numbers (including NumPy scalars) pass validation."""
+    _validate_win(valid_win)
+
+
+@pytest.mark.parametrize(
+    "invalid_win",
+    [
+        None,
+        True,
+        False,
+        "",
+        "   ",
+        "\t\n",
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        [1, 2],
+        {"a": 1},
+        1 + 2j,
+        *(
+            [np.bool_(True), np.bool_(False), np.nan, np.inf, -np.inf]
+            if np is not None
+            else []
+        ),
+    ],
+)
+def test_validate_win_rejects_invalid_identifiers(invalid_win):
+    """Non-strings, non-real numbers, booleans, empty strings, and NaN/Inf raise 400."""
+    with pytest.raises(tornado.web.HTTPError) as exc_info:
+        _validate_win(invalid_win)
+    assert exc_info.value.status_code == 400
+    assert "'win' must be a string or number" in exc_info.value.reason
+
+
+# ---------------------------------------------------------- _resolve_win_key ----
+
+
+def test_resolve_win_key_direct_and_none():
+    assert _resolve_win_key({"w1": {}}, None) is None
+    assert _resolve_win_key({"w1": {}}, "w1") == "w1"
+    assert _resolve_win_key({"w1": {}}, "w2") == "w2"
+
+
+def test_resolve_win_key_symmetric_numeric_matching():
+    env_jsons = {"42": "string_key", 100: "int_key"}
+    assert _resolve_win_key(env_jsons, 42) == "42"
+    assert _resolve_win_key(env_jsons, 42.0) == "42"
+    assert _resolve_win_key(env_jsons, "42.0") == "42"
+    assert _resolve_win_key(env_jsons, 100) == 100
+    assert _resolve_win_key(env_jsons, "100") == 100
+    assert _resolve_win_key(env_jsons, "100.0") == 100
+    assert _resolve_win_key(env_jsons, 100.0) == 100
+    if np is not None:
+        assert _resolve_win_key(env_jsons, np.int64(42)) == "42"
+        assert _resolve_win_key(env_jsons, np.float64(42.0)) == "42"
