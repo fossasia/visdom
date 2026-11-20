@@ -3020,32 +3020,16 @@ class Visdom(object):
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
-        # The tile has always been inset one extra pixel into its cell, which
-        # leaves one pixel less padding below and to the right of it. That
-        # extra pixel only fits while `padding` is at least 1; with padding=0
-        # the last row and column ran off the end of the grid and the copy
-        # raised, so drop the offset in that case.
-        offset = padding + 1 if padding > 0 else 0
-
-        # The grid has always been float64, which `image()` then takes through
-        # its float branch: eight bytes a pixel for what is usually a uint8
-        # batch, plus that branch's full-size temporaries. Staying in uint8 is
-        # only *identical* while that branch does no scaling, and it has two
-        # ways to scale. It rescales whenever the whole grid fits in [0, 1] --
-        # which includes the fill value of 1 itself -- so a uint8 batch holding
-        # nothing above 1 keeps the float grid, and with it the stretch pinned
-        # by `test_images_padding_colour_follows_the_input_dtype`. And
-        # `opts.normalize` asks for the min-max stretch explicitly, which the
-        # branch is the only thing that implements: a uint8 grid never reaches
-        # it, so the option would silently do nothing. Deciding this costs one
-        # C-speed pass over the batch and saves a copy of it at eight times the
-        # width.
+        offset = padding
+        # Keep exact uint8 pixels and white padding unless image() needs the
+        # float grid to apply explicit normalization.
         normalize = opts is not None and opts.get("normalize", False)
-        grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
-            grid = np.ones(grid_shape, dtype=np.uint8)
-        else:
-            grid = np.ones(grid_shape)
+        use_uint8 = tensor.dtype == np.uint8 and not normalize
+        grid = np.full(
+            [tensor.shape[1], height * ymaps, width * xmaps],
+            255 if use_uint8 else 1,
+            dtype=np.uint8 if use_uint8 else np.float64,
+        )
 
         # One strided write per row of cells instead of one per tile: the grid
         # viewed as (ymaps, xmaps, C, cell height, cell width) addresses every
