@@ -1112,9 +1112,7 @@ def test_plotlyplot_delegates_save_path(capture_send, tmp_path):
     path = tmp_path / "plot.png"
     mock_plotly = MagicMock()
     with patch.dict(sys.modules, {"plotly": mock_plotly}):
-        with patch(
-            "visdom.json.dumps", return_value='{"data": [], "layout": {}}'
-        ):
+        with patch("visdom.json.dumps", return_value='{"data": [], "layout": {}}'):
             capture_send(lambda v: v.plotlyplot(fig, save_path=path))
     assert fig["saved_to"] == str(path)
 

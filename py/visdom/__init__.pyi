@@ -5,7 +5,19 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from typing import Any, Callable, Dict, IO, List, Mapping, Optional, Set, Text, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    IO,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Text,
+    Tuple,
+    Union,
+)
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -228,10 +240,7 @@ class Visdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     def save_plotly_figure(
-        self,
-        figure: Any,
-        filepath: _SaveTarget,
-        **kwargs: Any
+        self, figure: Any, filepath: _SaveTarget, **kwargs: Any
     ) -> None: ...
     def plotlyplot(
         self,
