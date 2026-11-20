@@ -56,9 +56,18 @@ if sys.version_info < (3, 12):
 
 
 def _normalize_tsne(Y):
+    """Rescale 2-D t-SNE coordinates to [-1, 1], ignoring NaN when finding bounds."""
     Y = np.asarray(Y)
-    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
-    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xmin, xmax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 0]))
+        else (np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0]))
+    )
+    ymin, ymax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 1]))
+        else (np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1]))
+    )
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
@@ -951,9 +960,12 @@ def _decode_binary_arrays(obj):
                     base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
                 )
                 if "shape" in obj:
-                    arr = arr.reshape(obj["shape"])
+                    shape = obj["shape"]
+                    if isinstance(shape, str):
+                        shape = tuple(int(dim) for dim in shape.split(","))
+                    arr = arr.reshape(shape)
                 return arr.tolist()
-            except (binascii.Error, ValueError, TypeError):
+            except (binascii.Error, ValueError, TypeError, OverflowError):
                 return obj
         return {k: _decode_binary_arrays(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -2886,13 +2898,15 @@ class Visdom(object):
                     heatmap.shape, H, W
                 )
             )
-        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        h_min, h_max = float(heatmap.min()), float(heatmap.max())
-        if h_min < 0.0 or h_max > 1.0:
+        finite = np.isfinite(heatmap)
+        h_min = float(np.min(heatmap, where=finite, initial=np.inf))
+        h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
+        if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.zeros_like(heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
         try:
@@ -3094,6 +3108,9 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
+            # Non-finite samples (NaN, +/-inf) would make max_val, and the
+            # whole scaled tensor, non-finite. Treat them as silence.
+            tensor = np.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
@@ -4163,15 +4180,15 @@ class Visdom(object):
 
         raw_cm = cm.copy()
         if normalize == "true":
-            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums = cm.sum(axis=1, keepdims=True, dtype=float)
             row_sums[row_sums == 0] = 1
             cm = cm.astype(float) / row_sums
         elif normalize == "pred":
-            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums = cm.sum(axis=0, keepdims=True, dtype=float)
             col_sums[col_sums == 0] = 1
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
-            total = float(cm.sum())
+            total = float(cm.sum(dtype=float))
             if total == 0:
                 warnings.warn(
                     "confusion matrix sum is zero; normalized values will be zero",
@@ -4205,7 +4222,7 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
-        raw_total = float(raw_cm.sum())
+        raw_total = float(raw_cm.sum(dtype=float))
         raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
@@ -4222,7 +4239,7 @@ class Visdom(object):
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        pct = float(raw_cm[i, j]) / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
