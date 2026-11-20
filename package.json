@@ -20,7 +20,7 @@
     "less": "^4.9.1",
     "less-loader": "^13.0.0",
     "prettier": "^3.9.9",
-    "react-devtools": "^7.0.1",
+    "react-devtools": "^8.0.0",
     "webpack": "^5.111.1",
     "webpack-cli": "^7.2.3",
     "webpack-merge": "^6.0.1"

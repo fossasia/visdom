@@ -32,6 +32,7 @@ import tornado.web
 from visdom.data_model import JSONStore
 from visdom.experiments import METADATA_KEY, ExperimentStore, flatten_experiments
 from visdom.server.app import Application
+from visdom.server.handlers import experiments_handler
 from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsHandler,
     _resident_experiments,
@@ -335,6 +336,48 @@ class TestHparamsPaneStaysOffTheLoop(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 200)
         self.assertEqual(self.spy.calls["load_experiment"], ["run-c", "run-a"])
         self.assertReachedOffLoop("load_experiment")
+
+    def _snapshot_taken_for(self, body):
+        """Post ``body`` and return the resident ids the worker was handed."""
+        taken = []
+        select = experiments_handler._select_hparams
+
+        def capture(store, spec, resident):
+            taken.append(sorted(resident))
+            return select(store, spec, resident)
+
+        with mock.patch.object(experiments_handler, "_select_hparams", capture):
+            resp = self.hparams(body)
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(len(taken), 1)
+        return taken[0]
+
+    def _make_resident(self, *env_ids):
+        for env_id in env_ids:
+            self._app.state[env_id] = JSONStore(self._tmp_dir).load_env(env_id)
+
+    def test_an_env_ids_selection_copies_only_the_named_envs(self):
+        """The copy the loop takes is the ids asked for and nothing else.
+
+        The blobs carry the runs' metric histories, so copying every resident
+        env would charge a two-run pane -- and every live rebuild of it -- the
+        whole of what the server is holding.
+        """
+        self._make_resident("run-a", "run-b", "run-c")
+
+        self.assertEqual(self._snapshot_taken_for({"env_ids": ["run-a"]}), ["run-a"])
+
+    def test_a_query_selection_still_copies_every_resident_env(self):
+        """It reads every environment the store knows, so it needs them all."""
+        self._make_resident("run-a", "run-b", "run-c")
+
+        taken = self._snapshot_taken_for({"query": "epochs > 0"})
+
+        self.assertEqual(
+            [env_id for env_id in taken if env_id != "main"],
+            ["run-a", "run-b", "run-c"],
+        )
 
     def test_the_pane_is_saved_on_the_storage_worker(self):
         resp = self.hparams({"env_ids": ["run-a"]})

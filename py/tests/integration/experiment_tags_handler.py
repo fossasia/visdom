@@ -85,6 +85,47 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
             {"run-a": {"owner": "alice"}, "run-b": {"owner": "bob"}},
         )
 
+    def test_get_action_sees_a_tag_written_after_an_earlier_get(self):
+        """A second listing reflects a write made after the first one.
+
+        ``GET /experiments/tags`` reads every env's metadata off disk, so the
+        first listing is what fills the store's metadata cache. A cache that
+        did not notice the write behind it would keep answering with the tags
+        as they stood on page load -- for as long as the server ran.
+        """
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self.assertEqual(
+            json.loads(self.post_json("/experiments/tags", {"action": "get"}).body),
+            {"run-a": {"owner": "alice"}},
+        )
+
+        self.post_json("/experiments/tags", {"eid": "run-b", "tags": {"owner": "bob"}})
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "carol"}}
+        )
+
+        self.assertEqual(
+            json.loads(self.post_json("/experiments/tags", {"action": "get"}).body),
+            {"run-a": {"owner": "carol"}, "run-b": {"owner": "bob"}},
+        )
+
+    def test_repeat_listings_agree(self):
+        """Listing the tags twice reads the same thing twice.
+
+        Repeat reads of an unchanged env share one metadata object, so a reader
+        that edited it in place would surface as the second listing differing.
+        """
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+
+        first = self.post_json("/experiments/tags", {"action": "get"})
+        second = self.post_json("/experiments/tags", {"action": "get"})
+
+        self.assertEqual(json.loads(first.body), json.loads(second.body))
+
     def test_set_broadcasts_one_transport_neutral_message(self):
         websocket = FakeSocket("websocket")
         polling = FakeSocket("polling")
