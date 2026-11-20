@@ -14,9 +14,11 @@ a mocked viz -- no model, optimizer or training loop is needed. ``viz.line``
 returns a fresh handle per call so window bookkeeping can be asserted.
 """
 
+import os
+import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -244,6 +246,193 @@ class TestLogEvery(unittest.TestCase):
         logger.log("loss", 4.0)  # on interval -> plotted, buffer cleared
         self.assertNotIn("loss", logger._pending)
         self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [4.0])
+
+
+class TestRank(unittest.TestCase):
+    """Only the main process of a distributed job plots and tracks."""
+
+    @staticmethod
+    def _rank(value):
+        return patch.dict(os.environ, {"RANK": str(value)})
+
+    @staticmethod
+    def _tracked_logger(**kwargs):
+        logger = _logger(params={"lr": 0.1}, **kwargs)
+        logger.viz.experiment.return_value = {"env_id": "test_env"}
+        logger.viz.finish_experiment.return_value = {"env_id": "test_env"}
+        logger.viz.log_metrics.return_value = {"env_id": "test_env"}
+        return logger
+
+    def test_nonzero_rank_plots_nothing(self):
+        logger = _logger()
+        with self._rank(1):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+
+    def test_rank_zero_plots(self):
+        logger = _logger()
+        with self._rank(0):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+
+    def test_nonzero_rank_still_validates_input(self):
+        logger = _logger()
+        with self._rank(2):
+            with self.assertRaises(TypeError):
+                logger.log("loss", "high")
+            with self.assertRaises(TypeError):
+                logger.log("", 1.0)
+
+    def test_nonzero_rank_buffers_nothing_for_the_exit_flush(self):
+        logger = _logger(log_every=3)
+        with self._rank(1):
+            with logger as tracker:
+                tracker.log("loss", 1.0)
+                tracker.log("loss", 2.0)
+        self.assertEqual(logger._pending, {})
+        logger.viz.line.assert_not_called()
+
+    def test_pending_points_are_not_flushed_once_the_rank_is_nonzero(self):
+        logger = _logger(log_every=3)
+        with self._rank(0):
+            logger.log("loss", 1.0)
+            logger.log("loss", 2.0)
+        logger.viz.line.assert_called_once()
+        with self._rank(1):
+            logger.__exit__(None, None, None)
+        logger.viz.line.assert_called_once()
+
+    def test_nonzero_rank_skips_experiment_tracking(self):
+        logger = self._tracked_logger()
+        with self._rank(1):
+            with logger as tracker:
+                tracker.log("loss", 1.0)
+        logger.viz.experiment.assert_not_called()
+        logger.viz.log_metrics.assert_not_called()
+        logger.viz.finish_experiment.assert_not_called()
+
+    def test_experiment_started_as_main_is_finished_if_rank_turns_nonzero(self):
+        logger = self._tracked_logger()
+        with self._rank(0):
+            logger.__enter__()
+        with self._rank(1):
+            logger.__exit__(None, None, None)
+        logger.viz.finish_experiment.assert_called_once()
+
+    def test_metrics_are_mirrored_without_a_context_manager(self):
+        logger = self._tracked_logger()
+        with self._rank(0):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+        logger.viz.log_metrics.assert_called_once()
+
+    def test_experiment_never_started_is_not_finished_or_fed_metrics(self):
+        logger = self._tracked_logger()
+        with self._rank(1):
+            logger.__enter__()
+        with self._rank(0):
+            logger.log("loss", 1.0)
+            logger.__exit__(None, None, None)
+        logger.viz.experiment.assert_not_called()
+        logger.viz.log_metrics.assert_not_called()
+        logger.viz.finish_experiment.assert_not_called()
+
+    def test_explicit_false_skips_tracking_without_any_rank_information(self):
+        logger = self._tracked_logger(is_main_process=False)
+        env = {k: v for k, v in os.environ.items() if k not in ("RANK", "SLURM_PROCID")}
+        with patch.dict(os.environ, env, clear=True):
+            with logger as tracker:
+                tracker.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+        logger.viz.experiment.assert_not_called()
+        logger.viz.finish_experiment.assert_not_called()
+
+    def test_override_must_be_a_bool_or_none(self):
+        for bad in ("False", "false", 0, 1, 0.0):
+            with self.subTest(bad=bad):
+                with self.assertRaises(TypeError):
+                    _logger(is_main_process=bad)
+        for good in (True, False, None):
+            with self.subTest(good=good):
+                _logger(is_main_process=good)
+
+    def test_rank_zero_runs_experiment_tracking(self):
+        logger = self._tracked_logger()
+        with self._rank(0):
+            with logger as tracker:
+                tracker.log("loss", 1.0)
+        logger.viz.experiment.assert_called_once()
+        logger.viz.log_metrics.assert_called_once()
+        logger.viz.finish_experiment.assert_called_once()
+
+    def test_nonzero_rank_exit_still_propagates_exceptions(self):
+        with self._rank(1):
+            with self.assertRaises(RuntimeError):
+                with _logger():
+                    raise RuntimeError("boom")
+
+    def test_rank_is_read_at_call_time_not_at_construction(self):
+        logger = _logger()
+        with self._rank(1):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+        with self._rank(0):
+            logger.log("loss", 2.0)
+        logger.viz.line.assert_called_once()
+
+    def test_explicit_false_overrides_rank_zero(self):
+        logger = _logger(is_main_process=False)
+        with self._rank(0):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+
+    def test_explicit_true_overrides_nonzero_rank(self):
+        logger = _logger(is_main_process=True)
+        with self._rank(3):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+
+    def test_slurm_procid_is_used_when_rank_is_unset(self):
+        logger = _logger()
+        env = {k: v for k, v in os.environ.items() if k != "RANK"}
+        env["SLURM_PROCID"] = "2"
+        with patch.dict(os.environ, env, clear=True):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+
+    def test_negative_rank_means_not_distributed(self):
+        logger = _logger()
+        with self._rank(-1):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+
+    def test_local_rank_alone_does_not_silence_the_logger(self):
+        logger = _logger()
+        env = {k: v for k, v in os.environ.items() if k not in ("RANK", "SLURM_PROCID")}
+        env["LOCAL_RANK"] = "1"
+        with patch.dict(os.environ, env, clear=True):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+
+    def test_initialized_process_group_decides_over_environment(self):
+        dist = Mock()
+        dist.is_available.return_value = True
+        dist.is_initialized.return_value = True
+        dist.get_rank.return_value = 2
+        logger = _logger()
+        with self._rank(0), patch.dict(sys.modules, {"torch.distributed": dist}):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+
+    def test_uninitialized_process_group_falls_back_to_environment(self):
+        dist = Mock()
+        dist.is_available.return_value = True
+        dist.is_initialized.return_value = False
+        logger = _logger()
+        with self._rank(1), patch.dict(sys.modules, {"torch.distributed": dist}):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+        dist.get_rank.assert_not_called()
 
 
 if __name__ == "__main__":
