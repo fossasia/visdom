@@ -406,7 +406,7 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(_normalize_title_strings(layout))
 
 
-def _normalize_labels(Y):
+def _normalize_labels(Y, max_label=None):
     """
     Normalizes arbitrary labels (int, float, string) to 1-based indices.
     Returns:
@@ -415,6 +415,7 @@ def _normalize_labels(Y):
                                            was already a valid set of 1-based integer labels.
         K (int): Number of unique labels
     """
+    # A compact legend can name sparse labels by their sorted unique values.
     Y = np.ravel(Y)
 
     try:
@@ -423,6 +424,8 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
+                and (max_label is None or int(np.nanmax(Y)) <= max_label)
             )
     except TypeError:
         is_integer_labels = False
@@ -3451,7 +3454,9 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            Y, label_values, K = _normalize_labels(Y)
+            legend = opts.get("legend") if opts else None
+            max_label = len(legend) if isinstance(legend, (list, tuple)) else None
+            Y, label_values, K = _normalize_labels(Y, max_label=max_label)
             labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
