@@ -139,8 +139,10 @@ class TestWindowClose(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200)
 
     def test_close_window_in_nonexistent_unicode_env_is_noop(self):
-        resp = self.close_window(win="some_win", eid="nonexistent_env_日本語_🚀")
+        win = self.create_text_window(content="preserve")
+        resp = self.close_window(win=win, eid="nonexistent_env_日本語_🚀")
         self.assertEqual(resp.code, 200)
+        self.assertTrue(self.win_exists(win))
 
 
 class TestUpdateMissingWindow(VisdomHTTPTestCase):
