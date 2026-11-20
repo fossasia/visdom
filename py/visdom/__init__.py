@@ -1524,6 +1524,20 @@ class Visdom(object):
                         + "\n"
                     )
 
+    @property
+    def _last_response_status(self):
+        """HTTP status of this thread's last request, or None."""
+        local = self.__dict__.get("_response_local")
+        return getattr(local, "status", None)
+
+    @_last_response_status.setter
+    def _last_response_status(self, status):
+        # Per thread, so callbacks sharing one client can't read each other's.
+        local = self.__dict__.get("_response_local")
+        if local is None:
+            local = self.__dict__.setdefault("_response_local", threading.local())
+        local.status = status
+
     def _note_refusal(self, status, body):
         """Say so when the server turns a request down.
 
@@ -1539,6 +1553,7 @@ class Visdom(object):
         does not raise on a 4xx. Each distinct reason is logged once, so a
         training loop is not flooded.
         """
+        self._last_response_status = status
         if status not in REFUSED_STATUSES:
             return
         message = "The visdom server refused this request ({0}): {1}".format(
@@ -1699,8 +1714,10 @@ class Visdom(object):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
         Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string).
+        the raw response (e.g. an error string). ``_last_response_status`` then
+        holds this request's HTTP status (None when nothing was sent).
         """
+        self._last_response_status = None
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
             return response
