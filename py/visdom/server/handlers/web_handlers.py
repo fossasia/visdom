@@ -20,11 +20,17 @@ import json
 import jsonpatch
 import logging
 import math
+import numbers
 import os
 import uuid
 from collections import OrderedDict
 
 from collections.abc import Mapping, Sequence
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 import tornado.escape
 from visdom.utils.shared_utils import (
@@ -86,12 +92,13 @@ def _reject_json_constant(value):
 
 
 def _validate_win(win):
-    """Validate that win is a string or finite number (and not a bool)."""
+    """Validate that win is a non-empty string or finite number (and not a bool)."""
     if (
         win is None
-        or isinstance(win, bool)
-        or not isinstance(win, (str, int, float))
-        or (isinstance(win, float) and (win != win or abs(win) == float("inf")))
+        or isinstance(win, (bool, getattr(np, "bool_", bool)))
+        or not (isinstance(win, str) or isinstance(win, numbers.Real))
+        or (isinstance(win, numbers.Real) and (math.isnan(win) or math.isinf(win)))
+        or (isinstance(win, str) and not win.strip())
     ):
         raise tornado.web.HTTPError(400, reason="'win' must be a string or number")
 
@@ -106,10 +113,34 @@ def _resolve_win_key(env_jsons, win):
     win_str = str(win)
     if win_str in env_jsons:
         return win_str
-    if isinstance(win, float) and win.is_integer():
-        win_int_str = str(int(win))
-        if win_int_str in env_jsons:
-            return win_int_str
+
+    if isinstance(win, numbers.Real) and not isinstance(win, bool):
+        try:
+            f = float(win)
+            if math.isfinite(f) and f.is_integer():
+                int_str = str(int(f))
+                if int_str in env_jsons:
+                    return int_str
+                if int(f) in env_jsons:
+                    return int(f)
+        except (ValueError, OverflowError):
+            pass
+
+    if isinstance(win, str):
+        try:
+            f = float(win)
+            if math.isfinite(f):
+                if f.is_integer():
+                    int_str = str(int(f))
+                    if int_str in env_jsons:
+                        return int_str
+                    if int(f) in env_jsons:
+                        return int(f)
+                elif f in env_jsons:
+                    return f
+        except (ValueError, OverflowError):
+            pass
+
     return win
 
 
@@ -867,7 +898,9 @@ class UpdateHandler(BaseHandler):
 
         win = args["win"]
         win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
-        if win_key not in handler.state[eid]["jsons"]:
+        if win_key in handler.state[eid]["jsons"]:
+            args["win"] = win_key
+        else:
             # Append to a window that doesn't exist attempts to create
             # that window
             append = args.get("append")
@@ -1016,9 +1049,11 @@ class CloseHandler(BaseHandler):
         client while the server still holds it.
         """
         eid = extract_eid(args)
+        win = args.get("win")
+        if win is not None:
+            _validate_win(win)
         if eid not in handler.state:
             return
-        win = args.get("win")
 
         env = handler.state[eid]
         if win is None:
@@ -1362,6 +1397,7 @@ class DataHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+        win = args.get("win")
 
         if "data" in args:
             # Load data from client. This is the one write behind an endpoint
@@ -1375,29 +1411,35 @@ class DataHandler(BaseHandler):
             if eid not in handler.state:
                 handler.state[eid] = {"jsons": {}, "reload": {}}
 
-            if "win" in args and args["win"] is None:
+            if win is None:
+                if not isinstance(data, Mapping):
+                    raise tornado.web.HTTPError(
+                        400, reason="environment data must be an object"
+                    )
                 handler.state[eid]["jsons"] = data
             else:
-                handler.state[eid]["jsons"][args["win"]] = data
+                _validate_win(win)
+                win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
+                handler.state[eid]["jsons"][str(win_key)] = data
 
             handler.mark_dirty(eid)
             broadcast_envs(handler)
         else:
             # Dump data to client
             if eid not in handler.state:
-                if "win" in args and args["win"] is None:
+                if win is None:
                     handler.write(json.dumps({}, cls=NanSafeEncoder))
                     return
                 raise tornado.web.HTTPError(
                     404, reason=f"environment '{eid}' not found"
                 )
 
-            if "win" in args and args["win"] is None:
+            if win is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                win = args["win"]
+                _validate_win(win)
                 win_key = _resolve_win_key(handler.state[eid]["jsons"], win)
                 if win_key not in handler.state[eid]["jsons"]:
                     raise tornado.web.HTTPError(
@@ -1409,9 +1451,7 @@ class DataHandler(BaseHandler):
 
     @check_auth
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        args = _decode_json_body(self.request.body)
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
