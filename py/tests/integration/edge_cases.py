@@ -20,6 +20,11 @@ import logging
 import os
 import unittest
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 import pytest
 
 from testutils.fakes import FakeSocket
@@ -580,6 +585,62 @@ class TestWinExistsEndpoint(VisdomHTTPTestCase):
             )
             self.assertEqual(resp_update.code, 400)
             self.assertIn("'win' must be a string or number", resp_update.reason)
+
+    def test_empty_or_whitespace_win_returns_400(self):
+        """Empty string or whitespace-only win is rejected with HTTP 400."""
+        for empty_win in ("", "   ", "\t\n"):
+            resp_exists = self.post_json(
+                "/win_exists", {"win": empty_win, "eid": "main"}
+            )
+            self.assertEqual(resp_exists.code, 400)
+            self.assertIn("'win' must be a string or number", resp_exists.reason)
+
+            resp_data = self.post_json("/win_data", {"win": empty_win, "eid": "main"})
+            self.assertEqual(resp_data.code, 400)
+            self.assertIn("'win' must be a string or number", resp_data.reason)
+
+            resp_close = self.post_json("/close", {"win": empty_win, "eid": "main"})
+            self.assertEqual(resp_close.code, 400)
+            self.assertIn("'win' must be a string or number", resp_close.reason)
+
+    def test_float_string_win_matches_integer_key(self):
+        """A float-string win like '42.0' resolves to integer string key '42'."""
+        self.create_text_window(eid="main", content="content for 42", win="42")
+        resp_exists = self.post_json("/win_exists", {"win": "42.0", "eid": "main"})
+        self.assertEqual(resp_exists.code, 200)
+        self.assertEqual(resp_exists.body.decode(), "true")
+
+        resp_data = self.post_json("/win_data", {"win": "42.0", "eid": "main"})
+        self.assertEqual(resp_data.code, 200)
+        data = json.loads(resp_data.body.decode())
+        self.assertEqual(data.get("id"), "42")
+
+    def test_data_endpoint_omitted_or_null_win_dumps_all(self):
+        """A win_data request without 'win' or with null 'win' dumps the whole env."""
+        self.create_text_window(eid="main", content="first", win="w1")
+        self.create_text_window(eid="main", content="second", win="w2")
+
+        resp_none = self.post_json("/win_data", {"eid": "main", "win": None})
+        self.assertEqual(resp_none.code, 200)
+        data_none = json.loads(resp_none.body.decode())
+        self.assertIn("w1", data_none)
+        self.assertIn("w2", data_none)
+
+        resp_omitted = self.post_json("/win_data", {"eid": "main"})
+        self.assertEqual(resp_omitted.code, 200)
+        data_omitted = json.loads(resp_omitted.body.decode())
+        self.assertIn("w1", data_omitted)
+        self.assertIn("w2", data_omitted)
+
+    def test_close_endpoint_validates_win_even_if_eid_missing(self):
+        """A close request with invalid win returns 400 even if env does not exist."""
+        resp = self.post_json("/close", {"eid": "nonexistent_env", "win": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'win' must be a string or number", resp.reason)
+
+        resp2 = self.post_json("/close", {"eid": "nonexistent_env", "win": ""})
+        self.assertEqual(resp2.code, 400)
+        self.assertIn("'win' must be a string or number", resp2.reason)
 
 
 if __name__ == "__main__":
