@@ -471,6 +471,183 @@ def test_embeddings_sends_a_loading_pane_then_the_points(offline_client):
     assert len(points["data"][0]["content"]["data"]) == 3
 
 
+def test_embeddings_accepts_a_list_of_feature_rows(offline_client):
+    """The t-SNE backends need an array, so a list is converted before use."""
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            FEATURES.tolist(), LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+@pytest.mark.parametrize(
+    "bad_features",
+    [
+        pytest.param([[0.0, 1.0], [1.0]], id="ragged"),
+        pytest.param([[1, "nope"], [2, 3]], id="non_numeric"),
+        pytest.param([0.0, 1.0, 2.0], id="one_dimensional"),
+        pytest.param([], id="empty_list"),
+        pytest.param(np.empty((0, 3)), id="zero_rows"),
+        pytest.param(np.empty((3, 0)), id="zero_cols"),
+        pytest.param(np.zeros((3, 2, 2)), id="three_dimensional"),
+        pytest.param(np.ones((1, 2)), id="single_row"),
+        pytest.param(np.array([[np.nan, 1.0], [2.0, 3.0], [4.0, 5.0]]), id="nan"),
+        pytest.param(np.array([[np.inf, 1.0], [2.0, 3.0], [4.0, 5.0]]), id="inf"),
+        pytest.param(np.ones((3, 2), dtype=complex), id="complex"),
+        pytest.param([[0.0, 1.0], [1.0, 2.0], None], id="none_row"),
+        pytest.param(None, id="none"),
+    ],
+)
+def test_embeddings_rejects_bad_features_before_sending_anything(
+    offline_client, bad_features
+):
+    """A failure must not leave a loading pane behind, and every features
+    problem reports the same way instead of surfacing numpy's own message."""
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError, match="features must"):
+            offline_client.embeddings(
+                bad_features, LABELS, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        pytest.param([1, 2], id="fewer_labels_than_rows"),
+        pytest.param([1, 2, 1, 2], id="more_labels_than_rows"),
+        pytest.param(None, id="no_labels"),
+    ],
+)
+def test_embeddings_rejects_labels_that_do_not_match_the_rows(offline_client, labels):
+    """Too few labels used to raise IndexError after the loading pane was sent;
+    too many were silently dropped."""
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError, match="labels must have one entry per row"):
+            offline_client.embeddings(
+                FEATURES, labels, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "labels, message",
+    [
+        pytest.param([1.0, float("nan"), 2.0], "labels must be finite", id="nan"),
+        pytest.param([1.0, float("inf"), 2.0], "labels must be finite", id="inf"),
+        pytest.param(np.zeros((3, 2)), "labels must be one-dimensional", id="two_d"),
+    ],
+)
+def test_embeddings_rejects_invalid_label_values_before_sending_anything(
+    offline_client, labels, message
+):
+    """A NaN label used to send the loading pane, run t-SNE, and only then
+    fail inside _normalize_labels."""
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client, "_send", return_value="w"
+    ) as send:
+        with pytest.raises(ValueError, match=message):
+            offline_client.embeddings(
+                FEATURES, labels, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
+def test_embeddings_leaves_the_callers_opts_untouched(offline_client):
+    """A numeric title is cast to a string in the payload, not in the caller's dict."""
+    opts = {"title": 5, "register_embedding_events": False}
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client, "_send", return_value="w"
+    ) as send:
+        offline_client.embeddings(FEATURES, LABELS, opts=opts)
+
+    assert opts == {"title": 5, "register_embedding_events": False}
+    assert send.call_args_list[0][0][0]["opts"]["title"] == "5"
+
+
+def test_embeddings_converts_an_object_with_array_protocol(offline_client):
+    """A tensor-like (ndim/shape/dtype, a dtype with no .kind, and __array__)
+    must be converted, not rejected for its dtype or passed through raw."""
+
+    class _TensorLike:
+        ndim = 2
+        shape = (3, 2)
+        dtype = object()  # like torch.float32: has no ``.kind``
+
+        def __array__(self, dtype=None, copy=None):
+            return FEATURES
+
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            _TensorLike(), LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_embeddings_accepts_a_torch_tensor(offline_client, requires_grad):
+    """The real-torch case; a requires_grad tensor makes bare np.asarray raise."""
+    torch = pytest.importorskip("torch")
+    tensor = torch.tensor(FEATURES, requires_grad=requires_grad)
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            tensor, LABELS, opts={"register_embedding_events": False}
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+def test_embeddings_densifies_a_sparse_matrix(offline_client):
+    """The backends call len(X), which scipy refuses, so sparse input is
+    densified before it reaches do_tsne."""
+    sparse = pytest.importorskip("scipy.sparse")
+    with patch("visdom.do_tsne", return_value=TSNE_XY) as tsne, patch.object(
+        offline_client, "_send", return_value="w"
+    ):
+        offline_client.embeddings(
+            sparse.csr_matrix(FEATURES),
+            LABELS,
+            opts={"register_embedding_events": False},
+        )
+
+    received = tsne.call_args[0][0]
+    assert isinstance(received, np.ndarray)
+    np.testing.assert_array_equal(received, FEATURES)
+
+
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf])
+def test_embeddings_rejects_a_sparse_matrix_with_a_non_finite_value(
+    offline_client, bad_value
+):
+    sparse = pytest.importorskip("scipy.sparse")
+    matrix = sparse.csr_matrix(FEATURES)
+    matrix.data[0] = bad_value
+    with patch.object(offline_client, "_send", return_value="w") as send:
+        with pytest.raises(ValueError, match="features must be finite"):
+            offline_client.embeddings(
+                matrix, LABELS, opts={"register_embedding_events": False}
+            )
+
+    send.assert_not_called()
+
+
 def test_embeddings_point_carries_group_label_and_index(offline_client):
     calls = []
     with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
