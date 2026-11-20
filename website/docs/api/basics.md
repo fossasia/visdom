@@ -175,7 +175,7 @@ Using `tensor` input requires that ffmpeg is installed and working. Your ability
 vis.svg(svgstr=None, svgfile=None, win=None, env=None, opts=None)
 ```
 
-This function draws an SVG object. It takes as input a SVG string `svgstr` or the name of an SVG file `svgfile`. No specific `opts` are supported.
+This function draws an SVG object. It takes as input a SVG string `svgstr` or the filename or `pathlib.Path` of an SVG file `svgfile` (`svgfile` accepts string or `os.PathLike`). No specific `opts` are supported.
 
 ```python
 # From a string
