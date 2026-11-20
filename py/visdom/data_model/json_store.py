@@ -19,7 +19,7 @@ import threading
 from visdom.data_model.base import DataStore, read_json_file, UNREADABLE_JSON
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
 from visdom.utils.server_utils import escape_eid, LazyEnvData
-from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
+from visdom.utils.shared_utils import copy_json_data, ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 
@@ -324,7 +324,7 @@ class JSONStore(DataStore):
         except OSError as e:
             if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
                 raise
-            data_to_save = copy.deepcopy(payload)
+            data_to_save = copy_json_data(payload)
             data_to_save["name"] = self._safe_eid(eid)
             self._atomic_write(
                 self._hash_path(eid), json.dumps(data_to_save, cls=NanSafeEncoder)

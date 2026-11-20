@@ -7,7 +7,13 @@
  *
  */
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
 
@@ -380,22 +386,26 @@ const useAnnotations = ({
   }, [active, envID, paneID, frame, content]);
 
   // path data from lucide-react's pencil-line icon (24x24 viewBox)
-  const modebarButton = enabled
-    ? {
-        name: 'annotate',
-        title: active ? 'stop annotating' : 'annotate points',
-        icon: {
-          width: 24,
-          height: 24,
-          path: 'M13 21h8 m15 5 4 4 M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z',
-        },
-        toggle: true,
-        click: () => {
-          setActive((wasActive) => !wasActive);
-          setPendingPoint(null);
-        },
-      }
-    : null;
+  const modebarButton = useMemo(
+    () =>
+      enabled
+        ? {
+            name: 'annotate',
+            title: active ? 'stop annotating' : 'annotate points',
+            icon: {
+              width: 24,
+              height: 24,
+              path: 'M13 21h8 m15 5 4 4 M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z',
+            },
+            toggle: true,
+            click: () => {
+              setActive((wasActive) => !wasActive);
+              setPendingPoint(null);
+            },
+          }
+        : null,
+    [enabled, active]
+  );
 
   const hint =
     active && !pendingPoint ? (

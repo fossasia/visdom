@@ -30,7 +30,9 @@ import base64
 import binascii
 import builtins
 import sys
+import tracemalloc
 import types
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -43,6 +45,7 @@ from visdom import (
     _axisformat3d,
     _dashCheck,
     _decode_binary_arrays,
+    _finite_range,
     _lineColorCheck,
     _markerColorCheck,
     _markerSizeCheck,
@@ -150,6 +153,40 @@ def test_scrub_dict_visits_each_value_once():
     nested = Counted(b=Counted(c=Counted(d=1)))
     assert _scrub_dict(Counted(a=nested)) == {"a": {"b": {"c": {"d": 1}}}}
     assert len(seen) == 4
+
+
+def _layout_helper_calls(capture_send, depth):
+    """Calls into the two layout helpers for one line() with nested layoutopts."""
+    nested = {"leaf": 1}
+    for _ in range(depth):
+        nested = {"k": nested}
+    opts = {"layoutopts": {"plotly": {"nested": nested}}}
+    with mock.patch.object(
+        visdom, "_scrub_dict", wraps=visdom._scrub_dict
+    ) as scrub, mock.patch.object(
+        visdom, "_normalize_title_strings", wraps=visdom._normalize_title_strings
+    ) as normalize:
+        sent = capture_send(
+            lambda v: v.line(X=np.array([1, 2]), Y=np.array([1.0, 2.0]), opts=opts)
+        )
+    shown = sent["payload"]["layout"]["nested"]
+    for _ in range(depth):
+        shown = shown["k"]
+    assert shown == {"leaf": 1}
+    return scrub.call_count, normalize.call_count
+
+
+def test_nested_layoutopts_cost_grows_linearly_with_depth(capture_send):
+    """#1908: one line() call walked 2**depth nodes of a nested layoutopts.
+
+    Both helpers on that path are counted, and each level of nesting has to
+    add the same number of calls.
+    """
+    calls = {depth: _layout_helper_calls(capture_send, depth) for depth in (3, 6, 12)}
+    for helper in range(2):
+        first = calls[6][helper] - calls[3][helper]
+        second = calls[12][helper] - calls[6][helper]
+        assert second == 2 * first
 
 
 def test_normalize_title_strings_wraps_a_bare_string():
@@ -674,6 +711,7 @@ def test_assert_opts_accepts_a_fully_populated_opts():
             "columnnames": ["a"],
             "rownames": ["b"],
             "jpgquality": 100,
+            "compresslevel": 6,
             "opacity": 1,
             "fps": 30,
         }
@@ -705,6 +743,17 @@ def test_assert_opts_accepts_scalar_and_sequence_marker_sizes(markersize):
         ({"rownames": "abc"}, "rownames should be a list"),
         ({"jpgquality": "high"}, "JPG quality should be a number"),
         ({"jpgquality": 101}, "JPG quality should be number between 0 and 100"),
+        ({"compresslevel": 6.5}, "PNG compress level should be an integer"),
+        ({"compresslevel": "fast"}, "PNG compress level should be an integer"),
+        ({"compresslevel": True}, "PNG compress level should be an integer"),
+        (
+            {"compresslevel": 10},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
+        (
+            {"compresslevel": -1},
+            "PNG compress level should be an integer between 0 and 9",
+        ),
         ({"opacity": "half"}, "opacity should be a number"),
         ({"opacity": 1.5}, "opacity should be a number between 0 and 1"),
         ({"fps": "fast"}, "fps should be a number"),
@@ -722,6 +771,8 @@ def test_assert_opts_rejects_bad_input(opts, message):
     [
         {"jpgquality": 100},
         {"jpgquality": 0},
+        {"compresslevel": 0},
+        {"compresslevel": 9},
         {"opacity": 0},
         {"opacity": 1},
         {"fps": 1},
@@ -731,7 +782,9 @@ def test_assert_opts_accepts_the_boundaries(opts):
     """The inclusive ends of each range are valid.
 
     ``opacity=0`` and ``jpgquality=0`` reach no assertion at all, since the
-    guards are ``if opts.get(...)`` and zero is falsy.
+    guards are ``if opts.get(...)`` and zero is falsy. ``compresslevel`` is
+    guarded on ``is not None`` instead, precisely because 0 is a level there
+    rather than an unset value, so its boundary really is validated.
     """
     _assert_opts(opts)
 
@@ -1091,3 +1144,108 @@ def test_torch_types_is_still_an_extension_point(monkeypatch):
     monkeypatch.setattr(visdom, "torch_types", [_FakeTensor])
     array = np.arange(3)
     assert _to_numpy(_FakeTensor(array)) is array
+
+
+# ------------------------------------------------------------ _finite_range ----
+
+
+def _reference_finite_range(ar):
+    """What the call sites did before ``_finite_range`` existed."""
+    finite = ar[np.isfinite(ar)]
+    if finite.size > 0:
+        return float(finite.min()), float(finite.max())
+    return None
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [1.0, 2.0, 3.0],
+        [-5.0, 0.0, 5.0],
+        [0.0],
+        [np.nan, 3.0, 1.0],
+        [np.nan],
+        [np.nan, np.nan],
+        [np.inf, 2.0, 1.0],
+        [-np.inf, 2.0, 1.0],
+        [-np.inf, np.inf],
+        [-np.inf, np.inf, 4.0],
+        [np.inf, np.nan],
+        [-np.inf, np.nan],
+        [np.inf, np.nan, -np.inf],
+        [np.inf],
+        [-np.inf],
+        [],
+        [1, 2, 3],
+    ],
+)
+def test_finite_range_matches_the_mask_it_replaces(values):
+    """Every combination of NaN, infinities and emptiness agrees with the mask.
+
+    ``fmin``/``fmax`` skip NaN but *propagate* infinities, which is the one
+    case the fast path cannot answer on its own -- so the interesting rows here
+    are the ones mixing an infinity with a finite value, and the ones holding
+    nothing finite at all.
+    """
+    ar = np.asarray(values, dtype=np.float64)
+    assert _finite_range(ar) == _reference_finite_range(ar)
+
+
+def test_finite_range_reads_a_multidimensional_array_whole():
+    """The reduction is over every axis, as the mask was."""
+    ar = np.arange(24, dtype=np.float64).reshape(2, 3, 4)
+    assert _finite_range(ar) == (0.0, 23.0)
+
+
+def test_finite_range_handles_an_integer_array():
+    """``histogram`` may be handed ints, which have no NaN to skip."""
+    assert _finite_range(np.array([3, -1, 7])) == (-1.0, 7.0)
+
+
+def test_finite_range_returns_floats_not_numpy_scalars():
+    """The call sites compare against Python floats and put them in payloads."""
+    low, high = _finite_range(np.array([1.5, 2.5], dtype=np.float32))
+    assert type(low) is float and type(high) is float
+
+
+def _peak_bytes(call):
+    """Peak allocation during ``call``, numpy's own buffers included."""
+    call()  # first call pays for any one-off import or cache
+    tracemalloc.start()
+    try:
+        call()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        lambda ar: ar[np.isfinite(ar)],
+        lambda ar: ar[~np.isnan(ar)],
+    ],
+    ids=["isfinite", "isnan"],
+)
+def test_finite_range_allocates_nothing_without_an_infinity(spelling):
+    """The whole point is that the common case allocates nothing.
+
+    The thing to protect is the *allocation*, not the absence of one named
+    function: asserting that ``np.isfinite`` goes uncalled would pin a single
+    spelling of the mask, and ``ar[~np.isnan(ar)]`` costs exactly as much while
+    slipping past it. So the budget is measured instead, and each mask spelling
+    is run against the same budget in the same test -- which is what proves the
+    budget is tight enough to catch one rather than merely generous.
+    """
+    ar = np.linspace(0.0, 1.0, 1 << 18)
+    ar[0] = np.nan
+    budget = ar.nbytes // 64  # a bare bool mask is eight times this, uncompacted
+
+    assert _finite_range(ar) == (ar[1], 1.0)
+    assert _peak_bytes(lambda: _finite_range(ar)) < budget
+    assert _peak_bytes(lambda: spelling(ar)) > budget
+
+
+def test_finite_range_falls_back_to_the_mask_for_an_infinity():
+    """The slow path is the only way to get the finite extremes past an inf."""
+    assert _finite_range(np.array([-np.inf, 1.0, 4.0, np.inf])) == (1.0, 4.0)
