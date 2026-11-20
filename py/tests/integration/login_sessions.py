@@ -91,11 +91,12 @@ class TestLoginSessions(VisdomHTTPTestCase):
         self.assertNotIn(credential(OLD_PASSWORD)["client_hash"], value)
         self.assertNotIn("$", value)
 
-    def test_cookie_is_hidden_from_page_scripts(self):
+    def test_cookie_is_hidden_from_scripts_and_other_sites(self):
         client_hash = hashlib.sha256(OLD_PASSWORD.encode("utf-8")).hexdigest()
         resp = self.post_json("/", {"username": USERNAME, "password": client_hash})
         (set_cookie,) = resp.headers.get_list("Set-Cookie")
         self.assertIn("httponly", set_cookie.lower())
+        self.assertIn("samesite=lax", set_cookie.lower())
 
     def test_session_survives_a_restart_with_the_same_password(self):
         cookie = self.login(OLD_PASSWORD)
