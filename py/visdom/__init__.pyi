@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
 
 ### Type aliases for commonly-used types.
@@ -12,6 +13,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
+_OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -47,6 +49,28 @@ _EventHandler = Callable[[_Event], Any]
 # 'env' is None for a handler registered for every environment.
 _EventKey = Tuple[_OptStr, Text]
 
+# An iframe dimension for 'Visdom.show': a number is pixels, a string is CSS.
+_EmbedSize = Union[int, float, Text]
+
+class _NotebookEmbed:
+    # What 'show' hands back: a URL that renders as an iframe in a notebook and
+    # prints as the URL itself anywhere else. 'url' is None for an offline
+    # client, which has no server to embed and carries a 'note' instead. The
+    # dimensions are normalized to CSS lengths on the way in, so they are Text
+    # here whatever the constructor was handed.
+    url: _OptStr
+    height: Text
+    width: Text
+    note: _OptStr
+    def __init__(
+        self,
+        url: _OptStr,
+        height: _EmbedSize = ...,
+        width: _EmbedSize = ...,
+        note: _OptStr = ...,
+    ) -> None: ...
+    def _repr_html_(self) -> Text: ...
+
 class Visdom:
     # Public attributes. Callers read 'env' to see the environment new windows
     # land in and assign it to change that; the rest are the connection state the
@@ -76,6 +100,8 @@ class Visdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         proxies: Optional[Mapping[Text, Text]] = ...,
         offline: bool = ...,
         use_polling: bool = ...,
@@ -169,6 +195,17 @@ class Visdom:
     def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
     def check_connection(self, timeout_seconds: Union[int, float] = ...) -> bool: ...
     def replay_log(self, log_filename: Text) -> None: ...
+    def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
+    def _dashboard_url(self, env: _OptStr = ...) -> Text: ...
+    def _repr_html_(self) -> Text: ...
+    def show(
+        self,
+        env: _OptStr = ...,
+        height: _EmbedSize = ...,
+        width: _EmbedSize = ...,
+    ) -> _NotebookEmbed: ...
     def text(
         self,
         text: Text,
@@ -227,8 +264,8 @@ class Visdom:
     ) -> _SendReturn: ...
     def audio(
         self,
-        tensor: Tensor,
-        audiofile: _OptStr = ...,
+        tensor: Tensor = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -237,7 +274,7 @@ class Visdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

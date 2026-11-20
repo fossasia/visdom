@@ -16,7 +16,6 @@ import pytest
 
 from visdom.integrations import OptunaCallback
 
-
 pytestmark = pytest.mark.unit
 
 
