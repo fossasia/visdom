@@ -56,9 +56,18 @@ if sys.version_info < (3, 12):
 
 
 def _normalize_tsne(Y):
+    """Rescale 2-D t-SNE coordinates to [-1, 1], ignoring NaN when finding bounds."""
     Y = np.asarray(Y)
-    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
-    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xmin, xmax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 0]))
+        else (np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0]))
+    )
+    ymin, ymax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 1]))
+        else (np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1]))
+    )
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
@@ -237,12 +246,10 @@ from visdom.utils.shared_utils import NanSafeEncoder
 
 
 def loadfile(filename):
+    filename = os.fsdecode(filename)
     assert os.path.isfile(filename), "could not find file %s" % filename
-    fileobj = open(filename, "rb")
-    assert fileobj, "could not open file %s" % filename
-    str = fileobj.read()
-    fileobj.close()
-    return str
+    with open(filename, "rb") as fileobj:
+        return fileobj.read()
 
 
 def _finite_range(ar):
@@ -367,7 +374,7 @@ def _axisformat3d(xyz, opts):
 def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
-        "showlegend": opts.get("showlegend", "legend" in opts),
+        "showlegend": opts.get("showlegend", opts.get("legend") is not None),
         "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
@@ -399,7 +406,7 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(_normalize_title_strings(layout))
 
 
-def _normalize_labels(Y):
+def _normalize_labels(Y, max_label=None):
     """
     Normalizes arbitrary labels (int, float, string) to 1-based indices.
     Returns:
@@ -408,6 +415,7 @@ def _normalize_labels(Y):
                                            was already a valid set of 1-based integer labels.
         K (int): Number of unique labels
     """
+    # A compact legend can name sparse labels by their sorted unique values.
     Y = np.ravel(Y)
 
     try:
@@ -416,6 +424,8 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
+                and (max_label is None or int(np.nanmax(Y)) <= max_label)
             )
     except TypeError:
         is_integer_labels = False
@@ -950,9 +960,12 @@ def _decode_binary_arrays(obj):
                     base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
                 )
                 if "shape" in obj:
-                    arr = arr.reshape(obj["shape"])
+                    shape = obj["shape"]
+                    if isinstance(shape, str):
+                        shape = tuple(int(dim) for dim in shape.split(","))
+                    arr = arr.reshape(shape)
                 return arr.tolist()
-            except (binascii.Error, ValueError, TypeError):
+            except (binascii.Error, ValueError, TypeError, OverflowError):
                 return obj
         return {k: _decode_binary_arrays(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -2360,7 +2373,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2379,7 +2392,7 @@ class Visdom(object):
         is resized with the pane. You need `beautifulsoup4` and `lxml`
         packages installed to use this option.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2885,13 +2898,15 @@ class Visdom(object):
                     heatmap.shape, H, W
                 )
             )
-        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        h_min, h_max = float(heatmap.min()), float(heatmap.max())
-        if h_min < 0.0 or h_max > 1.0:
+        finite = np.isfinite(heatmap)
+        h_min = float(np.min(heatmap, where=finite, initial=np.inf))
+        h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
+        if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.zeros_like(heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
         try:
@@ -3056,8 +3071,8 @@ class Visdom(object):
     @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
-        This function plays audio. It takes as input the filename of the audio
-        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        This function plays audio. It takes as input the filename or `pathlib.Path`
+        of the audio file (`os.PathLike` supported) or an `N` tensor containing the waveform (use an `Nx2` matrix for
         stereo audio). The `(channels, N)` layout that torchaudio and librosa
         return (`1xN` or `2xN`) is accepted too. The function does not support
         any plot-specific `opts`.
@@ -3093,6 +3108,9 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
+            # Non-finite samples (NaN, +/-inf) would make max_val, and the
+            # whole scaled tensor, non-finite. Treat them as silence.
+            tensor = np.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
@@ -3101,6 +3119,7 @@ class Visdom(object):
                 tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
+        audiofile = os.fsdecode(audiofile)
         extension = audiofile.split(".")[-1].lower()
         mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
         mimetype = mimetypes.get(extension)
@@ -3166,8 +3185,8 @@ class Visdom(object):
         self, tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None
     ):
         """
-        This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        This function plays a video. It takes as input the filename or `pathlib.Path`
+        of the video `videofile` (`os.PathLike` supported) or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
         the frames of the video as input, as specified in `dim`. The color
         channels must be in BGR order.
 
@@ -3194,6 +3213,7 @@ class Visdom(object):
         ), "should specify video tensor or file"
 
         if tensor is None:
+            videofile = os.fsdecode(videofile)
             extension = videofile.split(".")[-1].lower()
             mimetypes = {"mp4": "mp4", "ogv": "ogg", "avi": "avi", "webm": "webm"}
             mimetype = mimetypes.get(extension)
@@ -3434,7 +3454,9 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            Y, label_values, K = _normalize_labels(Y)
+            legend = opts.get("legend") if opts else None
+            max_label = len(legend) if isinstance(legend, (list, tuple)) else None
+            Y, label_values, K = _normalize_labels(Y, max_label=max_label)
             labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
@@ -3478,10 +3500,15 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        if opts.get("legend"):
-            assert isinstance(opts["legend"], (tuple, list)) and K <= len(
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts["legend"], (tuple, list)
+            ), "opts.legend must be a list or tuple"
+            assert K <= len(
                 opts["legend"]
-            ), ("largest label should not be greater than size of " "the legends table")
+            ), "largest label should not be greater than size of the legends table"
+        else:
+            opts.pop("legend", None)
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
@@ -3518,8 +3545,8 @@ class Visdom(object):
         for position, k in enumerate(labels):
             ind = runs[position]
             if run_lengths[position]:
-                if "legend" in opts:
-                    trace_name = opts.get("legend")[k - 1]
+                if opts.get("legend") is not None:
+                    trace_name = opts["legend"][k - 1]
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
@@ -4158,15 +4185,15 @@ class Visdom(object):
 
         raw_cm = cm.copy()
         if normalize == "true":
-            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums = cm.sum(axis=1, keepdims=True, dtype=float)
             row_sums[row_sums == 0] = 1
             cm = cm.astype(float) / row_sums
         elif normalize == "pred":
-            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums = cm.sum(axis=0, keepdims=True, dtype=float)
             col_sums[col_sums == 0] = 1
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
-            total = float(cm.sum())
+            total = float(cm.sum(dtype=float))
             if total == 0:
                 warnings.warn(
                     "confusion matrix sum is zero; normalized values will be zero",
@@ -4200,7 +4227,7 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
-        raw_total = float(raw_cm.sum())
+        raw_total = float(raw_cm.sum(dtype=float))
         raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
@@ -4217,7 +4244,7 @@ class Visdom(object):
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        pct = float(raw_cm[i, j]) / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
@@ -4590,7 +4617,7 @@ class Visdom(object):
                 and opts["normalize"] > 0
                 and np.isfinite(opts["normalize"])
             ), "opts.normalize should be a finite positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            magnitude = np.hypot(X, Y, dtype=np.result_type(X, Y, np.float64))
             finite_mask = np.isfinite(magnitude)
 
             if not np.any(finite_mask):
@@ -4607,18 +4634,24 @@ class Visdom(object):
                         RuntimeWarning,
                     )
                 else:
-                    scale = max_mag / opts["normalize"]
-
-                    if scale <= 0 or not np.isfinite(scale):
-                        warnings.warn(
-                            "Skipping quiver normalization: invalid scale computed",
-                            RuntimeWarning,
-                        )
-                    else:
-                        X = np.where(np.isfinite(X), X, np.nan)
-                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                    with np.errstate(over="ignore", under="ignore"):
+                        scale = max_mag / opts["normalize"]
+                    nonzero_vectors = finite_mask & ((X != 0) | (Y != 0))
+                    X = np.where(np.isfinite(X), X, np.nan)
+                    Y = np.where(np.isfinite(Y), Y, np.nan)
+                    if scale >= np.finfo(magnitude.dtype).tiny and np.isfinite(scale):
+                        # Avoid losing tiny components with a normal scale.
                         X = X / scale
                         Y = Y / scale
+                    else:
+                        X = (X / max_mag) * opts["normalize"]
+                        Y = (Y / max_mag) * opts["normalize"]
+                    if np.any(nonzero_vectors & (X == 0) & (Y == 0)):
+                        warnings.warn(
+                            "Quiver normalization underflow: nonzero vectors became zero",
+                            RuntimeWarning,
+                            stacklevel=3,
+                        )
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()

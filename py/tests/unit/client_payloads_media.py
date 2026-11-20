@@ -34,6 +34,7 @@ asserted here.
 
 import base64
 import io
+import os
 import sys
 from unittest.mock import patch
 
@@ -861,6 +862,35 @@ def test_audio_maps_the_file_extension_to_a_mime_type(
     assert 'type="audio/{}"'.format(extension) in content(sent)
 
 
+def test_audio_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
+
+
+class _BytesPath:
+    def __init__(self, path):
+        self._path = os.fsencode(path)
+
+    def __fspath__(self):
+        return self._path
+
+
+def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=_BytesPath(path)))
+    assert 'type="audio/wav"' in content(sent)
+
+
+def test_audio_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "café_音频_test.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
+
+
 def test_audio_escapes_the_caption(capture_send):
     """The caption is interpolated into markup, so it has to be escaped."""
     sent = capture_send(
@@ -901,6 +931,27 @@ def test_video_is_sent_as_a_text_pane_holding_a_player(capture_send, tmp_path):
     assert sent["payload"]["data"][0]["type"] == "text"
     assert "<video controls" in content(sent)
     assert "data:video/mp4;base64," in content(sent)
+
+
+def test_video_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=_BytesPath(path)))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "vidéo_café_動画.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
 
 
 @pytest.mark.parametrize(
