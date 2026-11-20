@@ -21,6 +21,7 @@ Application belongs.
 """
 
 import json
+from unittest import mock
 
 import pytest
 
@@ -82,6 +83,55 @@ class TestExperimentLogEndpoint(VisdomHTTPTestCase):
         self.assertEqual(len(exp.metrics), 2)
         self.assertEqual(exp.latest_metric("acc").value, 0.9)
         self.assertEqual(exp.latest_metric("acc").step, 3)
+
+    def test_a_metric_batch_is_one_read_of_the_experiment(self):
+        """Observations sent together share one read-append-write.
+
+        Each used to be its own, and each of those re-read and re-persisted
+        the series the others were appending to.
+        """
+        reads = []
+        original = ExperimentStore._read
+
+        def counting(store, env_id):
+            reads.append(env_id)
+            return original(store, env_id)
+
+        with mock.patch.object(ExperimentStore, "_read", counting):
+            resp = self.post_json(
+                "/experiments/log",
+                {
+                    "eid": "main",
+                    "action": "metrics",
+                    "metrics": {"acc": 0.9, "loss": 0.1, "f1": 0.5},
+                    "step": 2,
+                },
+            )
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(reads, ["main"])
+        self.assertEqual(len(json.loads(resp.body)["metrics"]), 3)
+        self.assertEqual(len(self.read_experiment("main").metrics), 3)
+
+    def test_metrics_batch_to_finished_records_none_of_them(self):
+        """A batch refused for the whole experiment leaves nothing behind."""
+        self.post_json(
+            "/experiments/log",
+            {"eid": "main", "action": "metrics", "metrics": {"acc": 0.9}},
+        )
+        self.post_json("/experiments/log", {"eid": "main", "action": "finish"})
+
+        resp = self.post_json(
+            "/experiments/log",
+            {
+                "eid": "main",
+                "action": "metrics",
+                "metrics": {"acc": 0.95, "loss": 0.2},
+            },
+        )
+
+        self.assertEqual(resp.code, 409)
+        self.assertEqual(len(self.read_experiment("main").metrics), 1)
 
     def test_finish_sets_terminal_status(self):
         self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})

@@ -301,11 +301,16 @@ def test_allowlist_covers_every_public_visdom_method_but_the_socket_ones():
         if not name.startswith("_") and inspect.isfunction(value)
     }
     assert _PROXIED - public == set()
+    # 'show' is deliberately not proxied: it builds an iframe for a notebook
+    # cell out of attributes the client already holds, so there is no wire hop
+    # to put on the thread pool and awaiting it would only make a display
+    # helper harder to call. AsyncVisdom therefore does not answer to it.
     assert public - _PROXIED == {
         "register_event_handler",
         "clear_event_handlers",
         "setup_socket",
         "setup_polling",
+        "show",
     }
 
 
