@@ -1267,7 +1267,10 @@ paths:
         Validates the username and password against the server's configured
         credentials. The password is SHA-256 hashed on the server side
         (the client should also pre-hash once before sending). On success,
-        sets a secure cookie (`user_password`). On failure, returns 400.
+        sets a secure cookie (`user_password`). On failure, returns 400 (if login
+        is disabled on the server, the request payload is malformed or not an
+        object, required fields are missing, non-string, or contain invalid
+        UTF-8 surrogates, or credentials do not match).
       security: []
       requestBody:
         required: true
@@ -1279,13 +1282,13 @@ paths:
               properties:
                 username:
                   type: string
-                  description: Username for authentication.
+                  description: Username for authentication (must be a valid UTF-8 string).
                 password:
                   type: string
                   description: >
                     Password string (typically pre-hashed once on the
                     client side with SHA-256, then hashed again on the
-                    server).
+                    server). Must be a valid UTF-8 string.
       responses:
         "200":
           description: >
@@ -1297,7 +1300,14 @@ paths:
                 type: string
               description: Secure session cookie.
         "400":
-          description: Invalid credentials.
+          description: >
+            Invalid request. Returned when login is disabled on the server,
+            the request body is malformed or not an object, username or password
+            is missing, non-string, or contains invalid UTF-8 surrogates, or
+            credentials are invalid.
+        "404":
+          description: Path not found for unsupported subpaths.
+
 
   /socket:
     get:

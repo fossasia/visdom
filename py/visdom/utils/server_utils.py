@@ -146,7 +146,9 @@ def hash_password(password, salt=None):
         salt = os.urandom(32)
     elif isinstance(salt, str):
         salt = bytes.fromhex(salt)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    if isinstance(password, str):
+        password = password.encode("utf-8")
+    dk = hashlib.pbkdf2_hmac("sha256", password, salt, 100000)
     return salt.hex() + "$" + dk.hex()
 
 
