@@ -28,6 +28,7 @@ asserted here.
 
 import base64
 import io
+import os
 import sys
 from unittest.mock import patch
 
@@ -388,6 +389,214 @@ def test_images_promotes_a_grayscale_image_to_three_channels(capture_send):
     assert pixels.shape == (4, 4, 3)
 
 
+def _compressible(channels=3, size=128):
+    """A smooth image, so a PNG level really does change the payload size.
+
+    Random pixels are incompressible -- level 0 and level 9 come out within
+    bytes of each other -- which makes noise useless for asserting that the
+    dial is wired up at all.
+    """
+    ramp = np.linspace(0, 255, size, dtype=np.uint8)
+    plane = np.broadcast_to(ramp, (size, size))
+    return np.stack([plane] * channels)
+
+
+def _grid_dtype(client, batch, **kwargs):
+    """The dtype of the grid ``images`` hands to ``image``."""
+    seen = []
+    with patch.object(
+        client, "image", side_effect=lambda g, *a, **k: seen.append(g.dtype)
+    ):
+        client.images(batch, **kwargs)
+    assert len(seen) == 1
+    return seen[0]
+
+
+def test_images_grid_is_byte_identical_across_shapes_and_dtypes(capture_send):
+    """The vectorised tile fill must place every tile where the loop did.
+
+    The grid is built by writing one strided block per row of cells rather
+    than one block per tile, which is only valid if the slots it addresses are
+    exactly the old ``h_start:h_end``/``w_start:w_end`` windows. A partial last
+    row, ``padding=0`` and a batch smaller than ``nrow`` are the three ways that arithmetic can drift, so each
+    is checked against the pixels the reference loop produces.
+    """
+
+    def reference(tensor, nrow, padding):
+        nmaps = tensor.shape[0]
+        xmaps = min(nrow, nmaps)
+        ymaps = int(np.ceil(nmaps / xmaps))
+        height = tensor.shape[2] + 2 * padding
+        width = tensor.shape[3] + 2 * padding
+        is_uint8 = tensor.dtype == np.uint8
+        grid = np.full(
+            [tensor.shape[1], height * ymaps, width * xmaps],
+            255 if is_uint8 else 1,
+            dtype=np.uint8 if is_uint8 else np.float64,
+        )
+        k = 0
+        for y in range(ymaps):
+            for x in range(xmaps):
+                if k >= nmaps:
+                    break
+                h_start = y * height + padding
+                w_start = x * width + padding
+                grid[
+                    :,
+                    h_start : h_start + tensor.shape[2],
+                    w_start : w_start + tensor.shape[3],
+                ] = tensor[k]
+                k += 1
+        return grid
+
+    rng = np.random.default_rng(0)
+    batches = [
+        rng.integers(0, 256, (4, 3, 6, 6), dtype=np.uint8),  # exactly one row
+        rng.integers(0, 256, (10, 3, 5, 5), dtype=np.uint8),  # partial last row
+        rng.integers(0, 256, (3, 3, 4, 4), dtype=np.uint8),  # fewer than nrow
+        rng.integers(0, 2, (6, 3, 4, 4), dtype=np.uint8),  # low-valued uint8
+        rng.random((5, 3, 4, 4)),  # float keeps the float grid
+    ]
+    for tensor in batches:
+        for nrow, padding in ((8, 2), (4, 1), (2, 0), (3, 3)):
+            sent = capture_send(
+                lambda v, t=tensor, n=nrow, p=padding: v.images(t, nrow=n, padding=p)
+            )
+            _, pixels = decode(sent)
+            expected = reference(tensor, nrow, padding)
+            # `image()` is what turns the grid into pixels, so compare through it
+            through_image = capture_send(lambda v, g=expected: v.image(g))
+            assert np.array_equal(pixels, decode(through_image)[1]), (
+                tensor.dtype,
+                tensor.shape,
+                nrow,
+                padding,
+            )
+
+
+def test_images_keeps_a_uint8_batch_in_uint8(offline_client):
+    """A uint8 batch no longer widens to float64 on its way through the grid.
+
+    The grid used to be ``np.ones(...)`` -- float64 -- which cost eight bytes a
+    pixel and then took ``image()``'s float branch with its full-size
+    temporaries. This is the observable half of that: the pixels are unchanged,
+    so the test watches the dtype the grid is actually built with.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch) == np.uint8
+
+
+def test_images_keeps_a_low_valued_uint8_batch_in_uint8(offline_client):
+    """Keeping values 0 and 1 in uint8 prevents implicit float scaling."""
+    batch = np.ones((2, 3, 2, 2), dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch) == np.uint8
+
+
+def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
+    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
+
+    A uint8 grid never reaches that branch, so taking the dtype shortcut under
+    ``normalize=True`` would accept the option and silently do nothing. The
+    batch here is uint8 with a maximum above 1, which is exactly what the
+    shortcut is for -- so the float grid can only be coming from the option.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
+    assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
+
+
+def test_images_normalize_still_stretches_a_uint8_batch(capture_send):
+    """And the stretch itself reaches the pixels, not just the grid dtype.
+
+    A batch spanning only part of [0, 255] is min-max scaled onto the whole
+    range, so the decoded grid has to reach both ends; without the option it
+    keeps the input pixels and adds white padding.
+    """
+    batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
+    batch[:, :, 0, 0] = 40
+    stretched = decode(
+        capture_send(lambda v: v.images(batch, opts={"normalize": True}))
+    )[1]
+    plain = decode(capture_send(lambda v: v.images(batch)))[1]
+    assert (stretched.min(), stretched.max()) == (0, 255)
+    assert (plain.min(), plain.max()) == (40, 255)
+
+
+def test_images_forwards_the_compress_level(capture_send):
+    """``images`` hands its opts to ``image``, so the PNG dial reaches the grid."""
+    batch = np.stack([_compressible(size=32)] * 4)
+    fast = capture_send(lambda v: v.images(batch, opts=dict(compresslevel=0)))
+    small = capture_send(lambda v: v.images(batch, opts=dict(compresslevel=9)))
+    assert len(content(fast)["src"]) > len(content(small)["src"])
+    assert np.array_equal(decode(fast)[1], decode(small)[1])
+
+
+def test_image_compress_level_changes_the_payload_not_the_pixels(capture_send):
+    """``opts.compresslevel`` is a speed/size dial, so PNG stays lossless.
+
+    Level 0 stores the image uncompressed and level 9 spends the most time on
+    it, which is visible as a payload-size ordering; the decoded pixels have to
+    be identical either way, since a lossy level would be a silent data change.
+    """
+    img = _compressible()
+    stored = capture_send(lambda v: v.image(img, opts=dict(compresslevel=0)))
+    packed = capture_send(lambda v: v.image(img, opts=dict(compresslevel=9)))
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+    assert np.array_equal(decode(stored)[1], decode(packed)[1])
+    assert decode(stored)[0] == "data:image/png;base64"
+
+
+def test_image_default_compression_is_unchanged(capture_send):
+    """Omitting the opt must encode exactly as before: PIL's default of 6.
+
+    The point of exposing the level is that nobody's payload size moves unless
+    they ask, so an unset opt and an explicit 6 have to produce the same bytes.
+    """
+    img = np.random.default_rng(1).integers(0, 256, (3, 48, 48), dtype=np.uint8)
+    default = capture_send(lambda v: v.image(img))
+    explicit = capture_send(lambda v: v.image(img, opts=dict(compresslevel=6)))
+    assert content(default)["src"] == content(explicit)["src"]
+
+
+def test_image_jpeg_quality_wins_over_a_compress_level(capture_send):
+    """``compress_level`` is a PNG argument, so JPEG must not be handed one.
+
+    Passing both used to be impossible; now it has to pick the JPEG path and
+    drop the PNG dial rather than fail inside PIL.
+    """
+    img = np.random.default_rng(2).integers(0, 256, (3, 16, 16), dtype=np.uint8)
+    sent = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=1))
+    )
+    assert decode(sent)[0] == "data:image/jpeg;base64"
+
+
+def test_image_rgba_with_a_jpeg_quality_still_takes_the_compress_level(capture_send):
+    """An RGBA image stays PNG despite a quality, so the PNG dial still applies."""
+    img = _compressible(channels=4)
+    stored = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=0))
+    )
+    packed = capture_send(
+        lambda v: v.image(img, opts=dict(jpgquality=80, compresslevel=9))
+    )
+    assert decode(stored)[0] == "data:image/png;base64"
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+
+
+def test_image_heatmap_takes_a_compress_level(capture_send):
+    img = _compressible()
+    heatmap = np.broadcast_to(np.linspace(0, 1, 128), (128, 128))
+    stored = capture_send(
+        lambda v: v.image_heatmap(img, heatmap, opts=dict(compresslevel=0))
+    )
+    packed = capture_send(
+        lambda v: v.image_heatmap(img, heatmap, opts=dict(compresslevel=9))
+    )
+    assert len(content(stored)["src"]) > len(content(packed)["src"])
+    assert np.array_equal(decode(stored)[1], decode(packed)[1])
+
+
 # --------------------------------------------------------- image_heatmap ----
 
 
@@ -603,6 +812,62 @@ def test_audio_accepts_a_stereo_tensor(capture_send):
     assert "<audio controls>" in content(sent)
 
 
+def _wav(sent):
+    """Decode the WAV visdom embedded in the pane."""
+    import base64
+    import io
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[1]
+
+
+def _expected_wav(samples):
+    """What audio() writes for (N,) or (N, 2) samples: scaled to int16."""
+    return np.int16(samples / np.max(np.abs(samples)) * 32767)
+
+
+@pytest.mark.parametrize("shape", [(1, 64), (64, 1)], ids=["1xN", "Nx1"])
+def test_audio_plays_a_single_row_or_column_as_mono(capture_send, shape):
+    wave = np.sin(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=wave.reshape(shape)))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(wave))
+
+
+def test_audio_accepts_channels_first_stereo(capture_send):
+    """torchaudio and librosa return (2, N); each row stays its own channel."""
+    left = np.sin(np.linspace(0, 6, 64))
+    right = 0.5 * np.cos(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=np.stack([left, right])))
+    np.testing.assert_array_equal(
+        _wav(sent), _expected_wav(np.stack([left, right], axis=1))
+    )
+
+
+def test_audio_channels_first_matches_channels_last(capture_send):
+    stereo = np.random.RandomState(0).rand(64, 2) - 0.5
+    first = capture_send(lambda v: v.audio(tensor=stereo.T.copy()))
+    last = capture_send(lambda v: v.audio(tensor=stereo))
+    assert content(first) == content(last)
+
+
+@pytest.mark.parametrize(
+    "tensor, frames",
+    [
+        (np.array([[0.5, -0.25], [0.25, 0.75]]), [[0.5, -0.25], [0.25, 0.75]]),
+        (np.array([[0.5, -0.25]]), [[0.5, -0.25]]),
+        (np.array([[0.5], [-0.25]]), [[0.5, -0.25]]),
+    ],
+    ids=["2x2", "1x2", "2x1"],
+)
+def test_audio_keeps_short_stereo_as_stereo(capture_send, tensor, frames):
+    """(2, 2) and (1, 2) stay (N, 2) frames as before; (2, 1) is one frame."""
+    sent = capture_send(lambda v: v.audio(tensor=tensor))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(np.array(frames)))
+
+
 @pytest.mark.parametrize("extension", ["wav", "mp3", "ogg", "flac"])
 def test_audio_maps_the_file_extension_to_a_mime_type(
     capture_send, tmp_path, extension
@@ -611,6 +876,35 @@ def test_audio_maps_the_file_extension_to_a_mime_type(
     path.write_bytes(b"not really audio")
     sent = capture_send(lambda v: v.audio(audiofile=str(path)))
     assert 'type="audio/{}"'.format(extension) in content(sent)
+
+
+def test_audio_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
+
+
+class _BytesPath:
+    def __init__(self, path):
+        self._path = os.fsencode(path)
+
+    def __fspath__(self):
+        return self._path
+
+
+def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=_BytesPath(path)))
+    assert 'type="audio/wav"' in content(sent)
+
+
+def test_audio_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "café_音频_test.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
 
 
 def test_audio_escapes_the_caption(capture_send):
@@ -635,6 +929,7 @@ def test_audio_rejects_an_unknown_file_type(offline_client, tmp_path):
     [
         ({}, "should specify audio tensor or file"),
         (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((6, 100))), "tensor should be 1D vector or 2D matrix"),
     ],
 )
 def test_audio_rejects_malformed_input(offline_client, kwargs, message):
@@ -652,6 +947,27 @@ def test_video_is_sent_as_a_text_pane_holding_a_player(capture_send, tmp_path):
     assert sent["payload"]["data"][0]["type"] == "text"
     assert "<video controls" in content(sent)
     assert "data:video/mp4;base64," in content(sent)
+
+
+def test_video_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=_BytesPath(path)))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "vidéo_café_動画.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
 
 
 @pytest.mark.parametrize(

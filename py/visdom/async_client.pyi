@@ -20,6 +20,7 @@ import asyncio
 import contextvars
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
+import os
 from types import TracebackType
 from typing import (
     Any,
@@ -47,7 +48,9 @@ from visdom import (
     _Event,
     _EventHandler,
     _ExperimentQueryReply,
+    _ExperimentReply,
     _OptOps,
+    _OptPath,
     _OptStr,
     _SendReturn,
     _TagMap,
@@ -97,6 +100,8 @@ class _AsyncTransport:
     password: _OptStr
     ssl_verify: Union[bool, Text]
     max_clients: int
+    api_key: _OptStr
+    workspace: _OptStr
     cookie: _OptStr
     def __init__(
         self,
@@ -107,6 +112,8 @@ class _AsyncTransport:
         password: _OptStr = ...,
         ssl_verify: Union[bool, Text] = ...,
         max_clients: int = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
     ) -> None: ...
     @property
     def client(self) -> AsyncHTTPClient: ...
@@ -194,6 +201,8 @@ class AsyncVisdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         offline: bool = ...,
         use_polling: bool = ...,
         session_idle_timeout: Union[int, float] = ...,
@@ -316,6 +325,9 @@ class AsyncVisdom:
         self, timeout_seconds: Union[int, float] = ...
     ) -> bool: ...
     async def replay_log(self, log_filename: Text) -> None: ...
+    async def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
     async def text(
         self,
         text: Text,
@@ -375,7 +387,7 @@ class AsyncVisdom:
     async def audio(
         self,
         tensor: Tensor = ...,
-        audiofile: _OptStr = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -384,7 +396,7 @@ class AsyncVisdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

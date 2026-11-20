@@ -18,7 +18,7 @@
 
 /* eslint-disable react/no-find-dom-node, react/display-name */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 var Width = (ComposedComponent) => (props) => {
   const { onWidthChange } = props;
@@ -80,9 +80,10 @@ var Width = (ComposedComponent) => (props) => {
     };
   }, []);
 
-  // call onWindowResize upon initialization to query initial dimensions
-  useEffect(() => {
-    onWindowResize();
+  // measure initial dimensions before the first paint, so panes arriving
+  // right after page load are not packed against the 1280px default
+  useLayoutEffect(() => {
+    onWindowResizeStop();
   }, []);
 
   // rendering

@@ -116,8 +116,27 @@ class FakeHandler:
         """Record an environment the server flagged as needing a save."""
         self.dirtied.append(eid)
 
+    def storage_refusal(self):
+        return None
+
     def write(self, chunk):
         self.written.append(chunk)
+
+    def write_text(self, body):
+        """``BaseHandler.write_text``, as far as a test can observe it.
+
+        The real one declares ``text/plain`` and ``nosniff`` and finishes the
+        response; here only the body is observable, so it is recorded where
+        ``write`` records one and ``handler.body`` keeps reading the same way.
+
+        It appends directly rather than delegating to ``self.write``: a handler
+        method is dispatched by name, so taint arriving at ``write_text`` on a
+        real ``RequestHandler`` reaches this body too, and a ``self.write``
+        here is then the modelled ``text/html`` response sink that
+        ``BaseHandler.write_text`` exists to avoid -- CodeQL reports it against
+        this file.
+        """
+        self.written.append(body)
 
     def set_status(self, code, reason=None):
         self.status = code
