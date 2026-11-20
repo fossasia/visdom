@@ -23,6 +23,7 @@ from tornado.testing import gen_test
 from tornado.websocket import websocket_connect
 
 from testutils.http import VisdomHTTPTestCase
+from visdom.server import handlers
 
 pytestmark = pytest.mark.integration
 
@@ -116,12 +117,28 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 403)
         self.assertTrue(self.env_exists("victim"))
 
-    def test_https_behind_a_proxy_that_sets_no_forwarded_proto_is_allowed(self):
-        # The proxy ends TLS and forwards plain http, keeping Host but not
-        # saying which scheme the browser used.
+    def test_without_forwarded_proto_only_the_arrival_scheme_is_accepted(self):
+        # A proxy that ends TLS without X-Forwarded-Proto leaves no way to tell
+        # an https page from an http one, so only the scheme the request came
+        # in on is accepted, and the operator is told what to set.
+        handlers.base_handlers._warned_missing_forwarded_proto = False
+        here = "localhost:%d" % self.get_http_port()
+        with self.assertLogs(level="WARNING") as logs:
+            resp = self.post_from(
+                "/delete_env", {"eid": "victim"}, Origin="https://" + here, Host=here
+            )
+        self.assertEqual(resp.code, 403)
+        self.assertTrue(self.env_exists("victim"))
+        self.assertIn("X-Forwarded-Proto", "\n".join(logs.output))
+
+    def test_https_behind_a_proxy_that_sets_forwarded_proto_is_allowed(self):
         here = "localhost:%d" % self.get_http_port()
         resp = self.post_from(
-            "/delete_env", {"eid": "victim"}, Origin="https://" + here, Host=here
+            "/delete_env",
+            {"eid": "victim"},
+            Origin="https://" + here,
+            Host=here,
+            **{"X-Forwarded-Proto": "https"},
         )
         self.assertEqual(resp.code, 200)
 

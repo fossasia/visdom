@@ -77,19 +77,39 @@ def is_cross_site_request(request, get_changes_state=False):
     # proxy allow-list: a page cannot set them on a cross-site request without
     # a CORS preflight, which visdom does not grant, and callers that can set
     # them freely (curl, scripts) are not stopped by this check anyway.
-    forwarded_scheme = _first_forwarded(request, "X-Forwarded-Proto")
-    schemes = {forwarded_scheme or request.protocol}
-    if not forwarded_scheme and request.protocol == "http":
-        # A proxy that ends TLS without setting X-Forwarded-Proto passes an
-        # https page's requests on over plain http. Accepting https here is
-        # safe: the reverse, an http page posting to an https server, is the
-        # downgrade a network attacker could use, and it stays refused.
-        schemes.add("https")
+    #
+    # Without X-Forwarded-Proto the server cannot know which scheme the
+    # browser used, so it assumes the one the request arrived on and accepts
+    # no other. Accepting both would let an http page post to a site served
+    # over https -- the downgrade a network attacker could use. Behind a proxy
+    # that ends TLS without that header an https page is refused instead, so
+    # that case is logged with what to set.
+    scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
     hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
-    allowed = {
-        "{0}://{1}".format(scheme, host) for scheme in schemes for host in hosts if host
-    }
-    return origin.lower() not in allowed
+    allowed = {"{0}://{1}".format(scheme, host) for host in hosts if host}
+    if origin.lower() in allowed:
+        return False
+    if scheme == "http" and origin.lower() in {"https://" + h for h in hosts if h}:
+        _warn_missing_forwarded_proto(origin)
+    return True
+
+
+_warned_missing_forwarded_proto = False
+
+
+def _warn_missing_forwarded_proto(origin):
+    """Say once why an https page was refused by a server reached over http."""
+    global _warned_missing_forwarded_proto
+    if _warned_missing_forwarded_proto:
+        return
+    _warned_missing_forwarded_proto = True
+    logging.warning(
+        "Refused a request from %s because it arrived over plain http. If "
+        "Visdom runs behind a proxy that terminates TLS, have the proxy set "
+        "X-Forwarded-Proto (for nginx: proxy_set_header X-Forwarded-Proto "
+        "$scheme;).",
+        origin,
+    )
 
 
 def _first_forwarded(request, header):
