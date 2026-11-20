@@ -6,17 +6,58 @@ import ApiContext from './ApiContext';
 import Poller from './Legacy';
 import serverPath from './serverPath';
 
+const CONNECT_TIMEOUT_MS = 15000;
+
 const ApiProvider = ({ children }) => {
-  const [connected, setConnected] = useState(false);
+  // null = initial connection attempt pending ("connecting")
+  // true = online / connected
+  // false = offline / disconnected / connection failed
+  const [connected, setConnected] = useState(null);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
   const apiHandlers = useRef(null);
+  const _connectTimer = useRef(null);
 
   // ---------------- //
   // helper functions //
   // ---------------- //
-
   const correctPathname = serverPath;
+
+  const clearConnectTimer = () => {
+    if (_connectTimer.current) {
+      clearTimeout(_connectTimer.current);
+      _connectTimer.current = null;
+    }
+  };
+
+  // Detach handlers so late events can't touch a newer socket, then close
+  const detachAndClose = (sock) => {
+    sock.onopen = null;
+    sock.onmessage = null;
+    sock.onerror = null;
+    sock.onclose = null;
+    try {
+      sock.close();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Error while closing socket:', e);
+    }
+  };
+
+  const startConnectTimer = (instance) => {
+    clearConnectTimer();
+    _connectTimer.current = setTimeout(() => {
+      _connectTimer.current = null;
+      if (_socket.current !== instance) {
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Connection timed out');
+      _socket.current = null;
+      detachAndClose(instance);
+      setConnected(false);
+    }, CONNECT_TIMEOUT_MS);
+  };
 
   // ------------------- //
   // basic communication //
@@ -62,43 +103,71 @@ const ApiProvider = ({ children }) => {
     if (_socket.current) {
       return;
     }
+    setConnected(null); // show "connecting" on (re)connect too
 
-    const _onConnect = () => {
+    const _onConnect = (instance) => {
+      // Ignore connects from sockets that were closed or superseded
+      if (_socket.current !== instance) {
+        return;
+      }
+      clearConnectTimer();
       setConnected(true);
     };
-    const _onDisconnect = () => {
-      // Silent cleanup - logging handled by event handlers
-      apiHandlers.current.onDisconnect(_socket);
+
+    const _onDisconnect = (instance) => {
+      // Only the active socket may mark us offline
+      if (_socket.current !== instance) {
+        return;
+      }
+      clearConnectTimer();
+      _socket.current = null;
+      // Update the indicator first so a failing handler can't leave it stale
       setConnected(false);
+      try {
+        apiHandlers.current?.onDisconnect(_socket);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[Visdom API] onDisconnect handler failed:', e);
+      }
     };
 
     // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      _socket.current = new Poller(
-        correctPathname,
-        handleMessage,
-        _onConnect,
-        _onDisconnect
-      );
+      let pollerInstance;
+      try {
+        pollerInstance = new Poller(
+          correctPathname,
+          handleMessage,
+          () => _onConnect(pollerInstance),
+          () => _onDisconnect(pollerInstance)
+        );
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[Visdom API] Failed to start poller:', e);
+        setConnected(false);
+        return;
+      }
+      _socket.current = pollerInstance;
+      startConnectTimer(pollerInstance);
       return;
     }
 
-    var url = window.location;
-    var ws_protocol = null;
-    if (url.protocol == 'https:') {
-      ws_protocol = 'wss';
-    } else {
-      ws_protocol = 'ws';
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl =
+      protocol + '://' + window.location.host + correctPathname() + 'socket';
+
+    let socket;
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to create WebSocket:', e);
+      setConnected(false);
+      return;
     }
-
-    const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
-
-    var socket = new WebSocket(wsUrl);
-
     socket.onmessage = handleMessage;
-    socket.onopen = _onConnect;
+    socket.onopen = () => _onConnect(socket);
     socket.onerror = (event) => {
-      // Log error but don't call _onDisconnect here (let onclose handle it)
       // eslint-disable-next-line no-console
       console.error(
         '[Visdom API] WebSocket error - the socket will likely close next',
@@ -106,7 +175,9 @@ const ApiProvider = ({ children }) => {
       );
     };
     socket.onclose = (event) => {
-      // Determine if this was a clean close or an error
+      if (_socket.current !== socket) {
+        return;
+      }
       if (!event.wasClean) {
         // eslint-disable-next-line no-console
         console.warn(
@@ -115,21 +186,26 @@ const ApiProvider = ({ children }) => {
           `Reason: ${event.reason || '(no reason provided)'}`
         );
       }
-      // Only call _onDisconnect from onclose to avoid duplicate handling
-      _onDisconnect();
+      _onDisconnect(socket);
     };
+
     _socket.current = socket;
+    startConnectTimer(socket);
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    if (_socket.current) {
-      _socket.current.close();
-      _socket.current = null;
+    clearConnectTimer(); // also runs on unmount, even with no socket
+    const socketToClose = _socket.current;
+    if (!socketToClose) {
+      return;
     }
+    _socket.current = null;
+    detachAndClose(socketToClose);
+    setConnected(false);
   };
 
-  // ------------------ //
+  // -------------------//
   // API receive events //
   // -------------------//
 
