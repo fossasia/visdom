@@ -30,7 +30,35 @@ async function prepareDemoForScreenshot(page, run) {
   await waitForPlotRender(page);
 }
 
+// The visual regression job takes its baseline screenshots from the base
+// branch's build. A build without the session guard in sendEnvQuery
+// (js/api/ApiProvider.js) posts {"sid": null} to /compare before the socket
+// has registered; the server answers 400 and the page is replaced by the
+// error page. Answer that one request with an empty 200, as the server did
+// before it validated sid. The query is sent again with the real sid once
+// 'register' arrives, and that one goes to the server.
+//
+// jQuery sends the body as form-encoded, so read it raw: postDataJSON()
+// parses form-encoded bodies as forms and never sees the sid.
+async function answerUnregisteredCompareQuery(page) {
+  await page.unroute('**/compare/**').catch(() => {});
+  await page.route('**/compare/**', (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      try {
+        if (JSON.parse(request.postData() || '{}').sid === null) {
+          return route.fulfill({ status: 200, body: '' });
+        }
+      } catch (e) {
+        // Not JSON: let the server answer it.
+      }
+    }
+    return route.continue();
+  });
+}
+
 async function openCompareView(page, envs) {
+  await answerUnregisteredCompareQuery(page);
   await page.goto(`/compare/${envs.join('+')}`);
   await page.locator('text=online').first().waitFor({ state: 'visible' });
 }

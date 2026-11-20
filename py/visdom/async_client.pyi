@@ -20,6 +20,7 @@ import asyncio
 import contextvars
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
+import os
 from types import TracebackType
 from typing import (
     Any,
@@ -47,7 +48,9 @@ from visdom import (
     _Event,
     _EventHandler,
     _ExperimentQueryReply,
+    _ExperimentReply,
     _OptOps,
+    _OptPath,
     _OptStr,
     _SendReturn,
     _TagMap,
@@ -62,6 +65,8 @@ _AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
 CONNECT_TIMEOUT: float
 REQUEST_TIMEOUT: float
+# tornado reads 0 as "no timeout": the backchannel connection is held for the
+# life of the client, not for one request.
 SOCKET_REQUEST_TIMEOUT: int
 DEFAULT_MAX_CONCURRENCY: int
 HANDSHAKE_TIMEOUT: float
@@ -95,6 +100,8 @@ class _AsyncTransport:
     password: _OptStr
     ssl_verify: Union[bool, Text]
     max_clients: int
+    api_key: _OptStr
+    workspace: _OptStr
     cookie: _OptStr
     def __init__(
         self,
@@ -105,6 +112,8 @@ class _AsyncTransport:
         password: _OptStr = ...,
         ssl_verify: Union[bool, Text] = ...,
         max_clients: int = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
     ) -> None: ...
     @property
     def client(self) -> AsyncHTTPClient: ...
@@ -129,15 +138,20 @@ class _AsyncWebSocket(_AsyncBackchannel): ...
 class _AsyncPolling(_AsyncBackchannel): ...
 
 class _Call:
-    # The two sides of the call live behind '__slots__' and are reached only
-    # through these three methods: the worker attaches and detaches the POST it
-    # is on, the loop cancels it.
+    # The POST in flight and the cancelled flag are guarded by a lock and are
+    # reached only through these methods -- one side is a worker thread and the
+    # other is the loop. 'attach' returns True when the call was cancelled
+    # before the POST was recorded, which makes cancelling it the worker's job.
     def __init__(self) -> None: ...
     def attach(self, future: _ConcurrentFuture[Text]) -> bool: ...
     def detach(self) -> None: ...
     def cancel(self) -> None: ...
 
 class _Construction:
+    # Ownership of a half-built client while 'create' can still be cancelled.
+    # 'finish' is the worker's report and returns True when releasing the
+    # client is the worker's job; 'abandon' is the loop's and returns the
+    # instance to release, or None when the worker will do it.
     def __init__(self) -> None: ...
     def publish(self, inner: _BridgedVisdom) -> None: ...
     def finish(self) -> bool: ...
@@ -187,6 +201,8 @@ class AsyncVisdom:
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
+        api_key: _OptStr = ...,
+        workspace: _OptStr = ...,
         offline: bool = ...,
         use_polling: bool = ...,
         session_idle_timeout: Union[int, float] = ...,
@@ -309,6 +325,9 @@ class AsyncVisdom:
         self, timeout_seconds: Union[int, float] = ...
     ) -> bool: ...
     async def replay_log(self, log_filename: Text) -> None: ...
+    async def restore_run(
+        self, json_path: Text, env: _OptStr = ..., delay: Optional[float] = ...
+    ) -> _ExperimentReply: ...
     async def text(
         self,
         text: Text,
@@ -367,8 +386,8 @@ class AsyncVisdom:
     ) -> _SendReturn: ...
     async def audio(
         self,
-        tensor: Tensor,
-        audiofile: _OptStr = ...,
+        tensor: Tensor = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -377,7 +396,7 @@ class AsyncVisdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

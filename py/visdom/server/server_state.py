@@ -110,6 +110,10 @@ class StateAccessorsMixin:
     def deleting_envs(self):
         return self.server_state.deleting_envs
 
+    @property
+    def env_delete_watches(self):
+        return self.server_state.env_delete_watches
+
     def mark_dirty(self, eid):
         """Mark an environment for persistence through the shared state."""
         return self.server_state.mark_dirty(eid)
@@ -176,6 +180,12 @@ class ServerState:
         # back into ``state`` when it resumes, or the deleted env is listed
         # again for as long as the server runs.
         self.deleting_envs = {}
+        # Watches held by requests that are off the loop with an env in mind,
+        # keyed by that env. ``deleting_envs`` is dropped as soon as the delete
+        # lands, so a request that resumes after it would see no trace of it;
+        # these are told as the delete starts and keep saying so until their
+        # holder is done.
+        self.env_delete_watches = {}
         self.autosave = None
         # Disk work is handed to one worker thread rather than run on the loop.
         # A single worker keeps the writes serialized, so two saves of the same
