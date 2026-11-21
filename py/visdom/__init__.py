@@ -374,7 +374,7 @@ def _axisformat3d(xyz, opts):
 def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
-        "showlegend": opts.get("showlegend", "legend" in opts),
+        "showlegend": opts.get("showlegend", opts.get("legend") is not None),
         "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
@@ -406,7 +406,7 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(_normalize_title_strings(layout))
 
 
-def _normalize_labels(Y):
+def _normalize_labels(Y, max_label=None):
     """
     Normalizes arbitrary labels (int, float, string) to 1-based indices.
     Returns:
@@ -415,6 +415,7 @@ def _normalize_labels(Y):
                                            was already a valid set of 1-based integer labels.
         K (int): Number of unique labels
     """
+    # A compact legend can name sparse labels by their sorted unique values.
     Y = np.ravel(Y)
 
     try:
@@ -423,6 +424,8 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
+                and (max_label is None or int(np.nanmax(Y)) <= max_label)
             )
     except TypeError:
         is_integer_labels = False
@@ -2370,7 +2373,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2389,7 +2392,7 @@ class Visdom(object):
         is resized with the pane. You need `beautifulsoup4` and `lxml`
         packages installed to use this option.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2537,7 +2540,16 @@ class Visdom(object):
             raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     def _register_embeddings(
-        self, features, labels, points, data_getter, data_type, win, env, opts
+        self,
+        features,
+        labels,
+        points,
+        data_getter,
+        data_type,
+        win,
+        env,
+        opts,
+        label_groups=None,
     ):
         self.win_data[win] = {
             "features": features,
@@ -2548,6 +2560,10 @@ class Visdom(object):
             "env": env,
             "opts": opts,
         }
+
+        if label_groups is None:
+            labels_normalized, _, _ = _normalize_labels(labels)
+            _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2580,10 +2596,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2654,9 +2669,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -2683,7 +2699,15 @@ class Visdom(object):
 
         if opts.get("register_embedding_events", True):
             self._register_embeddings(
-                features, labels, points, data_getter, data_type, win, env, opts
+                features,
+                labels,
+                points,
+                data_getter,
+                data_type,
+                win,
+                env,
+                opts,
+                label_groups=label_groups,
             )
         return win
 
@@ -3451,7 +3475,9 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            Y, label_values, K = _normalize_labels(Y)
+            legend = opts.get("legend") if opts else None
+            max_label = len(legend) if isinstance(legend, (list, tuple)) else None
+            Y, label_values, K = _normalize_labels(Y, max_label=max_label)
             labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
@@ -3495,10 +3521,15 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        if opts.get("legend"):
-            assert isinstance(opts["legend"], (tuple, list)) and K <= len(
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts["legend"], (tuple, list)
+            ), "opts.legend must be a list or tuple"
+            assert K <= len(
                 opts["legend"]
-            ), ("largest label should not be greater than size of " "the legends table")
+            ), "largest label should not be greater than size of the legends table"
+        else:
+            opts.pop("legend", None)
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
@@ -3535,8 +3566,8 @@ class Visdom(object):
         for position, k in enumerate(labels):
             ind = runs[position]
             if run_lengths[position]:
-                if "legend" in opts:
-                    trace_name = opts.get("legend")[k - 1]
+                if opts.get("legend") is not None:
+                    trace_name = opts["legend"][k - 1]
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
@@ -4617,7 +4648,7 @@ class Visdom(object):
                 and opts["normalize"] > 0
                 and np.isfinite(opts["normalize"])
             ), "opts.normalize should be a finite positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            magnitude = np.hypot(X, Y, dtype=np.result_type(X, Y, np.float64))
             finite_mask = np.isfinite(magnitude)
 
             if not np.any(finite_mask):
@@ -4634,18 +4665,24 @@ class Visdom(object):
                         RuntimeWarning,
                     )
                 else:
-                    scale = max_mag / opts["normalize"]
-
-                    if scale <= 0 or not np.isfinite(scale):
-                        warnings.warn(
-                            "Skipping quiver normalization: invalid scale computed",
-                            RuntimeWarning,
-                        )
-                    else:
-                        X = np.where(np.isfinite(X), X, np.nan)
-                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                    with np.errstate(over="ignore", under="ignore"):
+                        scale = max_mag / opts["normalize"]
+                    nonzero_vectors = finite_mask & ((X != 0) | (Y != 0))
+                    X = np.where(np.isfinite(X), X, np.nan)
+                    Y = np.where(np.isfinite(Y), Y, np.nan)
+                    if scale >= np.finfo(magnitude.dtype).tiny and np.isfinite(scale):
+                        # Avoid losing tiny components with a normal scale.
                         X = X / scale
                         Y = Y / scale
+                    else:
+                        X = (X / max_mag) * opts["normalize"]
+                        Y = (Y / max_mag) * opts["normalize"]
+                    if np.any(nonzero_vectors & (X == 0) & (Y == 0)):
+                        warnings.warn(
+                            "Quiver normalization underflow: nonzero vectors became zero",
+                            RuntimeWarning,
+                            stacklevel=3,
+                        )
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
@@ -5173,10 +5210,21 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
-        G = nx.Graph()
-        G.add_edges_from(edges)
+        input_edges = list(edges)
+        G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
+        G.add_edges_from(input_edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
+        if opts.get("directed", False):
+            link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
+        else:
+            link_data = []
+            seen = set()
+            for edge in input_edges:
+                key = frozenset(edge[:2])
+                if key not in seen:
+                    seen.add(key)
+                    link_data.append(tuple(edge[:2]))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(
