@@ -70,9 +70,18 @@ const safeJsonParse = (raw, fallback, onError) => {
   }
 };
 
+// Only a /compare/ page joins several envs with '+'; an env name may contain
+// it too. The route is whichever of /env/ and /compare/ comes first.
+const isComparePage = () => {
+  const path = window.location.pathname || '';
+  const env = path.indexOf('/env/');
+  const compare = path.indexOf('/compare/');
+  return compare !== -1 && (env === -1 || compare < env);
+};
+
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
-  if (ACTIVE_ENV.indexOf('+') > -1) {
+  if (isComparePage()) {
     // Compare case
     use_envs = ACTIVE_ENV.split('+');
   } else {
