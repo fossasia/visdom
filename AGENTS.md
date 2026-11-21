@@ -41,7 +41,7 @@ Version `0.3.1` · Python >= 3.12 · Apache 2.0
 - Python unit tests: `pytest -m "not server"` (config in `pyproject.toml`, suite in `py/tests/`)
 - Fast loop: `pytest -m unit` — CI runs this as a gate, so mark every new file with a module-level
   `pytestmark`; see `context/testing.md` for which marker and where the file goes
-- Install browser once: `npx playwright install chromium`
+- Install browsers once: `npx playwright install chromium firefox`
 - Run E2E tests: `npm test` and `npm run test:polling`
 - Visual tests: `npm run test:init` then `npm run test:visual`
 - Pre-commit: `pre-commit run --all-files`

@@ -7,6 +7,8 @@
  *
  */
 
+import './PlotPane.css';
+
 import React, {
   useCallback,
   useContext,
