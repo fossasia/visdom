@@ -374,7 +374,7 @@ def _axisformat3d(xyz, opts):
 def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
-        "showlegend": opts.get("showlegend", "legend" in opts),
+        "showlegend": opts.get("showlegend", opts.get("legend") is not None),
         "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
@@ -406,7 +406,7 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(_normalize_title_strings(layout))
 
 
-def _normalize_labels(Y):
+def _normalize_labels(Y, max_label=None):
     """
     Normalizes arbitrary labels (int, float, string) to 1-based indices.
     Returns:
@@ -415,6 +415,7 @@ def _normalize_labels(Y):
                                            was already a valid set of 1-based integer labels.
         K (int): Number of unique labels
     """
+    # A compact legend can name sparse labels by their sorted unique values.
     Y = np.ravel(Y)
 
     try:
@@ -423,6 +424,8 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
+                and (max_label is None or int(np.nanmax(Y)) <= max_label)
             )
     except TypeError:
         is_integer_labels = False
@@ -2370,7 +2373,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2389,7 +2392,7 @@ class Visdom(object):
         is resized with the pane. You need `beautifulsoup4` and `lxml`
         packages installed to use this option.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -3451,7 +3454,9 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            Y, label_values, K = _normalize_labels(Y)
+            legend = opts.get("legend") if opts else None
+            max_label = len(legend) if isinstance(legend, (list, tuple)) else None
+            Y, label_values, K = _normalize_labels(Y, max_label=max_label)
             labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
@@ -3495,10 +3500,15 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        if opts.get("legend"):
-            assert isinstance(opts["legend"], (tuple, list)) and K <= len(
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts["legend"], (tuple, list)
+            ), "opts.legend must be a list or tuple"
+            assert K <= len(
                 opts["legend"]
-            ), ("largest label should not be greater than size of " "the legends table")
+            ), "largest label should not be greater than size of the legends table"
+        else:
+            opts.pop("legend", None)
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
@@ -3535,8 +3545,8 @@ class Visdom(object):
         for position, k in enumerate(labels):
             ind = runs[position]
             if run_lengths[position]:
-                if "legend" in opts:
-                    trace_name = opts.get("legend")[k - 1]
+                if opts.get("legend") is not None:
+                    trace_name = opts["legend"][k - 1]
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
