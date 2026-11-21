@@ -12,9 +12,9 @@ or debugging browser-test failures.
 
 ## Core Workflow
 
-1. Install Chromium once:
+1. Install Chromium and Firefox once:
    ```bash
-   npx playwright install chromium
+   npx playwright install chromium firefox
    ```
 
 2. Run functional tests:

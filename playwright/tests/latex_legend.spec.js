@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
+const { randomUUID } = require('node:crypto');
 const { devices, test, expect } = require('@playwright/test');
 
 test.use({ ...devices['Desktop Firefox'], browserName: 'firefox' });
@@ -8,7 +9,7 @@ test('Firefox fits complete LaTeX labels inside the plot legend', async ({
   page,
   request,
 }) => {
-  const eid = `latex-legend-${Date.now()}`;
+  const eid = `latex-legend-${randomUUID()}`;
   const labels = [
     String.raw`$\alpha_{1c} = 352 \pm 11 \text{ km s}^{-1}$`,
     String.raw`$\beta_{1c} = 25 \pm 11 \text{ km s}^{-1}$`,

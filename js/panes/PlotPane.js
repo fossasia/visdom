@@ -7,6 +7,8 @@
  *
  */
 
+import './PlotPane.css';
+
 import React, {
   useCallback,
   useContext,
@@ -15,8 +17,6 @@ import React, {
   useState,
 } from 'react';
 const { usePrevious } = require('../util');
-import './PlotPane.css';
-
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
