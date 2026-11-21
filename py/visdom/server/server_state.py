@@ -25,7 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 import tornado.ioloop
 
 from visdom.server.defaults import MAX_SOCKET_WAIT
-from visdom.utils.server_utils import run_on_storage_executor, snapshot_env
+from visdom.utils.server_utils import (
+    LoginThrottle,
+    run_on_storage_executor,
+    snapshot_env,
+)
 from visdom.utils.shared_utils import warn_once
 
 
@@ -81,6 +85,10 @@ class StateAccessorsMixin:
     @property
     def user_credential(self):
         return self.server_state.user_credential
+
+    @property
+    def login_throttle(self):
+        return self.server_state.login_throttle
 
     @property
     def user_settings(self):
@@ -187,6 +195,10 @@ class ServerState:
         # holder is done.
         self.env_delete_watches = {}
         self.autosave = None
+        # Failed-login accounting for the login endpoint. Reaches the
+        # handler through this facade so every handler instance consults
+        # the same counter rather than each keeping its own.
+        self.login_throttle = LoginThrottle()
         # Disk work is handed to one worker thread rather than run on the loop.
         # A single worker keeps the writes serialized, so two saves of the same
         # environment cannot interleave and leave a half-written file behind.

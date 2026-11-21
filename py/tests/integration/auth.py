@@ -36,7 +36,7 @@ from visdom.server import app as app_module
 from visdom.server.app import Application
 from visdom.server.handlers import web_handlers
 from visdom.server.handlers.socket_handlers import SocketWrapper, VisSocketWrapper
-from visdom.utils.server_utils import hash_password
+from visdom.utils.server_utils import LoginThrottle, hash_password
 
 from testutils import socket_double
 from testutils.fakes import SpyStore
@@ -49,6 +49,8 @@ USERNAME = "visdom_user"
 PASSWORD = "correct horse battery staple"
 # What the login page actually posts: sjcl.hash.sha256 of the typed password.
 CLIENT_HASH = hashlib.sha256(PASSWORD.encode("utf-8")).hexdigest()
+# The same shape of wrong: a sha256 of a password that is not the password.
+WRONG_HASH = hashlib.sha256(b"nope").hexdigest()
 COOKIE_SECRET = "test_cookie_secret"
 
 CREDENTIAL = {"username": USERNAME, "password": hash_password(CLIENT_HASH)}
@@ -202,6 +204,79 @@ class TestLoginCredentials(LoginTestCase):
 
         self.assertNotIn(CLIENT_HASH, stored)
         self.assertEqual(len(stored.split("$")), 2)
+
+
+# -- Brute-force lockout on the login form ------------------------------------
+
+
+class _SteppableClock:
+    """A monotonic clock a test moves by assignment, not by sleeping."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class TestLoginLockouts(LoginTestCase):
+    """Five wrong passwords buy the client a 429, not a sixth derivation."""
+
+    def setUp(self):
+        super().setUp()
+        # The production throttle waits half a minute. The same logic on a
+        # clock the test can advance turns waiting out a lockout into a
+        # single assignment, so the suite stays fast and deterministic.
+        self.clock = _SteppableClock()
+        self._app.server_state.login_throttle = LoginThrottle(clock=self.clock)
+
+    def fail_five_times(self):
+        for _ in range(5):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+    def test_attempts_below_the_threshold_are_answered_normally(self):
+        for _ in range(4):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+    def test_the_fifth_failure_locks_the_client_out(self):
+        self.fail_five_times()
+
+        resp = self.login(password=WRONG_HASH)
+
+        self.assertEqual(resp.code, 429)
+        self.assertTrue(int(resp.headers["Retry-After"]) > 0)
+        self.assertEqual(resp.headers.get_list("Set-Cookie"), [])
+
+    def test_even_the_right_password_is_refused_while_locked(self):
+        self.fail_five_times()
+
+        # Correct credentials, but the client is locked out, so the server
+        # does not even spend the derivation that would check them.
+        self.assertEqual(self.login().code, 429)
+
+    def test_the_lockout_expires_and_lets_the_client_back_in(self):
+        self.fail_five_times()
+        self.assertEqual(self.login().code, 429)
+
+        self.clock.now += 30.1
+
+        resp = self.login()
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(
+            any("user_password" in c for c in resp.headers.get_list("Set-Cookie"))
+        )
+
+    def test_a_successful_login_forgets_the_failures(self):
+        for _ in range(4):
+            self.login(password=WRONG_HASH)
+
+        # Getting in clears the count, so the next slip starts from zero.
+        self.assertEqual(self.login().code, 200)
+
+        for _ in range(4):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+        self.assertEqual(self.login().code, 200)
 
 
 # -- Authorization on the routes ---------------------------------------------
