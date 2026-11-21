@@ -847,6 +847,9 @@ monitor.stop()
 - `env`: environment to plot in (default: the client's own env)
 - `interval`: seconds between samples (default: 5)
 - `is_main_process`: set `True` or `False` to choose which process is monitored; by default only global rank 0 of a distributed job is
+- `gpu`: set `False` to leave out the GPU plots (default: `True`)
+
+**Note:** if `nvidia-ml-py` (NVIDIA) or `amdsmi` (AMD) is installed and finds a GPU, up to two more plots, `GPU usage (%)` and `GPU memory (MB)` (windows `system_gpu_util`, `system_gpu_mem`), show one line per GPU that library can read. NVIDIA is tried first, and a metric a GPU cannot report is left out. These are whole-device numbers, not the share of this script. Without the library or a device nothing extra is plotted.
 
 **Note:** the windows have fixed ids (`system_cpu`, `system_ram`), so a second run in the same env replaces them instead of adding more.
 
