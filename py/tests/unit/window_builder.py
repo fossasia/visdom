@@ -326,6 +326,108 @@ def test_legend_renames_traces_positionally(two_trace_pane, legend, expected):
     assert trace_names(two_trace_pane) == expected
 
 
+def numbered_pane(*names):
+    return window(window_args(data=[plot_data(name=n) for n in names]))
+
+
+@pytest.mark.parametrize(
+    "names,legend,expected",
+    [
+        (["1", "2"], ["a", "b"], ["a", "b"]),
+        (["2", "3"], ["a", "b", "c"], ["b", "c"]),
+        (["3", "1"], ["a", "b", "c"], ["c", "a"]),
+        (["2"], ["cat", "dog"], ["dog"]),
+    ],
+)
+def test_legend_renames_numbered_traces_by_their_number(names, legend, expected):
+    """A scatter created from some labels has its numbered traces out of place."""
+    pane = numbered_pane(*names)
+    update_window(pane, {"opts": {"legend": legend}})
+    assert trace_names(pane) == expected
+
+
+@pytest.mark.parametrize(
+    "names,expected",
+    [
+        (["0", "1"], ["a", "b"]),
+        (["2", "cat"], ["a", "b"]),
+        (["²", "1"], ["a", "b"]),
+        (["1", "4"], ["a", "b"]),
+        (["10", "20"], ["a", "b"]),
+        (["1", "1"], ["a", "b"]),
+    ],
+)
+def test_traces_not_numbered_within_the_legend_are_renamed_by_position(names, expected):
+    pane = numbered_pane(*names)
+    update_window(pane, {"opts": {"legend": ["a", "b"]}})
+    assert trace_names(pane) == expected
+
+
+def test_a_repeated_legend_keeps_the_names_it_gave():
+    pane = numbered_pane("2", "3")
+    for _ in range(2):
+        update_window(pane, {"opts": {"legend": ["a", "b", "c"]}})
+    assert trace_names(pane) == ["b", "c"]
+
+
+def test_traces_named_from_the_previous_legend_keep_their_entry():
+    """Label 1 was added after label 2, so its trace comes second."""
+    pane = numbered_pane("b", "a")
+    pane["legend"] = ["a", "b"]
+    update_window(pane, {"opts": {"legend": ["x", "y"]}})
+    assert trace_names(pane) == ["y", "x"]
+
+
+@pytest.mark.parametrize(
+    "names,expected",
+    [
+        (["b", "c", "bird"], ["b", "c", "bird"]),
+        (["b", "c", "1"], ["b", "c", "a"]),
+        (["a", "stale"], ["a", "b"]),
+    ],
+)
+def test_traces_from_the_previous_legend_keep_their_entry_beside_others(
+    names, expected
+):
+    pane = numbered_pane(*names)
+    pane["legend"] = ["a", "b", "c"]
+    update_window(pane, {"opts": {"legend": ["a", "b", "c"]}})
+    assert trace_names(pane) == expected
+
+
+def test_the_creation_legend_is_stored_on_the_pane():
+    pane = window(window_args(data=[plot_data(name="b")], opts={"legend": ["a", "b"]}))
+    assert pane["legend"] == ["a", "b"]
+
+
+def test_a_new_legend_renames_traces_from_the_creation_legend():
+    legend = ["a", "b", "c"]
+    traces = [plot_data(name=n) for n in ("b", "c")]
+    pane = window(window_args(data=traces, opts={"legend": legend}))
+    update_window(pane, {"opts": {"legend": ["x", "y", "z"]}})
+    assert trace_names(pane) == ["y", "z"]
+
+
+def test_an_append_to_a_pane_saved_without_its_legend_keeps_its_names():
+    pane = numbered_pane("b", "c")
+    args = {"data": [plot_data(name="c")], "opts": {"legend": ["a", "b", "c"]}}
+    update_window(pane, args)
+    assert trace_names(pane) == ["b", "c"]
+
+
+def test_a_legend_alone_still_renames_a_pane_saved_without_it_by_position():
+    pane = numbered_pane("val", "train")
+    update_window(pane, {"opts": {"legend": ["train", "val"]}})
+    assert trace_names(pane) == ["train", "val"]
+
+
+def test_a_new_legend_still_renames_a_legended_line_by_position():
+    pane = numbered_pane("train", "val")
+    pane["legend"] = ["train", "val"]
+    update_window(pane, {"opts": {"legend": ["val", "train"]}})
+    assert trace_names(pane) == ["val", "train"]
+
+
 @pytest.mark.parametrize(
     "name,legend,expected",
     [

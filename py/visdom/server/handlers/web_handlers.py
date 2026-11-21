@@ -54,6 +54,8 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     broadcast_tags,
     escape_eid,
+    label_number,
+    legend_slots,
     compare_envs,
     load_env,
     broadcast,
@@ -78,6 +80,46 @@ from visdom.experiments import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def pair_traces(pdata, new_data, legend=None):
+    """Pair each entry of an unnamed update with the trace it updates.
+
+    Returns ``(index, entry)`` pairs, with ``index`` None for an entry that
+    should become a new trace.
+
+    Each entry goes to the trace of its own label, and a label the plot hasn't
+    seen becomes a new trace. A name is the label itself, except for a label
+    number k sent without a legend: on a plot named from ``legend`` it means
+    the trace named ``legend[k - 1]``. If the traces carry other names, or
+    none, and there's no legend, nothing says which trace k is, so the entries
+    are paired by position, as they always were.
+    """
+    positional = list(zip(range(len(pdata)), new_data))
+    by_name = {}
+    for i, trace in enumerate(pdata):
+        by_name.setdefault(trace.get("name"), []).append(i)
+    if all(entry.get("name") is None for entry in new_data):
+        return positional
+    legend = list(legend) if isinstance(legend, (list, tuple)) else None
+    numbered = all(label_number(n) is not None for n in by_name)
+    keys = []
+    for entry in new_data:
+        name = entry.get("name")
+        k = label_number(name)
+        if name in by_name or k is None:
+            keys.append(name)
+        elif legend is not None:
+            keys.append(legend[k - 1] if k <= len(legend) else name)
+        elif numbered:
+            keys.append(name)
+        else:
+            return positional
+    pairs = []
+    for key, entry in zip(keys, new_data):
+        free = by_name.get(key)
+        pairs.append((free.pop(0) if free else None, entry))
+    return pairs
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -149,6 +191,19 @@ class UpdateHandler(BaseHandler):
         return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
 
     @staticmethod
+    def trace_pairs(p, pdata, args, idxs, new_data):
+        """``(index, entry)`` pairs for ``args``, as ``update`` applies them.
+
+        A named update goes to the traces with that name. An unnamed one is
+        paired by ``pair_traces``, with the pane's legend unless the update
+        sent its own, whose names its entries then already carry.
+        """
+        if args.get("name") is not None:
+            return list(zip(idxs, new_data))
+        sent = (args.get("opts") or {}).get("legend")
+        return pair_traces(pdata, new_data, None if sent else p.get("legend"))
+
+    @staticmethod
     def window_args_are_noops(p, args):
         """Whether ``update_window`` would leave the pane exactly as it is.
 
@@ -208,8 +263,11 @@ class UpdateHandler(BaseHandler):
             return all(
                 d.get("name") == legend[0] for d in pdata if d.get("name") == name
             )
+        slots = legend_slots([d.get("name") for d in pdata], legend, p.get("legend"))
         return all(
-            d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
+            d.get("name") == legend[slot]
+            for slot, d in zip(slots, pdata)
+            if slot is not None and slot < len(legend)
         )
 
     @staticmethod
@@ -249,9 +307,12 @@ class UpdateHandler(BaseHandler):
             # Nothing matched, so ``update`` injects a new trace rather than
             # appending to an existing one.
             return False
-        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
-        # actually touched.
-        for i, new_trace in zip(idxs, new_data):
+        # Pair the entries exactly as ``update`` will, so only the traces it
+        # touches are checked. An entry that becomes a new trace has no index
+        # patch, so it takes the general path.
+        for i, new_trace in UpdateHandler.trace_pairs(p, pdata, args, idxs, new_data):
+            if i is None:
+                return False
             target = pdata[i]
             if not isinstance(target, dict) or not isinstance(new_trace, dict):
                 return False
@@ -660,8 +721,11 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for idx, new_trace in zip(idxs, new_data):
+        for idx, new_trace in UpdateHandler.trace_pairs(p, pdata, args, idxs, new_data):
             if all(_is_missing_value(i) for i in new_trace["x"]):
+                continue
+            if idx is None:
+                pdata.append(dict(new_trace))
                 continue
             # handle data for plotting
             axes = ["x", "y"]
