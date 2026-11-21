@@ -49,6 +49,40 @@ def test_custom_legends_target_existing_learning_curve_traces(
         assert all(message["append"] == (update == "append") for message in messages)
 
 
+@pytest.mark.parametrize("update", ["append", "replace", "remove"])
+@pytest.mark.parametrize("legend_type", [list, tuple])
+def test_positional_learning_curve_updates_reject_a_full_legend_for_a_subset(
+    offline_client, update, legend_type
+):
+    legend = legend_type(["Training loss", "Validation loss"])
+    with (
+        patch.object(offline_client, "_send", return_value="losses") as send,
+        patch.object(offline_client, "win_exists", return_value=True),
+    ):
+        with pytest.raises(AssertionError, match="one entry per metric"):
+            offline_client.learning_curve(
+                {"val": 0.9},
+                step=[1],
+                win="losses",
+                opts={"legend": legend},
+                update=update,
+            )
+    send.assert_not_called()
+
+
+def test_learning_curve_positional_legend_can_have_trailing_labels_at_creation(
+    offline_client,
+):
+    with patch.object(offline_client, "_send", return_value="losses") as send:
+        offline_client.learning_curve(
+            {"train": 1.0},
+            opts={"legend": ["Training loss", "Validation loss"]},
+        )
+    assert [trace["name"] for trace in send.call_args.args[0]["data"]] == [
+        "Training loss"
+    ]
+
+
 def test_default_legends_follow_metric_names_when_update_order_changes(offline_client):
     with (
         patch.object(offline_client, "_send", return_value="losses") as send,

@@ -1203,7 +1203,7 @@ vis.learning_curve(
 ```
 
 
-For custom labels, use a metric-name mapping such as `opts={"legend": {"train_loss": "Training loss", "val_loss": "Validation loss"}}`. Pass the same mapping on updates and removals: metric order can change, and a subset of metrics can be updated without shifting labels. Missing mapping keys keep their metric names; resolved labels must be unique strings. List/tuple legends remain supported, but their labels are positional and must match the metrics in each call.
+For custom labels, use a metric-name mapping such as `opts={"legend": {"train_loss": "Training loss", "val_loss": "Validation loss"}}`. Pass the same mapping on updates and removals: metric order can change, and a subset of metrics can be updated without shifting labels. Missing mapping keys keep their metric names; resolved labels must be unique strings. List/tuple legends remain positional. On an update or removal, provide exactly one label per metric in the same order as the metrics, or use the metric-name mapping to reuse the full legend for a subset.
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor

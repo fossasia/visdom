@@ -2742,7 +2742,7 @@ class Visdom(object):
         `opts.legend` can map metric names to display labels. Reuse this mapping
         on updates to keep labels attached to their metrics when the order changes
         or only a subset is updated. Missing keys use the metric name. List/tuple
-        legends remain positional for compatibility.
+        legends remain positional and updates require exactly one label per metric.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -2801,9 +2801,14 @@ class Visdom(object):
         else:
             legend = opts["legend"]
             assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
-            assert len(legend) >= len(
-                names
-            ), "legend should have at least as many entries as metrics"
+            if update is None:
+                assert len(legend) >= len(
+                    names
+                ), "legend should have at least as many entries as metrics"
+            else:
+                assert len(legend) == len(
+                    names
+                ), "positional legends require one entry per metric on updates"
 
         if update is not None:
             result = None
