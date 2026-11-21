@@ -19,6 +19,7 @@ Every test runs through the ``capture_send`` fixture, which patches ``_send``
 on an ``offline_client`` — no server, no I/O, no sockets.
 """
 
+import datetime
 import math
 
 import numpy as np
@@ -505,6 +506,18 @@ def test_dual_axis_lines_resolves_the_environment_itself(capture_send, offline_c
             "values of X and Y2 are not in proper shape",
         ),
         (
+            dict(X=np.zeros((3, 1)), Y1=np.zeros(3), Y2=np.zeros((3, 1))),
+            "values of X and Y1 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros(3), Y1=np.zeros((3, 1)), Y2=np.zeros(3)),
+            "values of X and Y1 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros(3), Y1=np.zeros(3), Y2=np.zeros((3, 1))),
+            "values of X and Y2 are not in proper shape",
+        ),
+        (
             dict(X=np.zeros((3, 2)), Y1=np.zeros((3, 2)), Y2=np.zeros((3, 2))),
             "values of X should be one-dimensional",
         ),
@@ -626,3 +639,59 @@ def test_dual_axis_lines_none_xtype_numeric_omits_xaxis(capture_send):
         )
     )
     assert "xaxis" not in sent["payload"]["layout"]
+
+
+def test_dual_axis_lines_accepts_datetime64_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array(["2023-01-01", "2023-01-02"], dtype="datetime64[D]"),
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["2023-01-01", "2023-01-02"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["2023-01-01", "2023-01-02"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+
+def test_dual_axis_lines_accepts_python_date_and_datetime_x(capture_send):
+    sent_date = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[datetime.date(2023, 1, 1), datetime.date(2023, 1, 2)],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent_date["payload"]["data"][0]["x"] == ["2023-01-01", "2023-01-02"]
+    assert sent_date["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+    sent_dt = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[
+                datetime.datetime(2023, 1, 1, 10, 0),
+                datetime.datetime(2023, 1, 2, 12, 30),
+            ],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent_dt["payload"]["data"][0]["x"] == [
+        "2023-01-01T10:00:00",
+        "2023-01-02T12:30:00",
+    ]
+    assert sent_dt["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+
+def test_dual_axis_lines_explicit_xtype_overrides_date(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[datetime.date(2023, 1, 1), datetime.date(2023, 1, 2)],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+            opts={"xtype": "category"},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}

@@ -27,6 +27,7 @@ import math
 import re
 import base64
 import binascii
+import datetime
 import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
@@ -622,9 +623,6 @@ def _assert_opts(opts):
 
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
-
-    if opts.get("xtype") is not None:
-        assert isstr(opts.get("xtype")), "xtype should be a string"
 
 
 def _assert_sunburst_opts(opts):
@@ -5080,37 +5078,49 @@ class Visdom(object):
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        if opts.get("xtype") is not None:
+            assert isstr(opts.get("xtype")), "xtype should be a string"
 
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
 
-        if X.ndim == 2 and X.shape[1] == 1:
-            X = X.ravel()
-        if Y1.ndim == 2 and Y1.shape[1] == 1:
-            Y1 = Y1.ravel()
-        if Y2.ndim == 2 and Y2.shape[1] == 1:
-            Y2 = Y2.ravel()
-
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
+        if X.ndim == 2 and X.shape[1] == 1:
+            # The shapes match, so all three are column vectors holding one
+            # value per row, which the ``float(value)`` loop this replaced
+            # flattened implicitly. Every other 2-D shape still fails the
+            # assertion below.
+            X, Y1, Y2 = X.reshape(-1), Y1.reshape(-1), Y2.reshape(-1)
         assert X.ndim == 1, "values of X should be one-dimensional"
 
-        is_categorical = False
-        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
+        inferred_xtype = None
+        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.datetime64):
+            X = X.astype(str).tolist()
+            inferred_xtype = "date"
+        elif any(
+            isinstance(val, (datetime.date, datetime.datetime, np.datetime64))
+            for val in X
+        ):
+            X = [
+                val.isoformat() if hasattr(val, "isoformat") else str(val) for val in X
+            ]
+            inferred_xtype = "date"
+        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
             X = X.astype(float).tolist()
         elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character):
             X = X.astype(str).tolist()
-            is_categorical = True
+            inferred_xtype = "category"
         elif any(isinstance(val, str) for val in X):
             X = [str(value) for value in X]
-            is_categorical = True
+            inferred_xtype = "category"
         else:
             try:
                 X = X.astype(float).tolist()
             except (ValueError, TypeError):
                 X = [str(value) for value in X]
-                is_categorical = True
+                inferred_xtype = "category"
 
         Y1 = Y1.astype(float).tolist()
         Y2 = Y2.astype(float).tolist()
@@ -5159,8 +5169,8 @@ class Visdom(object):
         }
         if opts.get("xtype") is not None:
             layout["xaxis"] = {"type": opts["xtype"]}
-        elif is_categorical:
-            layout["xaxis"] = {"type": "category"}
+        elif inferred_xtype is not None:
+            layout["xaxis"] = {"type": inferred_xtype}
 
         if "height" not in opts:
             opts["height"] = 300
