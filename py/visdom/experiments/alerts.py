@@ -30,7 +30,10 @@ beside the append rather than behind a re-read of the environment.
 
 A rule fires on the observation that *completes* its streak and not again
 until the streak breaks, so a metric that stays over its threshold for an
-hour is one notification rather than one per observation.
+hour is one notification rather than one per observation. An observation
+that is not a finite number does not break a streak: a diverging run is
+precisely the one that logs them, and re-arming there would spend a second
+notification on the run that already sent one.
 """
 
 from __future__ import annotations
@@ -380,11 +383,23 @@ class Alert:
 
 @dataclass(frozen=True)
 class AlertEvent:
-    """A rule that has just fired, and the observation that fired it."""
+    """A rule that has just fired, and the observation that fired it.
+
+    ``best`` is the stall watch's best value as it stood at that moment, read
+    off the rule here rather than when the text is built: the rule goes on
+    folding, and a later observation -- in the batch this event came out of,
+    even -- can improve it, leaving the notification quoting a best that was
+    never the one the rule stalled against.
+    """
 
     alert: Alert
     value: Any
     step: Optional[int] = None
+    best: Optional[float] = None
+
+    def __post_init__(self):
+        if self.best is None:
+            object.__setattr__(self, "best", self.alert.best)
 
 
 def build_alert(
@@ -455,7 +470,18 @@ def observe(alert: Alert, value: Any, step: Optional[int] = None) -> bool:
     of matching observations: the streak keeps climbing past the threshold
     without firing again, and an observation that does not match resets it and
     re-arms the rule.
+
+    An observation that is not a finite number is the exception, and leaves
+    the streak where it is. It is not evidence that the condition stopped
+    holding -- a run that is already over its threshold is the one that
+    starts logging nulls -- and resetting on it would re-arm the rule and
+    spend a second notification on the same run. A value of the wrong kind
+    still breaks the streak: that is a metric logged as something other than
+    a number, not arithmetic that went wrong.
     """
+    if alert.condition != CONDITION_NAN and _is_diverged(value):
+        return False
+
     if _matches(alert, value):
         alert.streak += 1
     else:
@@ -507,6 +533,11 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     a format string. Otherwise the message is built from the rule, the
     observation that fired it and the environment it fired in, because a toast
     arrives with none of that context around it.
+
+    Numbers are written to twelve significant digits rather than the six
+    ``:g`` defaults to, which is what keeps the crossing visible: a rule on
+    ``> 1.0000001`` that fired on ``1.00000011`` would otherwise report that
+    "loss is 1, > 1".
     """
     alert = event.alert
     where = "" if not env_id else "{0}: ".format(env_id)
@@ -522,7 +553,7 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
         return "{0}{1} is {2}{3}".format(where, alert.key, arrived, at)
 
     if alert.condition == CONDITION_STALLED:
-        best = "" if alert.best is None else " (best {0:g})".format(alert.best)
+        best = "" if event.best is None else " (best {0:.12g})".format(event.best)
         return "{0}{1} has not improved in {2} observations{3}{4}".format(
             where, alert.key, alert.patience, best, at
         )
@@ -530,7 +561,7 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     held = (
         "" if alert.for_steps == 1 else " for {0} observations".format(alert.for_steps)
     )
-    return "{0}{1} is {2:g}, {3} {4:g}{5}{6}".format(
+    return "{0}{1} is {2:.12g}, {3} {4:.12g}{5}{6}".format(
         where,
         alert.key,
         event.value,

@@ -155,6 +155,9 @@ class TestAlertValidation:
             build_alert("loss", "> 2.0", for_steps=for_steps)
 
     def test_for_steps_defaults_when_left_out(self):
+        assert build_alert("loss", "> 2.0").for_steps == 1
+
+    def test_for_steps_normalises_an_explicit_none(self):
         assert build_alert("loss", "> 2.0", for_steps=None).for_steps == 1
 
     def test_patience_defaults_only_for_the_stall_watch(self):
@@ -347,6 +350,22 @@ class TestDebounce:
         restored = Alert.from_dict(alert.to_dict())
         assert feed(restored, [2.5]) == [0]
 
+    def test_a_diverged_observation_does_not_re_arm_the_rule(self):
+        # The run that fires a threshold rule is the one that goes on to log
+        # nulls, and a null is not the metric coming back under the
+        # threshold. Re-arming there is a second notification for one run.
+        alert = build_alert("loss", "> 2.0", for_steps=3)
+        assert feed(alert, [2.5, 2.5, 2.5, 2.5, None, 2.5, 2.5, 2.5]) == [2]
+        assert alert.fire_count == 1
+
+    def test_a_diverged_observation_does_not_re_arm_the_stall_watch(self):
+        # Here the metric demonstrably never improved -- the NaN leaves the
+        # count since the best alone -- so a second firing would contradict
+        # the message it carries.
+        alert = build_alert("loss", "stalled", patience=2)
+        assert feed(alert, [1.0, 1.5, 1.5, 1.5, float("nan"), 1.5, 1.5]) == [2]
+        assert alert.fire_count == 1
+
     def test_firing_records_where_it_happened(self):
         alert = build_alert("loss", "> 2.0")
         assert feed(alert, [2.5], step=120) == [0]
@@ -359,26 +378,38 @@ class TestDebounce:
 
 class TestEvaluate:
     def test_only_the_metrics_in_the_batch_are_judged(self):
+        # The second rule would fire on the first one's observation, so a
+        # fold that ignored the key shows up here as two events rather than
+        # passing quietly.
         experiment = Record(build_alert("loss", "> 2.0"))
-        experiment.alerts.append(build_alert("acc", "< 0.1"))
+        experiment.alerts.append(build_alert("acc", "> 2.0"))
         fired = evaluate(experiment, [("loss", 2.5)], step=3)
         assert [event.alert.key for event in fired] == ["loss"]
         assert fired[0].value == 2.5 and fired[0].step == 3
 
     def test_every_rule_on_one_metric_sees_the_observation(self):
+        # Both calls are asserted: the threshold rule fires on the first
+        # observation and the stall watch on the second, so a fold that
+        # judged only one rule per metric fails on one of them.
         experiment = Record(build_alert("loss", "> 2.0"))
         experiment.alerts.append(build_alert("loss", "stalled", patience=1))
-        evaluate(experiment, [("loss", 2.5)])
+        first = evaluate(experiment, [("loss", 2.5)])
+        assert [event.alert.condition for event in first] == [">"]
         fired = evaluate(experiment, [("loss", 2.5)])
-        assert sorted(event.alert.condition for event in fired) == ["stalled"]
+        assert [event.alert.condition for event in fired] == ["stalled"]
 
     def test_an_experiment_with_no_rules_is_not_walked(self):
         assert evaluate(Record(), [("loss", 2.5)]) == []
 
     def test_a_batch_is_judged_in_the_order_it_was_logged(self):
+        # Two observations whose order decides the outcome: the 2.5 completes
+        # the streak and the 1.0 then breaks it, where the other way round
+        # nothing fires at all.
         experiment = Record(build_alert("loss", "> 2.0", for_steps=2))
-        fired = evaluate(experiment, [("loss", 2.5), ("loss", 2.5)])
-        assert len(fired) == 1
+        evaluate(experiment, [("loss", 2.5)])
+        fired = evaluate(experiment, [("loss", 2.5), ("loss", 1.0)])
+        assert [event.value for event in fired] == [2.5]
+        assert experiment.alerts[0].streak == 0
 
 
 class TestDescribe:
@@ -395,6 +426,25 @@ class TestDescribe:
         message = describe(AlertEvent(alert, 0.9, 30), env_id="run-7")
         assert message == (
             "run-7: acc has not improved in 10 observations (best 0.91) at step 30"
+        )
+
+    def test_a_stall_message_names_the_best_at_the_time_it_fired(self):
+        # The rule keeps folding after the event comes out, and the later
+        # 0.95 in this very batch must not rewrite what the notification for
+        # the 0.80 says.
+        experiment = Record(build_alert("acc", "stalled", patience=1, goal=GOAL_MAX))
+        evaluate(experiment, [("acc", 0.90)], step=1)
+        fired = evaluate(experiment, [("acc", 0.80), ("acc", 0.95)], step=2)
+        assert describe(fired[0], env_id="run-7") == (
+            "run-7: acc has not improved in 1 observations (best 0.9) at step 2"
+        )
+
+    def test_a_message_keeps_the_precision_that_made_the_rule_fire(self):
+        # Six significant digits round both sides of this comparison to 1,
+        # and "loss is 1, > 1" is worse than no notification at all.
+        alert = build_alert("loss", "> 1.0000001")
+        assert describe(AlertEvent(alert, 1.00000011)) == (
+            "loss is 1.00000011, > 1.0000001"
         )
 
     def test_a_nan_message_says_what_arrived(self):
