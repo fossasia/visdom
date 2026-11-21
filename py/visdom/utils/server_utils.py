@@ -22,6 +22,8 @@ import json
 import logging
 import os
 import errno
+import threading
+import time
 from collections import OrderedDict
 
 import tornado.escape
@@ -162,6 +164,95 @@ def hash_password_off_loop(password, salt):
     return tornado.ioloop.IOLoop.current().run_in_executor(
         None, hash_password, password, salt
     )
+
+
+class LoginThrottle:
+    """Per-client failed-login accounting with escalating lockouts.
+
+    A wrong password is expensive to refuse -- each attempt costs the
+    server a full PBKDF2 derivation -- so this is what stands between an
+    attacker and unlimited guessing at the one credential a login-enabled
+    server knows. Rejections are counted per client; ``max_failures`` of
+    them in a row arm a lockout of ``base_delay`` seconds that doubles per
+    subsequent lockout, capped at ``max_delay``. A successful login forgets
+    the client entirely, so a typo never accumulates into a lockout for
+    someone who can still type the password.
+
+    ``clock`` is injectable because the waits are real: the default
+    ``time.monotonic`` is right in production and useless in a test, which
+    would rather move time than sleep through it. The lock covers only the
+    dictionary touches, and a failure refused during a standing lockout
+    extends nothing -- that client already costs nothing, and a steady
+    stream of refused requests must not wedge the lock open forever.
+    """
+
+    def __init__(
+        self,
+        max_failures=5,
+        base_delay=30.0,
+        max_delay=900.0,
+        clock=time.monotonic,
+    ):
+        self._max_failures = max_failures
+        self._base_delay = base_delay
+        self._max_delay = max_delay
+        self._clock = clock
+        self._lock = threading.Lock()
+        # key -> consecutive failures, past lockouts, locked-until, last-seen
+        self._entries = {}
+
+    def retry_after(self, key):
+        """Seconds ``key`` still has to wait, or ``None`` when it may try."""
+        with self._lock:
+            self._prune()
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            wait = entry[2] - self._clock()
+            return wait if wait > 0 else None
+
+    def record_failure(self, key):
+        """Count a rejected attempt; the seconds it earned, ``0.0`` if none."""
+        with self._lock:
+            now = self._clock()
+            self._prune()
+            entry = self._entries.setdefault(key, [0, 0, 0.0, now])
+            entry[3] = now
+            if now < entry[2]:
+                # Refused while already locked: nothing is spent on it and
+                # the standing lockout is all this client gets.
+                return entry[2] - now
+            entry[0] += 1
+            if entry[0] < self._max_failures:
+                return 0.0
+            entry[1] += 1
+            entry[0] = 0
+            delay = min(self._base_delay * 2 ** (entry[1] - 1), self._max_delay)
+            entry[2] = now + delay
+            return delay
+
+    def record_success(self, key):
+        """Forget a client that got in: lockouts are for failures only."""
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def _prune(self):
+        """Drop entries idle past ``max_delay``, so the map stays bounded.
+
+        The caller holds the lock. A client that keeps failing keeps its
+        entry alive, and so does the lockout it earned: idleness is
+        measured from the later of the last attempt and the expiry of the
+        lock it armed, so serving a lockout is not "going quiet". Only an
+        address quiet longer than any lockout it could still be serving
+        is worth forgetting.
+        """
+        now = self._clock()
+        for key in [
+            key
+            for key, entry in self._entries.items()
+            if now - max(entry[3], entry[2]) >= self._max_delay
+        ]:
+            del self._entries[key]
 
 
 # ------- File management helpers ----- #
@@ -877,9 +968,9 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     # Every base trace was validated above, so the rename
                     # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        destWidJson["content"]["data"][dataIdx][
-                            "name"
-                        ] = "{}_{}".format(eidNums[eid], data["name"])
+                        destWidJson["content"]["data"][dataIdx]["name"] = (
+                            "{}_{}".format(eidNums[eid], data["name"])
+                        )
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.

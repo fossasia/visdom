@@ -43,6 +43,10 @@ visdom -enable_login
 Never hardcode credentials in scripts or commit them to version control. Use a secrets manager or environment variables set outside your codebase.
 :::
 
+### Brute-force protection
+
+Failed logins are counted per client address. Five rejected attempts lock that client out for 30 seconds; each later lockout doubles (60s, 120s, ...) up to 15 minutes, and a successful login clears the counter. While locked out the endpoint answers `429 Too Many Requests` with a `Retry-After` header, and the credentials are not even checked.
+
 ### Connecting with credentials
 
 ```python

@@ -1400,6 +1400,18 @@ class IndexHandler(BaseHandler):
             )
 
     async def post(self, arg, **kwargs):
+        # A wrong password is expensive to refuse -- every attempt costs a
+        # PBKDF2 derivation -- so failures are counted per client, and a
+        # client that keeps failing is locked out and told when to come
+        # back, before any derivation is spent on it.
+        client = self.request.remote_ip
+        if self.login_enabled:
+            wait = self.login_throttle.retry_after(client)
+            if wait is not None:
+                self.set_status(429)
+                self.set_header("Retry-After", str(int(math.ceil(wait))))
+                return
+
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
         stored = self.user_credential["password"]
@@ -1419,8 +1431,10 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
+            self.login_throttle.record_success(client)
             self.set_secure_cookie("user_password", username + password)
         else:
+            self.login_throttle.record_failure(client)
             self.set_status(400)
 
 

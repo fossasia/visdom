@@ -1268,6 +1268,9 @@ paths:
         credentials. The password is SHA-256 hashed on the server side
         (the client should also pre-hash once before sending). On success,
         sets a secure cookie (`user_password`). On failure, returns 400.
+        Failures are counted per client: after five rejected attempts the
+        client is locked out, and further attempts -- correct credentials
+        or not -- answer 429 until the `Retry-After` delay has passed.
       security: []
       requestBody:
         required: true
@@ -1298,6 +1301,16 @@ paths:
               description: Secure session cookie.
         "400":
           description: Invalid credentials.
+        "429":
+          description: >
+            Too many failed attempts: the client is locked out. Further
+            attempts are refused, without the credentials being checked,
+            until the remaining wait has passed.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until another attempt is accepted.
 
   /socket:
     get:
