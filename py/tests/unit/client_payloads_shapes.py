@@ -154,14 +154,14 @@ def test_quiver_warns_when_the_longest_arrow_has_zero_length(capture_send):
         )
 
 
-def test_quiver_writes_its_defaults_onto_the_callers_opts(capture_send):
-    """mode and arrowheads are set in place, and travel with the payload."""
+def test_quiver_keeps_its_defaults_off_the_callers_opts(capture_send):
+    """mode and arrowheads travel with the payload, not onto the caller's dict."""
     opts = {}
     sent = capture_send(
         lambda v: v.quiver(X=np.ones((1, 1)), Y=np.ones((1, 1)), opts=opts)
     )
-    assert opts["mode"] == "lines"
-    assert opts["arrowheads"] is True
+    assert opts == {}
+    assert sent["payload"]["opts"]["mode"] == "lines"
     assert sent["payload"]["opts"]["arrowheads"] is True
 
 
