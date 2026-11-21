@@ -235,6 +235,33 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
+def _audio_sample_rate(rate, channels):
+    """``rate`` as an int that fits the WAV header of 16-bit audio.
+
+    The header stores the rate and the bytes per second (rate * channels * 2)
+    in 32 bits each. The range is checked before anything turns ``rate`` into
+    a float, so a huge int, NaN and inf are all rejected.
+    """
+    # A 0-d numpy array or a one-element tensor holds a plain number.
+    size = rate.size if isinstance(rate, np.ndarray) else None
+    if size is None and callable(getattr(rate, "numel", None)):
+        size = rate.numel()
+    if size == 1 and callable(getattr(rate, "item", None)):
+        rate = rate.item()
+    limit = 0xFFFFFFFF // (2 * channels)
+    if (
+        isinstance(rate, (bool, np.bool_))
+        or not isinstance(rate, numbers.Real)
+        or not 0 < rate <= limit
+        or rate != int(rate)
+    ):
+        raise ValueError(
+            "sample_frequency should be a positive whole number up to {} for "
+            "{}-channel audio, got {!r}".format(limit, channels, rate)
+        )
+    return int(rate)
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -2299,12 +2326,32 @@ class Visdom(object):
 
     def text(self, text, win=None, env=None, opts=None, append=False):
         """
-        This function prints text in a box. It takes as input an `text` string.
+        This function prints text in a box. ``text`` is a string, or a value
+        that can be rendered as one: bytes, bytearray and a byte-typed
+        one-dimensional memoryview are decoded as UTF-8 and everything else
+        goes through ``str()``, so a numpy array or any other repr-able
+        object is shown as its ``str(...)`` form instead of a cryptic
+        ``Object of type ... is not JSON serializable`` from the JSON encoder.
+        A memoryview over anything but bytes (an int64 array, a 2-D view) has
+        no text to decode, so it raises ``TypeError`` rather than printing
+        raw memory.
         No specific `opts` are currently supported.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        if isinstance(text, memoryview) and (
+            text.ndim != 1 or text.format not in ("B", "b", "c")
+        ):
+            raise TypeError(
+                "text() can only decode a one-dimensional byte memoryview; "
+                "got a memoryview with format %r and %d dimension(s)"
+                % (text.format, text.ndim)
+            )
+        if isinstance(text, (bytes, bytearray, memoryview)):
+            text = bytes(text).decode("utf-8", errors="replace")
+        elif not isinstance(text, str):
+            text = str(text)
         data = [{"content": text, "type": "text"}]
 
         if append:
@@ -2540,7 +2587,16 @@ class Visdom(object):
             raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     def _register_embeddings(
-        self, features, labels, points, data_getter, data_type, win, env, opts
+        self,
+        features,
+        labels,
+        points,
+        data_getter,
+        data_type,
+        win,
+        env,
+        opts,
+        label_groups=None,
     ):
         self.win_data[win] = {
             "features": features,
@@ -2551,6 +2607,10 @@ class Visdom(object):
             "env": env,
             "opts": opts,
         }
+
+        if label_groups is None:
+            labels_normalized, _, _ = _normalize_labels(labels)
+            _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2583,10 +2643,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2657,9 +2716,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -2686,7 +2746,15 @@ class Visdom(object):
 
         if opts.get("register_embedding_events", True):
             self._register_embeddings(
-                features, labels, points, data_getter, data_type, win, env, opts
+                features,
+                labels,
+                points,
+                data_getter,
+                data_type,
+                win,
+                env,
+                opts,
+                label_groups=label_groups,
             )
         return win
 
@@ -3079,10 +3147,10 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)  # the caller's dict is left alone
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         _title2str(opts)
         _assert_opts(opts)
@@ -3100,6 +3168,11 @@ class Visdom(object):
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
             ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
+            # Checked after the shape, so the channel count is the real one.
+            channels = tensor.shape[1] if tensor.ndim == 2 else 1
+            opts["sample_frequency"] = _audio_sample_rate(
+                opts["sample_frequency"], channels
+            )
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
@@ -5179,10 +5252,21 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
-        G = nx.Graph()
-        G.add_edges_from(edges)
+        input_edges = list(edges)
+        G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
+        G.add_edges_from(input_edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
+        if opts.get("directed", False):
+            link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
+        else:
+            link_data = []
+            seen = set()
+            for edge in input_edges:
+                key = frozenset(edge[:2])
+                if key not in seen:
+                    seen.add(key)
+                    link_data.append(tuple(edge[:2]))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(
