@@ -37,6 +37,85 @@ WRITE_ENDPOINTS = {
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
 
+# Methods that must not change server state, so they need no origin check.
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+# Sec-Fetch-Site values a browser sends for a request made by the visdom page
+# itself ("same-origin") or typed by the user ("none").
+TRUSTED_FETCH_SITES = {"same-origin", "none"}
+
+
+def is_cross_site_request(request, get_changes_state=False):
+    """Return True when a browser sent this request from another site's page.
+
+    A page on any site can make the user's browser POST to a visdom server,
+    and a text/plain body skips the CORS preflight, so the request would run
+    without the user knowing. Browsers mark where a request came from, and
+    the visdom UI only ever talks to its own origin, so anything else is
+    refused. The python client, curl and other non-browser callers send
+    neither header and are unaffected.
+
+    Reads are let through, except on handlers whose GET allocates server-side
+    state (``get_changes_state``), such as the polling handshake.
+    """
+    if request.method in SAFE_METHODS and not get_changes_state:
+        return False
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        # Compares no host names, so it holds behind a reverse proxy too.
+        return fetch_site not in TRUSTED_FETCH_SITES
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return False
+    if origin == "null":
+        return True
+    # Older browsers send Origin but not Sec-Fetch-Site, so it must equal this
+    # server's own origin exactly: a browser serializes it as scheme://host
+    # with no path, query or credentials, so anything else is refused too.
+    # A proxy may rewrite the scheme and host, so the ones the browser used
+    # may arrive as X-Forwarded-Proto/-Host. These are trusted without a
+    # proxy allow-list: a page cannot set them on a cross-site request without
+    # a CORS preflight, which visdom does not grant, and callers that can set
+    # them freely (curl, scripts) are not stopped by this check anyway.
+    #
+    # Without X-Forwarded-Proto the server cannot know which scheme the
+    # browser used, so it assumes the one the request arrived on and accepts
+    # no other. Accepting both would let an http page post to a site served
+    # over https -- the downgrade a network attacker could use. Behind a proxy
+    # that ends TLS without that header an https page is refused instead, so
+    # that case is logged with what to set.
+    scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
+    hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
+    allowed = {"{0}://{1}".format(scheme, host) for host in hosts if host}
+    if origin.lower() in allowed:
+        return False
+    if scheme == "http" and origin.lower() in {"https://" + h for h in hosts if h}:
+        _warn_missing_forwarded_proto(origin)
+    return True
+
+
+_warned_missing_forwarded_proto = False
+
+
+def _warn_missing_forwarded_proto(origin):
+    """Say once why an https page was refused by a server reached over http."""
+    global _warned_missing_forwarded_proto
+    if _warned_missing_forwarded_proto:
+        return
+    _warned_missing_forwarded_proto = True
+    logging.warning(
+        "Refused a request from %s because it arrived over plain http. If "
+        "Visdom runs behind a proxy that terminates TLS, have the proxy set "
+        "X-Forwarded-Proto (for nginx: proxy_set_header X-Forwarded-Proto "
+        "$scheme;).",
+        origin,
+    )
+
+
+def _first_forwarded(request, header):
+    """First value of a proxy header, which may list one entry per hop."""
+    return request.headers.get(header, "").split(",")[0].strip().lower()
+
 
 def build_cloud_context(slug, role):
     """Serialise the console context for the index template, or None when not in a workspace."""
@@ -256,6 +335,10 @@ class BaseHandler(
             return False
         return True
 
+    # Set on handlers whose GET creates server-side state, so a cross-site
+    # page cannot trigger it either.
+    get_changes_state = False
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -273,6 +356,10 @@ class BaseHandler(
         handler's state/storage/subs/sources at that workspace's isolated space so
         all subsequent handler logic operates on that workspace's environments.
         """
+        if is_cross_site_request(self.request, self.get_changes_state):
+            self.set_status(403)
+            self.finish({"error": "Cross-site requests are not allowed."})
+            return
         try:
             resolved = await self.resolve_workspace_off_loop()
         except WorkspaceAuthError as exc:
