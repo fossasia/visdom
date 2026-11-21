@@ -1403,15 +1403,31 @@ class IndexHandler(BaseHandler):
         # A wrong password is expensive to refuse -- every attempt costs a
         # PBKDF2 derivation -- so failures are counted per client, and a
         # client that keeps failing is locked out and told when to come
-        # back, before any derivation is spent on it.
+        # back. The attempt is counted when it is admitted, before the
+        # derivation is spent on it, so concurrent requests from one
+        # client cannot all pass the limit check while the earliest
+        # failure is still in flight; each admitted attempt is then
+        # confirmed as a failure or released by a success, whatever the
+        # request did in between.
         client = self.request.remote_ip
         if self.login_enabled:
-            wait = self.login_throttle.retry_after(client)
+            wait = self.login_throttle.admit(client)
             if wait is not None:
                 self.set_status(429)
                 self.set_header("Retry-After", str(int(math.ceil(wait))))
                 return
+            try:
+                await self._attempt_login(client)
+            except Exception:
+                # The attempt failed before it could be judged -- a body
+                # that is not the login form, a missing field -- and it
+                # spent a reservation, so it is confirmed the same way a
+                # wrong password is. Re-raised, the caller still gets the
+                # 400 it always got for a malformed login attempt.
+                self.login_throttle.record_failure(client)
+                raise
 
+    async def _attempt_login(self, client):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
         stored = self.user_credential["password"]

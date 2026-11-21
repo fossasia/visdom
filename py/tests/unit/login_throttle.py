@@ -34,11 +34,21 @@ class Clock:
         self.now += seconds
 
 
+def attempt(throttle, key):
+    """One login attempt as the handler makes it: reserve, then confirm.
+
+    An attempt that is refused at admission answers with the wait instead
+    of a verdict, exactly as ``IndexHandler.post`` answers it with a 429.
+    """
+    wait = throttle.admit(key)
+    return wait if wait is not None else throttle.record_failure(key)
+
+
 def lock_out(throttle, key, attempts=5):
     """Fail ``attempts`` times in a row, returning the last answer."""
     delay = 0.0
     for _ in range(attempts):
-        delay = throttle.record_failure(key)
+        delay = attempt(throttle, key)
     return delay
 
 
@@ -50,9 +60,38 @@ def test_failures_below_the_threshold_do_not_lock():
     throttle = LoginThrottle(max_failures=5, clock=Clock())
 
     for _ in range(4):
-        assert throttle.record_failure("10.0.0.1") == 0.0
+        assert attempt(throttle, "10.0.0.1") == 0.0
 
     assert throttle.retry_after("10.0.0.1") is None
+
+
+def test_in_flight_attempts_count_against_the_limit():
+    """A burst of concurrent requests cannot all pass the limit check.
+
+    The count is taken at admission, before the derivation is spent, so
+    the sixth request of a burst arrives while the first five are still
+    in flight and finds the limit already spent on them -- rather than
+    waiting for the first ``record_failure`` to land, which a passive
+    check would have let past.
+    """
+    throttle = LoginThrottle(max_failures=5, base_delay=30.0, clock=Clock())
+
+    for _ in range(5):
+        assert throttle.admit("10.0.0.1") is None
+
+    # No verdict has landed yet; the limit is already spent.
+    assert throttle.admit("10.0.0.1") == 30.0
+
+
+def test_a_success_releases_the_outstanding_reservations():
+    throttle = LoginThrottle(max_failures=5, clock=Clock())
+
+    for _ in range(4):
+        assert throttle.admit("10.0.0.1") is None
+    throttle.record_success("10.0.0.1")
+
+    # The client was forgotten whole, reservations and all.
+    assert throttle.admit("10.0.0.1") is None
 
 
 def test_the_threshold_failure_locks_for_the_base_delay():
@@ -69,6 +108,17 @@ def test_the_threshold_failure_locks_for_the_base_delay():
     assert throttle.retry_after("10.0.0.1") is None
 
 
+def test_an_attempt_during_a_lockout_is_refused_at_admission():
+    clock = Clock()
+    throttle = LoginThrottle(max_failures=5, base_delay=30.0, clock=clock)
+
+    lock_out(throttle, "10.0.0.1")
+    clock.advance(10.0)
+
+    # The lockout's remainder, with no derivation spent on the attempt.
+    assert throttle.admit("10.0.0.1") == 20.0
+
+
 def test_each_lockout_doubles_until_the_cap():
     clock = Clock()
     throttle = LoginThrottle(base_delay=30.0, max_delay=60.0, clock=clock)
@@ -81,16 +131,39 @@ def test_each_lockout_doubles_until_the_cap():
     assert lock_out(throttle, "10.0.0.1") == 60.0
 
 
+def test_reoffending_forever_stays_at_the_cap():
+    """The doubling cannot walk its exponent past what a float holds.
+
+    A client that reoffends often enough used to grow the exponent until
+    ``30.0 * 2 ** 1024`` overflowed and took the login route down with
+    it. The exponent is capped before the power is evaluated now, so
+    every answer past the cap is the cap.
+    """
+    clock = Clock()
+    throttle = LoginThrottle(base_delay=1.0, max_delay=900.0, clock=clock)
+
+    # Two attempts per lockout: one refused through the standing lockout,
+    # one admitted after it expires and confirmed into the next.
+    for _ in range(4000):
+        delay = attempt(throttle, "10.0.0.1")
+        assert delay <= 900.0
+        clock.advance(delay)
+
+    # The client has reoffended thousands of times, well past any
+    # exponent a float holds, and the answer is still a delay.
+    assert attempt(throttle, "10.0.0.1") <= 900.0
+
+
 def test_a_login_that_gets_in_forgets_the_client():
     throttle = LoginThrottle(max_failures=5, clock=Clock())
 
     for _ in range(4):
-        throttle.record_failure("10.0.0.1")
+        attempt(throttle, "10.0.0.1")
     throttle.record_success("10.0.0.1")
 
     # The count restarted, so four more typos buy no lockout.
     for _ in range(4):
-        assert throttle.record_failure("10.0.0.1") == 0.0
+        assert attempt(throttle, "10.0.0.1") == 0.0
 
     assert throttle.retry_after("10.0.0.1") is None
 
@@ -111,8 +184,9 @@ def test_failures_during_a_lockout_extend_nothing():
     lock_out(throttle, "10.0.0.1")
     clock.advance(10.0)
 
-    # A client already refused gets the standing lockout's remainder, and
-    # hammering does not wedge the lock open any longer.
+    # A confirm landing while a sibling attempt already armed the
+    # lockout gets the standing remainder, and hammering does not wedge
+    # the lock open any longer.
     assert throttle.record_failure("10.0.0.1") == 20.0
 
     clock.advance(20.1)
@@ -124,11 +198,11 @@ def test_a_client_that_goes_quiet_is_forgotten():
     throttle = LoginThrottle(max_failures=5, max_delay=10.0, clock=clock)
 
     for _ in range(4):
-        throttle.record_failure("10.0.0.1")
+        attempt(throttle, "10.0.0.1")
     clock.advance(10.0)
 
     # The abandoned counter was pruned, so the next burst starts fresh.
     for _ in range(4):
-        assert throttle.record_failure("10.0.0.1") == 0.0
+        assert attempt(throttle, "10.0.0.1") == 0.0
 
     assert throttle.retry_after("10.0.0.1") is None

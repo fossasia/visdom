@@ -20,6 +20,7 @@ import hashlib
 import html
 import json
 import logging
+import math
 import os
 import errno
 import threading
@@ -172,11 +173,16 @@ class LoginThrottle:
     A wrong password is expensive to refuse -- each attempt costs the
     server a full PBKDF2 derivation -- so this is what stands between an
     attacker and unlimited guessing at the one credential a login-enabled
-    server knows. Rejections are counted per client; ``max_failures`` of
-    them in a row arm a lockout of ``base_delay`` seconds that doubles per
-    subsequent lockout, capped at ``max_delay``. A successful login forgets
-    the client entirely, so a typo never accumulates into a lockout for
-    someone who can still type the password.
+    server knows. Each attempt is counted against the client's limit when
+    it is admitted (:meth:`admit`), before any derivation is spent on it,
+    so a burst of concurrent requests cannot all pass the limit check
+    while the earliest failure is still in flight; every attempt is then
+    confirmed as a failure (:meth:`record_failure`) or released by a
+    success (:meth:`record_success`) on every exit path. ``max_failures``
+    confirmed in a row arm a lockout of ``base_delay`` seconds that
+    doubles per subsequent lockout, capped at ``max_delay``. A successful
+    login forgets the client entirely, so a typo never accumulates into a
+    lockout for someone who can still type the password.
 
     ``clock`` is injectable because the waits are real: the default
     ``time.monotonic`` is right in production and useless in a test, which
@@ -196,9 +202,19 @@ class LoginThrottle:
         self._max_failures = max_failures
         self._base_delay = base_delay
         self._max_delay = max_delay
+        # The exponent the doubling can reach before ``base * 2 ** exp``
+        # arrives at the cap. Past it the factor only grows, and a client
+        # that reoffends often enough walks the exponent up to values no
+        # float holds; bounded here, the delay sequence is identical for
+        # every lockout still distinguishable from the cap itself.
+        self._max_exponent = 0
+        if self._base_delay > 0 and self._max_delay > self._base_delay:
+            self._max_exponent = math.ceil(
+                math.log2(self._max_delay / self._base_delay)
+            )
         self._clock = clock
         self._lock = threading.Lock()
-        # key -> consecutive failures, past lockouts, locked-until, last-seen
+        # key -> attempts counted, past lockouts, locked-until, last-seen
         self._entries = {}
 
     def retry_after(self, key):
@@ -211,23 +227,66 @@ class LoginThrottle:
             wait = entry[2] - self._clock()
             return wait if wait > 0 else None
 
-    def record_failure(self, key):
-        """Count a rejected attempt; the seconds it earned, ``0.0`` if none."""
+    def admit(self, key):
+        """Reserve one attempt for ``key``; ``None`` if it may proceed.
+
+        The reservation is counted against the client's limit here,
+        before any derivation is spent on it, which is what keeps a burst
+        of concurrent requests from all passing the limit check while the
+        earliest failure is still in flight: every attempt is visible to
+        the counter the moment it is admitted. ``None`` means admitted,
+        and the caller then owes the key a confirming ``record_failure``
+        or ``record_success``. Any other value is the seconds to wait: the
+        remainder of a standing lockout, or -- when the limit is already
+        spent on attempts not yet answered -- the delay their failures are
+        about to arm.
+        """
         with self._lock:
             now = self._clock()
             self._prune()
-            entry = self._entries.setdefault(key, [0, 0, 0.0, now])
+            entry = self._entries.get(key)
+            if entry is None:
+                self._entries[key] = [1, 0, 0.0, now]
+                return None
+            if now < entry[2]:
+                return entry[2] - now
+            if entry[0] >= self._max_failures:
+                # The limit is spent on attempts still in flight. Their
+                # failures arm the lockout when the verdicts land; until
+                # then this client waits out the delay those verdicts are
+                # about to earn.
+                return self._base_delay
+            entry[0] += 1
+            entry[3] = now
+            return None
+
+    def record_failure(self, key):
+        """Confirm an admitted attempt as rejected; the seconds it earned.
+
+        The attempt was already counted at admission, so this is only the
+        verdict landing: the count reaching the limit arms the lockout,
+        doubling per reoffense and capped at ``max_delay``, and a confirm
+        refused during a standing lockout extends nothing -- that client
+        already costs nothing, and a steady stream of refused requests must
+        not wedge the lock open forever. A client a concurrent success has
+        forgotten is left forgotten: the reservation left with the entry
+        that held it.
+        """
+        with self._lock:
+            now = self._clock()
+            self._prune()
+            entry = self._entries.get(key)
+            if entry is None:
+                return 0.0
             entry[3] = now
             if now < entry[2]:
-                # Refused while already locked: nothing is spent on it and
-                # the standing lockout is all this client gets.
                 return entry[2] - now
-            entry[0] += 1
             if entry[0] < self._max_failures:
                 return 0.0
             entry[1] += 1
             entry[0] = 0
-            delay = min(self._base_delay * 2 ** (entry[1] - 1), self._max_delay)
+            exponent = min(entry[1] - 1, self._max_exponent)
+            delay = min(self._base_delay * 2**exponent, self._max_delay)
             entry[2] = now + delay
             return delay
 
