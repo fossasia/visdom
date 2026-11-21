@@ -24,6 +24,7 @@ import sys
 import textwrap
 
 import pytest
+import requests
 
 import visdom
 from visdom import notebook
@@ -49,16 +50,34 @@ class _FakeEmbed:
 
 
 class _FakeVisdom:
-    """Records how the magic built its client, and what it asked show() for."""
+    """Records how the magic built its client, and what it asked show() for.
+
+    ``server_is_up`` is what the real constructor's registration POST does or
+    does not reach, and so what the client's own ``_env_registered`` ends up
+    saying.
+    """
 
     built = []
+    server_is_up = True
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.registrations = []
+        self._env_registered = _FakeVisdom.server_is_up
         _FakeVisdom.built.append(self)
+
+    def _register_env(self, env):
+        self.registrations.append(env)
+        self._env_registered = _FakeVisdom.server_is_up
+        return self._env_registered
 
     def show(self, height=600, width="100%"):
         return _FakeEmbed(self, height, width)
+
+
+# Captured before the autouse fixture puts the fake in its place: the tests
+# that are about Visdom itself need the class the magic really builds.
+_REAL_CLIENT = notebook._NotebookClient
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +85,8 @@ def isolated(monkeypatch):
     """No real client, and no state carried between tests."""
     notebook._clients.clear()
     _FakeVisdom.built = []
-    monkeypatch.setattr(notebook, "Visdom", _FakeVisdom)
+    _FakeVisdom.server_is_up = True
+    monkeypatch.setattr(notebook, "_NotebookClient", _FakeVisdom)
     yield
     notebook._clients.clear()
 
@@ -76,11 +96,15 @@ def _parse(line=""):
 
 
 class TestParsing:
-    def test_the_defaults_are_a_local_server_on_8097(self):
+    def test_the_defaults_are_a_local_server_and_the_main_env(self):
         args = _parse()
 
-        assert (args.server, args.port) == ("http://localhost", 8097)
+        # --port has no default of its own: the port can be part of --server
+        # instead, and "the line did not say" is what tells that apart from
+        # the two of them disagreeing. _resolve_port fills in 8097.
+        assert (args.server, args.port) == ("http://localhost", None)
         assert (args.env, args.height, args.width) == ("main", 600, "100%")
+        assert notebook._resolve_port(None, None) == 8097
 
     def test_it_takes_a_port_and_an_env(self):
         args = _parse("--port 9000 --env run-7")
@@ -103,7 +127,28 @@ class TestParsing:
         with pytest.raises(ValueError):
             _parse(line)
 
-    @pytest.mark.parametrize("line", ["--height 0", "--height -1", "--height=-400"])
+    def test_a_decimal_dimension_is_pixels_too(self):
+        # Read as CSS instead -- which is what a whole-number-only test makes
+        # of it -- this reaches the browser as 'height:600.5', a length with
+        # no unit, and the browser drops the declaration: the flag is then
+        # ignored rather than refused.
+        args = _parse("--height 600.5")
+
+        assert args.height == 600.5
+        assert visdom._embed_size(args.height) == "600.5px"
+
+    def test_a_decimal_dimension_is_a_length_the_browser_keeps(self):
+        # Through the embed itself, which is what the cell displays.
+        embed = visdom._NotebookEmbed(
+            "http://localhost:8097/env/main", _parse("--height 600.5").height, "100%"
+        )
+
+        assert embed.height == "600.5px"
+        assert "height:600.5px" in embed._repr_html_()
+
+    @pytest.mark.parametrize(
+        "line", ["--height 0", "--height -1", "--height=-400", "--height -600.5"]
+    )
     def test_a_nonpositive_dimension_is_a_usage_error(self, line):
         # A signed number is a number: '-1' used to pass the digit test, go
         # through as a CSS length and reach the browser as 'height:-1'.
@@ -128,6 +173,8 @@ class TestParsing:
             ("--height 0", "must be positive"),
             ("--height -1", "must be positive"),
             ("--height ''", "must be a CSS length"),
+            ("--height nan", "must be finite"),
+            ("--height inf", "must be finite"),
         ],
     )
     def test_a_bad_value_is_explained_rather_than_named(self, line, wanted):
@@ -161,19 +208,25 @@ class TestServerUrl:
     @pytest.mark.parametrize(
         "given,expected",
         [
-            ("http://localhost", "http://localhost"),
-            ("localhost", "http://localhost"),
-            ("gpu-box.example.com", "http://gpu-box.example.com"),
-            ("https://visdom.example.com", "https://visdom.example.com"),
-            ("http://localhost/", "http://localhost"),
-            ("http://localhost/ignored", "http://localhost"),
-            ("  http://localhost  ", "http://localhost"),
-            ("localhost:8097", "http://localhost:8097"),
+            ("http://localhost", ("http://localhost", None)),
+            ("localhost", ("http://localhost", None)),
+            ("gpu-box.example.com", ("http://gpu-box.example.com", None)),
+            ("https://visdom.example.com", ("https://visdom.example.com", None)),
+            ("http://localhost/", ("http://localhost", None)),
+            ("  http://localhost  ", ("http://localhost", None)),
+            ("localhost:8097", ("http://localhost", 8097)),
+            ("http://localhost:9000", ("http://localhost", 9000)),
+            ("https://gpu-box.example.com:9000", ("https://gpu-box.example.com", 9000)),
+            ("http://user:secret@gpu-box:9000", ("http://user:secret@gpu-box", 9000)),
+            ("http://[::1]:9000", ("http://[::1]", 9000)),
+            ("http://[::1]", ("http://[::1]", None)),
+            ("localhost:", ("http://localhost", None)),
         ],
     )
-    def test_it_is_shaped_the_way_the_client_keeps_it(self, given, expected):
-        # The port is appended to this, so anything after the host would land
-        # in the middle of the url.
+    def test_the_port_comes_out_of_the_url_the_client_keeps(self, given, expected):
+        # The client builds every request as 'server:port/...', so a port left
+        # in the url is a second port: 'localhost:8097' on the default port
+        # asked for 'http://localhost:8097:8097/env/main'.
         assert notebook._normalize_server(given) == expected
 
     @pytest.mark.parametrize(
@@ -191,6 +244,56 @@ class TestServerUrl:
             notebook.visdom_magic("--server htps://gpu-box.example.com")
 
         assert _FakeVisdom.built == []
+
+    @pytest.mark.parametrize(
+        "given",
+        [
+            "http://localhost/visdom",
+            "localhost:8097/visdom",
+            "http://localhost/?env=main",
+            "http://localhost/#main",
+        ],
+    )
+    def test_anything_after_the_host_is_refused_rather_than_dropped(self, given):
+        # A dashboard mounted under a proxy path is a different address, not
+        # this one with a decoration: dropping the path embeds the server root
+        # instead, which is whatever else is answering there.
+        with pytest.raises(ValueError, match="nothing"):
+            notebook._normalize_server(given)
+
+    @pytest.mark.parametrize("given", ["localhost:http", "localhost:99999"])
+    def test_a_port_in_the_url_that_is_not_a_port_is_refused(self, given):
+        with pytest.raises(ValueError, match="usable port"):
+            notebook._normalize_server(given)
+
+    def test_port_zero_in_the_url_is_refused_as_it_is_in_the_flag(self):
+        with pytest.raises(ValueError, match="between 1 and 65535"):
+            notebook._normalize_server("box:0")
+
+    @pytest.mark.parametrize("given", ["http://", "http://:8097"])
+    def test_a_url_that_names_no_host_is_refused(self, given):
+        with pytest.raises(ValueError, match="no host"):
+            notebook._normalize_server(given)
+
+
+class TestPort:
+    def test_the_url_names_it(self):
+        assert notebook._resolve_port(9000, None) == 9000
+
+    def test_the_flag_names_it(self):
+        assert notebook._resolve_port(None, 9000) == 9000
+
+    def test_neither_names_it(self):
+        assert notebook._resolve_port(None, None) == 8097
+
+    def test_both_name_the_same_one(self):
+        assert notebook._resolve_port(9000, 9000) == 9000
+
+    def test_two_different_ports_is_a_usage_error(self):
+        # Rather than picking one, which is how '--port 9000' ends up
+        # silently ignored.
+        with pytest.raises(ValueError, match="give the port once"):
+            notebook._resolve_port(8097, 9000)
 
 
 class TestEmbedding:
@@ -245,6 +348,36 @@ class TestEmbedding:
 
         assert _FakeVisdom.built[0].kwargs["server"] == "http://localhost"
 
+    def test_a_bare_line_is_localhost_8097_and_main(self):
+        notebook.visdom_magic("")
+
+        kwargs = _FakeVisdom.built[0].kwargs
+        assert (kwargs["server"], kwargs["port"], kwargs["env"]) == (
+            "http://localhost",
+            8097,
+            "main",
+        )
+
+    def test_a_port_in_the_server_url_is_the_port_the_client_is_given(self):
+        # And it is not left in the url as well: the client builds every
+        # request as 'server:port/...', so this used to ask for
+        # 'http://localhost:9000:8097/env/main'.
+        notebook.visdom_magic("--server localhost:9000")
+
+        kwargs = _FakeVisdom.built[0].kwargs
+        assert (kwargs["server"], kwargs["port"]) == ("http://localhost", 9000)
+
+    def test_the_same_port_in_both_places_is_not_a_disagreement(self):
+        notebook.visdom_magic("--server localhost:9000 --port 9000")
+
+        assert _FakeVisdom.built[0].kwargs["port"] == 9000
+
+    def test_two_different_ports_never_reach_the_client(self):
+        with pytest.raises(ValueError, match="give the port once"):
+            notebook.visdom_magic("--server localhost:9000 --port 8097")
+
+        assert _FakeVisdom.built == []
+
     def test_the_iframe_size_is_passed_through(self):
         embed = notebook.visdom_magic("--height 40vh --width 480")
 
@@ -268,6 +401,30 @@ class TestEmbedding:
         assert again.client is first.client
         assert len(_FakeVisdom.built) == 1
 
+    def test_a_registration_that_never_landed_is_tried_again(self):
+        # A %visdom run before the server was up builds a client whose env was
+        # never created, and the frame shows the dashboard's 404 for it.
+        # Caching that client as it is makes the 404 permanent -- and
+        # re-running the cell, the one thing anybody would try, changes
+        # nothing.
+        _FakeVisdom.server_is_up = False
+        notebook.visdom_magic("--env run-7")
+
+        _FakeVisdom.server_is_up = True
+        again = notebook.visdom_magic("--env run-7")
+
+        # Still the one client, because the thread it holds is there either
+        # way, but the environment it names now exists.
+        assert len(_FakeVisdom.built) == 1
+        assert again.client.registrations == ["run-7"]
+        assert again.client._env_registered is True
+
+    def test_a_client_that_did_register_is_not_asked_again(self):
+        notebook.visdom_magic("--env run-7")
+        again = notebook.visdom_magic("--env run-7")
+
+        assert again.client.registrations == []
+
     def test_a_different_env_gets_its_own_client(self):
         # The registration is per-env, and it happens in the constructor.
         notebook.visdom_magic("--env run-7")
@@ -277,6 +434,71 @@ class TestEmbedding:
             "run-7",
             "run-8",
         ]
+
+
+class TestTheRealClient:
+    """What the magic relies on ``Visdom`` doing, with only its POST replaced."""
+
+    def _build(self):
+        return _REAL_CLIENT(
+            server="http://localhost",
+            port=8097,
+            env="run-7",
+            use_incoming_socket=False,
+        )
+
+    def test_a_registration_that_landed_is_recorded_as_such(self, monkeypatch):
+        monkeypatch.setattr(
+            visdom.Visdom, "_handle_post", lambda self, url, data=None: ""
+        )
+
+        assert self._build()._env_registered is True
+
+    def test_a_registration_that_did_not_land_is_recorded_as_such(self, monkeypatch):
+        # Which is the whole of what the magic has to go on: the constructor
+        # warns and hands back a client either way.
+        def refuse(self, url, data=None):
+            raise requests.ConnectionError("nothing is listening there")
+
+        monkeypatch.setattr(visdom.Visdom, "_handle_post", refuse)
+
+        assert self._build()._env_registered is False
+
+    def test_registering_again_is_the_same_post(self, monkeypatch):
+        posted = []
+
+        def record(self, url, data=None):
+            posted.append(url)
+            return ""
+
+        monkeypatch.setattr(visdom.Visdom, "_handle_post", record)
+        client = self._build()
+
+        client._register_env("run-7")
+
+        assert posted == ["http://localhost:8097/env/run-7"] * 2
+
+    def test_the_registration_post_cannot_hold_the_cell_open(self, monkeypatch):
+        timeouts = []
+
+        class _Reply:
+            status_code = 200
+            text = ""
+
+        class _Session:
+            def post(self, url, data=None, timeout=None):
+                timeouts.append(timeout)
+                return _Reply()
+
+        monkeypatch.setattr(visdom.Visdom, "session", property(lambda self: _Session()))
+
+        self._build()
+
+        # The client leaves the read half of a POST unbounded on purpose: a
+        # send can carry a video the server is still writing out. A cell has
+        # nothing to interrupt it, so the magic's client does not.
+        assert visdom.Visdom.post_timeout == (20, None)
+        assert timeouts == [(20, 20)]
 
 
 class TestExtension:

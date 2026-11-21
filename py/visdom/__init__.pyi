@@ -52,6 +52,10 @@ _EventKey = Tuple[_OptStr, Text]
 # An iframe dimension for 'Visdom.show': a number is pixels, a string is CSS.
 _EmbedSize = Union[int, float, Text]
 
+# requests' timeout for a POST: one number for both halves, or the
+# (connect, read) pair, either half of which may be None for 'no limit'.
+_PostTimeout = Union[float, Tuple[Optional[float], Optional[float]]]
+
 class _NotebookEmbed:
     # What 'show' hands back: a URL that renders as an iframe in a notebook and
     # prints as the URL itself anywhere else. 'url' is None for an offline
@@ -83,6 +87,9 @@ class Visdom:
     socket_alive: bool
     use_preflight_checks: bool
     event_handlers: Dict[_EventKey, List[_EventHandler]]
+    # A class attribute: the constructor POSTs, so a caller that cannot wait
+    # on an unbounded read has to set this before there is an instance.
+    post_timeout: _PostTimeout
 
     def __init__(
         self,

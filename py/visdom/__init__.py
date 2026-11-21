@@ -191,6 +191,13 @@ def _refusal_reason(body):
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+# requests' (connect, read) pair for a POST. The read half is unbounded
+# because a send can carry a video the server is still writing out when the
+# connection goes quiet, and no caller wants that cut off at an arbitrary
+# number of seconds. A caller that cannot afford an unbounded wait -- a
+# notebook cell, which has nothing to interrupt it -- sets its own.
+POST_TIMEOUT = (20, None)
+
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
 
 
@@ -1057,6 +1064,12 @@ class _NotebookEmbed:
 
 
 class Visdom(object):
+    # requests' (connect, read) for every POST this client makes. A class
+    # attribute rather than a constructor argument because the constructor
+    # POSTs before it returns, so a caller that needs a different one has to
+    # be able to set it before there is an instance to set it on.
+    post_timeout = POST_TIMEOUT
+
     def __init__(
         self,
         server="http://localhost",
@@ -1111,6 +1124,11 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
+        # Whether this client's environment exists on the server. A caller
+        # that deep-links to it rather than plotting into it -- the notebook
+        # embed does -- has a 404 to show otherwise, and nothing but this to
+        # tell it apart from a dashboard that is simply empty.
+        self._env_registered = False
         self.env = (
             env.replace("/", "_")
             .replace("\\", "_")
@@ -1180,8 +1198,7 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        result = self._send({"eid": env}, endpoint="env/" + env)
-        if result is False:
+        if not self._register_env(env):
             # Without the userinfo: this names the server in a message that is
             # printed, logged, and -- in a notebook -- saved into the .ipynb,
             # none of which is a place for a password typed into server=.
@@ -1540,6 +1557,21 @@ class Visdom(object):
             seen.popitem(last=False)
         logger.warning(message)
 
+    def _register_env(self, env):
+        """Create ``env`` on the server. ``True`` when the server took it.
+
+        The constructor does this so that a client always names an
+        environment the dashboard knows. It is a method rather than a line in
+        ``__init__`` because a client that was built while the server was down
+        holds an environment that was never created, and the caller that
+        notices -- the notebook magic, whose frame would show the ``404`` --
+        has to be able to ask again rather than carry the failure for the life
+        of the process.
+        """
+        result = self._send({"eid": env}, endpoint="env/" + env)
+        self._env_registered = result is not False
+        return self._env_registered
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1551,7 +1583,7 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data, timeout=(20, None))
+            r = self.session.post(url, data=data, timeout=self.post_timeout)
             self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
@@ -1567,7 +1599,7 @@ class Visdom(object):
                 except Exception:
                     pass
                 self._session = None
-            r = self.session.post(url, data=data, timeout=(20, None))
+            r = self.session.post(url, data=data, timeout=self.post_timeout)
             self._note_refusal(r.status_code, r.text)
             return r.text
 

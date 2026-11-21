@@ -1722,15 +1722,18 @@ client that names the environment the frame opens.
 ```
 
 Flags:
-- `--port`: server port. Default `8097`.
-- `--server`: server url, without the port. Default `http://localhost`.
+- `--port`: server port. Default `8097`. The port can be part of `--server` instead; giving it in both places is an error unless the two agree, rather than one of them being ignored.
+- `--server`: server url, with or without the port — `localhost`, `localhost:8097`, `https://gpu-box.example.com:8097`. Default `http://localhost`. A scheme other than `http`/`https`, and anything after the host, are refused: a dashboard mounted under a proxy path is a different address, and embedding the server root instead would frame whatever else answers there.
 - `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with. A server started with `-readonly` refuses that registration, as it refuses every write, so name an environment that already exists there or create it before the server goes read-only.
-- `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels, anything else is CSS.
+- `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels (whole or not: `600`, `600.5`), anything else is CSS.
 
 Re-running the cell embeds the same dashboard and reuses the same client rather
 than building a second one: every `Visdom` starts a session reaper that loops
 for the life of the process and holds its client while it does, so a client per
-cell execution is a thread per cell execution that never goes away.
+cell execution is a thread per cell execution that never goes away. If the
+server was not answering when you first ran the cell, the environment never got
+registered — re-running it registers the environment then, rather than reusing
+the client as it is and framing the `404` for the rest of the session.
 
 IPython is not a visdom dependency: the magic is registered against the shell
 IPython hands `%load_ext`, and nothing in `visdom` imports IPython. For
