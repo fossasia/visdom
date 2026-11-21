@@ -52,7 +52,9 @@ class TestEnvIdEscaping(VisdomHTTPTestCase):
         self.create_text_window(eid=long_name, content="long name")
         self.save([long_name])
         files = os.listdir(self.env_path)
-        hashed = [f for f in files if f.startswith("hash_") and f.endswith(".json")]
+        hashed = [
+            f for f in files if f.startswith("hash_") and f.endswith(".json.hash")
+        ]
         self.assertTrue(hashed, files)
 
 

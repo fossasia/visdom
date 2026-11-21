@@ -17,7 +17,9 @@ import errno
 import hashlib
 import json
 import os
+import ntpath
 import sys
+import types
 
 import pytest
 
@@ -170,9 +172,9 @@ def test_env_named_like_hash_is_not_misread(store):
     assert store.list_envs() == ["hash_results"]
 
 
-def test_long_name_hash_fallback_round_trips(store):
+@pytest.mark.parametrize("long_eid", ["e" * 300, "e" * 5000, "\U0001f600" * 130])
+def test_long_name_hash_fallback_round_trips(store, long_eid):
     """An over-long env name uses the hash_<sha256>.json fallback and round-trips."""
-    long_eid = "e" * 5000
     store.save_env(long_eid, _env())
     assert store.list_envs() == [long_eid]
     assert store.env_exists(long_eid)
@@ -225,12 +227,35 @@ def test_clear_undo_removes_history(store):
     assert store.load_undo("expt") == []
 
 
-def test_undo_long_name_hash_fallback_round_trips(store):
+@pytest.mark.parametrize("long_eid", ["e" * 300, "e" * 5000, "\U0001f600" * 130])
+def test_undo_long_name_hash_fallback_round_trips(store, long_eid):
     """An over-long env name uses the hash_<sha256>.json undo fallback."""
-    long_eid = "e" * 5000
     stack = [["win_0", {"id": "win_0"}]]
     store.save_undo(long_eid, stack)
     assert store.load_undo(long_eid) == stack
+
+
+@pytest.mark.parametrize("save_undo", [False, True])
+@pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EACCES, errno.EIO])
+def test_save_preserves_unrelated_os_errors(
+    store, monkeypatch, save_undo, error_number
+):
+    error = OSError(error_number, "write failed")
+    attempts = []
+
+    def fail_write(path, payload):
+        attempts.append(path)
+        raise error
+
+    monkeypatch.setattr(store, "_atomic_write", fail_write)
+    with pytest.raises(OSError) as caught:
+        if save_undo:
+            store.save_undo("short-name", [])
+        else:
+            store.save_env("short-name", _env())
+    assert caught.value is error
+    assert len(attempts) == 1
+    assert store.list_envs() == []
 
 
 @pytest.mark.parametrize("eid", ["../evil", "subdir/../evil", "/etc/evil"])
@@ -273,7 +298,8 @@ def test_env_literally_named_like_hash_pattern_is_still_listed(store):
     assert store.env_exists(eid)
 
 
-def test_list_recovers_hash_file_missing_name_field(store, env_path):
+@pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
+def test_list_recovers_hash_file_missing_name_field(store, env_path, suffix):
     """A well-formed hash_<64>.json missing its "name" field is recovered.
 
     This can happen if a genuine hash-fallback file's "name" field is lost
@@ -283,14 +309,20 @@ def test_list_recovers_hash_file_missing_name_field(store, env_path):
     strictly better than losing access to the data entirely.
     """
     stem = "hash_" + "b" * 64
-    with open(os.path.join(env_path, stem + ".json"), "w") as fn:
+    with open(os.path.join(env_path, stem + suffix), "w") as fn:
         fn.write(json.dumps({"jsons": {}, "reload": {}}))
     store.save_env("main", _env())
 
     assert store.list_envs() == sorted(["main", stem])
+    assert store.env_exists(stem)
+    assert store.load_env(stem) == {"jsons": {}, "reload": {}}
+    assert store.delete_env(stem)
+    assert not os.path.exists(os.path.join(env_path, stem + suffix))
+    assert store.list_envs() == ["main"]
 
 
-def test_list_recovers_hash_file_unusable_name_field(store, env_path):
+@pytest.mark.parametrize("suffix", [".json", ".json.hash", ".JSON.HASH"])
+def test_list_recovers_hash_file_unusable_name_field(store, env_path, suffix):
     """A hash_<64>.json with a non-string "name" field falls back to stem.
 
     Even if a "name" key exists in the JSON, it must be a string; otherwise we
@@ -298,11 +330,117 @@ def test_list_recovers_hash_file_unusable_name_field(store, env_path):
     still appears in list_envs().
     """
     stem = "hash_" + "c" * 64
-    with open(os.path.join(env_path, stem + ".json"), "w") as fn:
+    with open(os.path.join(env_path, stem + suffix), "w") as fn:
         fn.write(json.dumps({"name": 123, "jsons": {}, "reload": {}}))
     store.save_env("main", _env())
 
     assert store.list_envs() == sorted(["main", stem])
+    assert store.env_exists(stem)
+    assert store.load_env(stem) == {"jsons": {}, "reload": {}}
+    assert store.delete_env(stem)
+    assert not os.path.exists(os.path.join(env_path, stem + suffix))
+    assert store.list_envs() == ["main"]
+
+
+@pytest.mark.parametrize(
+    "payload", ['{"name": "owned-env", "jsons": {}, "reload": {}}', "{invalid"]
+)
+def test_recovered_stem_does_not_alias_named_or_unreadable_files(store, payload):
+    path = store._hash_path("owned-env")
+    stem = os.path.basename(path)[: -len(".json.hash")]
+    store._atomic_write(path, payload)
+    assert not store.env_exists(stem)
+    assert store.load_env(stem) == {}
+    assert not store.delete_env(stem)
+    with open(path) as handle:
+        assert handle.read() == payload
+
+
+def _recover_env_with_undo(store):
+    eid = "e" * 300
+    store.save_env(eid, _env("old"))
+    undo = store.save_undo(eid, [["old", {}]])
+    path = store._hash_path(eid)
+    store._atomic_write(path, json.dumps(_env("old")))
+    return os.path.basename(path)[: -len(".json.hash")], path, undo
+
+
+@pytest.mark.parametrize("delete_first", [False, True])
+def test_recovered_undo_can_be_loaded_and_cleared(store, delete_first):
+    eid, path, undo = _recover_env_with_undo(store)
+    store = JSONStore(store.env_path)
+    assert store.load_undo(eid) == [["old", {}]]
+    if delete_first:
+        assert store.delete_env(eid)
+    store.clear_undo(eid)
+    assert store.load_undo(eid) == []
+    assert not os.path.exists(undo)
+    assert os.listdir(os.path.dirname(undo)) == []
+
+
+@pytest.mark.parametrize("hashed_save", [False, True])
+@pytest.mark.parametrize("updated_undo", [False, True])
+def test_recovered_env_save_delete_reopen(
+    store, monkeypatch, hashed_save, updated_undo
+):
+    eid, path, undo = _recover_env_with_undo(store)
+    assert store.list_envs() == [eid]
+    assert store.load_env(eid) == _env("old")
+    if updated_undo:
+        store.save_undo(eid, [["new", {}]])
+    if hashed_save:
+        original_write = store._atomic_write
+
+        def limited_write(target, payload):
+            if target == store._primary_path(eid):
+                raise OSError(errno.ENAMETOOLONG, "staged path too long")
+            original_write(target, payload)
+
+        monkeypatch.setattr(store, "_atomic_write", limited_write)
+    assert store.save_env(eid, _env("new"))
+    assert not os.path.exists(path)
+    assert not os.path.exists(undo)
+    reopened = JSONStore(store.env_path)
+    assert reopened.load_env(eid) == _env("new")
+    assert reopened.load_undo(eid) == [["new" if updated_undo else "old", {}]]
+    assert reopened.delete_env(eid)
+    reopened.clear_undo(eid)
+    reopened = JSONStore(store.env_path)
+    assert reopened.list_envs() == []
+    assert not reopened.env_exists(eid)
+    assert reopened.load_undo(eid) == []
+    assert os.listdir(os.path.dirname(undo)) == []
+
+
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.ENAMETOOLONG])
+def test_failed_recovered_save_preserves_environment_and_undo(
+    store, monkeypatch, error_number
+):
+    eid, path, undo = _recover_env_with_undo(store)
+
+    def failed_write(target, payload):
+        raise OSError(error_number, "save failed")
+
+    monkeypatch.setattr(store, "_atomic_write", failed_write)
+    with pytest.raises(OSError):
+        store.save_env(eid, _env("new"))
+    reopened = JSONStore(store.env_path)
+    assert reopened.load_env(eid) == _env("old")
+    assert reopened.load_undo(eid) == [["old", {}]]
+    assert os.path.exists(path)
+    assert os.path.exists(undo)
+
+
+def test_literal_primary_does_not_claim_recovered_file_or_undo(store):
+    eid, path, undo = _recover_env_with_undo(store)
+    store._atomic_write(store._primary_path(eid), json.dumps(_env("literal")))
+    assert store.load_undo(eid) == []
+    store.save_undo(eid, [["literal", {}]])
+    store.save_env(eid, _env("updated literal"))
+    store.clear_undo(eid)
+    assert store.load_env(eid) == _env("updated literal")
+    assert os.path.exists(path)
+    assert os.path.exists(undo)
 
 
 def test_list_skips_unreadable_hash_files(store, env_path):
@@ -485,7 +623,7 @@ def test_interrupted_undo_save_keeps_the_previous_stack(store, monkeypatch):
 def _hashed_name(eid):
     """The hash-fallback filename JSONStore would pick for ``eid``."""
     digest = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-    return "hash_{0}.json".format(digest)
+    return "hash_{0}.json.hash".format(digest)
 
 
 def test_env_named_like_a_hash_file_is_still_listed(store):
@@ -1246,3 +1384,170 @@ def test_a_forked_store_starts_cold(store):
     assert fork.env_path == store.env_path
     assert fork._meta_cache == {}
     assert fork.load_experiment("run") == _experiment_env()["experiment"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_long_env_and_literal_hash_id_do_not_overwrite_each_other(store, reverse):
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    entries = [(literal_id, _env("literal")), (long_id, _env("long"))]
+    for eid, data in reversed(entries) if reverse else entries:
+        store.save_env(eid, data)
+        store.save_undo(eid, [[eid, data]])
+    reopened = JSONStore(store.env_path)
+    assert reopened.list_envs() == sorted([literal_id, long_id])
+    for eid, data in entries:
+        assert reopened.load_env(eid) == data
+        assert reopened.load_undo(eid) == [[eid, data]]
+    reopened.delete_env(long_id)
+    reopened.clear_undo(long_id)
+    assert reopened.load_env(literal_id) == _env("literal")
+    assert reopened.load_undo(literal_id) == [[literal_id, _env("literal")]]
+    assert not reopened.env_exists(long_id)
+    assert reopened.load_undo(long_id) == []
+
+
+@pytest.mark.parametrize("uppercase", [False, True])
+def test_legacy_fallback_survives_saving_a_literal_hash_id(store, uppercase):
+    if uppercase and os.name != "nt":
+        pytest.skip("requires Windows case-insensitive paths")
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    if uppercase:
+        literal_id = literal_id.upper()
+    legacy = store._hash_path(long_id)[:-5]
+    data = dict(_env("long"), name=long_id)
+    store._atomic_write(legacy, json.dumps(data))
+    undo_dir, _, hashed = store._undo_paths(long_id)
+    os.makedirs(undo_dir, exist_ok=True)
+    store._atomic_write(hashed[:-5], json.dumps([["long", {}]]))
+    assert store.load_env(long_id) == _env("long")
+    assert store.load_undo(long_id) == [["long", {}]]
+    assert not store.env_exists(literal_id)
+    assert store.load_undo(literal_id) == []
+    store.save_env(literal_id, _env("literal"))
+    store.save_undo(literal_id, [["literal", {}]])
+    assert store.load_env(long_id) == _env("long")
+    assert store.load_undo(long_id) == [["long", {}]]
+    assert store.load_env(literal_id) == _env("literal")
+    assert store.load_undo(literal_id) == [["literal", {}]]
+    store.save_env(long_id, _env("updated"))
+    store.save_undo(long_id, [["updated", {}]])
+    assert store.list_envs() == sorted([literal_id, long_id])
+    store.delete_env(long_id)
+    store.clear_undo(long_id)
+    assert not store.env_exists(long_id)
+    assert not os.path.exists(hashed[:-5])
+    assert store.load_undo(long_id) == []
+    assert store.load_env(literal_id) == _env("literal")
+    assert store.load_undo(literal_id) == [["literal", {}]]
+
+
+@pytest.mark.parametrize("failure", ["read", "stat"])
+def test_unreadable_legacy_owner_is_not_overwritten(store, monkeypatch, failure):
+    long_id = "e" * 300
+    literal_id = "hash_" + hashlib.sha256(long_id.encode()).hexdigest()
+    legacy = store._hash_path(long_id)[:-5]
+    store._atomic_write(legacy, json.dumps(dict(_env("long"), name=long_id)))
+    with open(legacy) as handle:
+        original = handle.read()
+    cold = JSONStore(store.env_path)
+    with monkeypatch.context() as patch:
+        if failure == "read":
+            patch.setattr(
+                json_store_module, "read_json_file", lambda *a, **k: UNREADABLE_JSON
+            )
+        else:
+            native_stat = os.stat
+
+            def failed_stat(path, *args, **kwargs):
+                if os.path.normcase(os.fspath(path)) == os.path.normcase(legacy):
+                    raise PermissionError(errno.EACCES, "temporarily unreadable")
+                return native_stat(path, *args, **kwargs)
+
+            patch.setattr(json_store_module.os, "stat", failed_stat)
+        cold.save_env(literal_id, _env("literal"))
+        cold.save_undo(literal_id, [["literal", {}]])
+        assert cold.delete_env(literal_id)
+        cold.save_env(literal_id, _env("literal"))
+    with open(legacy) as handle:
+        assert handle.read() == original
+    reopened = JSONStore(store.env_path)
+    assert reopened.load_env(long_id) == _env("long")
+    assert reopened.load_env(literal_id) == _env("literal")
+    assert reopened.load_undo(literal_id) == [["literal", {}]]
+    reopened.delete_env(literal_id)
+    assert reopened.load_env(long_id) == _env("long")
+
+
+@pytest.mark.parametrize("literal", [False, True])
+def test_deleting_fallback_removes_obsolete_primary(store, monkeypatch, literal):
+    eid = "hash_" + "a" * 64 if literal else "old-environment"
+    store.save_env(eid, _env("old"))
+    primary = store._primary_path(eid)
+    original_write = store._atomic_write
+
+    def limited_write(path, payload):
+        if path == primary:
+            raise OSError(errno.ENAMETOOLONG, "staged path too long")
+        original_write(path, payload)
+
+    monkeypatch.setattr(store, "_atomic_write", limited_write)
+    store.save_env(eid, _env("new"))
+    assert store.load_env(eid) == _env("new")
+    assert store.delete_env(eid)
+    reopened = JSONStore(store.env_path)
+    assert not reopened.env_exists(eid)
+    assert eid not in reopened.list_envs()
+    assert reopened.load_env(eid) == {}
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("C:\\" + "r" * 100 + "\\" + "e" * 160 + ".json", True),
+        ("C:\\" + "r" * 100 + "\\" + "e" * 100 + ".json", False),
+        ("\\\\?\\C:\\" + "r" * 100 + "\\" + "e" * 160 + ".json", False),
+        ("C:\\" + "e" * 300 + ".json", True),
+    ],
+)
+def test_windows_einval_path_limits(monkeypatch, path, expected):
+    windows_os = types.SimpleNamespace(**vars(os))
+    windows_os.name = "nt"
+    windows_os.path = ntpath
+    monkeypatch.setattr(json_store_module, "os", windows_os)
+    assert (
+        json_store_module._filename_too_long(OSError(errno.EINVAL, "invalid"), path)
+        is expected
+    )
+    assert not json_store_module._filename_too_long(
+        OSError(errno.EACCES, "denied"), path
+    )
+
+
+@pytest.mark.parametrize("undo", [False, True])
+def test_full_path_einval_uses_shorter_fallback(tmp_path, monkeypatch, undo):
+    directory = tmp_path / ("r" * max(1, 145 - len(str(tmp_path))))
+    store = JSONStore(str(directory))
+    native_os = types.SimpleNamespace(**vars(os))
+    native_os.name = "nt"
+    monkeypatch.setattr(json_store_module, "os", native_os)
+    original_write = store._atomic_write
+    attempts = []
+
+    def limited_write(path, payload):
+        attempts.append(path)
+        if len((os.path.abspath(path) + ".tmp").encode("utf-16-le")) >= 260 * 2:
+            raise OSError(errno.EINVAL, "Invalid argument")
+        original_write(path, payload)
+
+    monkeypatch.setattr(store, "_atomic_write", limited_write)
+    eid = "e" * 180
+    if undo:
+        store.save_undo(eid, [["window", {}]])
+        assert store.load_undo(eid) == [["window", {}]]
+    else:
+        store.save_env(eid, _env())
+        assert store.load_env(eid) == _env()
+    assert len(attempts) == 2
+    assert len(attempts[1]) < len(attempts[0])
