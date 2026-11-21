@@ -33,9 +33,12 @@ asserted here.
 """
 
 import base64
+import contextlib
 import io
+import json
 import os
 import sys
+import types
 from unittest.mock import patch
 
 import numpy as np
@@ -1046,6 +1049,29 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
+class _RawPath:
+    """A minimal os.PathLike that is not a pathlib.Path."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __fspath__(self):
+        return self._value
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    [lambda p: p, lambda p: _RawPath(str(p)), lambda p: os.fsencode(str(p))],
+    ids=["pathlib", "pathlike", "bytes"],
+)
+def test_svg_reads_pathlike_and_bytes_paths(capture_send, tmp_path, wrap):
+    """svg() normalizes every os.PathLike shape, not just str filenames."""
+    path = tmp_path / "drawing.svg"
+    path.write_text("<svg width='2'><rect/></svg>")
+    sent = capture_send(lambda v: v.svg(svgfile=wrap(path)))
+    assert content(sent) == "<svg width='2'><rect/></svg>"
+
+
 @pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
 def test_svg_file_preserves_text(capture_send, tmp_path, text):
     """File input must produce the same SVG text as the string API."""
@@ -1074,3 +1100,73 @@ def test_svg_passes_opts_through(capture_send):
 def test_svg_rejects_malformed_input(offline_client, kwargs, message):
     with pytest.raises(AssertionError, match=message):
         offline_client.svg(**kwargs)
+
+
+# -------------------------------------------------------- plotly export ----
+
+
+class _RecordingFigure:
+    """A stand-in for a Plotly figure that records what write_image received."""
+
+    def __init__(self):
+        self.paths = []
+
+    def write_image(self, filepath, **kwargs):
+        self.paths.append((filepath, kwargs))
+
+
+@contextlib.contextmanager
+def _fake_plotly():
+    """Make ``import plotly`` succeed without the optional dependency."""
+    module = types.ModuleType("plotly")
+    module.utils = types.SimpleNamespace(PlotlyJSONEncoder=json.JSONEncoder)
+    with patch.dict(sys.modules, {"plotly": module}):
+        yield module
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    [lambda p: p, lambda p: _RawPath(str(p)), lambda p: os.fsencode(str(p))],
+    ids=["pathlib", "pathlike", "bytes"],
+)
+def test_save_plotly_figure_normalizes_paths(offline_client, tmp_path, wrap):
+    """Plotly only accepts str, so path-like inputs must be decoded first."""
+    figure = _RecordingFigure()
+    expected = str(tmp_path / "plot.png")
+    with _fake_plotly():
+        offline_client.save_plotly_figure(
+            figure, wrap(tmp_path / "plot.png"), width=300
+        )
+    assert figure.paths == [(expected, {"width": 300})]
+
+
+def test_save_plotly_figure_leaves_file_objects_untouched(offline_client):
+    """A stream is a valid write_image target and must not be path-decoded."""
+    figure = _RecordingFigure()
+    sink = io.BytesIO()
+    with _fake_plotly():
+        offline_client.save_plotly_figure(figure, sink)
+    assert figure.paths == [(sink, {})]
+
+
+def test_plotlyplot_forwards_a_pathlike_save_path(
+    offline_client, capture_send, tmp_path, monkeypatch
+):
+    recorded = {}
+    monkeypatch.setattr(
+        offline_client,
+        "save_plotly_figure",
+        lambda figure, filepath, **kwargs: recorded.update(
+            filepath=filepath, kwargs=kwargs
+        ),
+    )
+    save_path = _RawPath(str(tmp_path / "plot.png"))
+    with _fake_plotly():
+        capture_send(
+            lambda v: v.plotlyplot(
+                {"data": [], "layout": {}},
+                save_path=save_path,
+                save_kwargs={"width": 320},
+            )
+        )
+    assert recorded == {"filepath": save_path, "kwargs": {"width": 320}}
