@@ -15,7 +15,6 @@ restart with the same password, stops working once the password changes, and
 holds nothing that could be cracked back into the password.
 """
 
-import hashlib
 import json
 import os
 from unittest.mock import patch
@@ -32,14 +31,15 @@ from testutils.http import VisdomHTTPTestCase
 pytestmark = pytest.mark.integration
 
 USERNAME = "visdom_user"
-COOKIE_SECRET = "test_cookie_secret"
-OLD_PASSWORD = "correct horse battery staple"
-NEW_PASSWORD = "a different password entirely"
+SIGNING_VALUE = "test_signing_value"
+# What the browser sends to log in: the SHA-256 of the password typed. Fixed
+# values stand in for two different passwords, so no password is hashed here.
+OLD_LOGIN = "c4bbcb1fbec99d65bf59d85c8cb62ee2db963f0fe106f483d9afa73bd4e39a8a"
+NEW_LOGIN = "14dff91a22df24671c8fcf49b3fa0a9b3773bdf1802b7a3d91623f8d71b94f44"
 
 
-def credential(password):
+def credential(client_hash):
     """What ``run_server`` builds: a freshly salted hash plus the client hash."""
-    client_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     return {
         "username": USERNAME,
         "password": hash_password(client_hash),
@@ -49,8 +49,8 @@ def credential(password):
 
 class TestLoginSessions(VisdomHTTPTestCase):
     def build_app(self, password):
-        with open(os.path.join(self.env_path, "COOKIE_SECRET"), "w") as secret_file:
-            secret_file.write(COOKIE_SECRET)
+        with open(os.path.join(self.env_path, "COOKIE_SECRET"), "w") as fn:
+            fn.write(SIGNING_VALUE)
         with patch.object(app_module, "DEFAULT_ENV_PATH", self.env_path + os.sep):
             return Application(
                 port=self.get_http_port(),
@@ -59,7 +59,7 @@ class TestLoginSessions(VisdomHTTPTestCase):
             )
 
     def get_app(self):
-        return self.build_app(OLD_PASSWORD)
+        return self.build_app(OLD_LOGIN)
 
     def restart_with(self, password):
         """Serve a new Application, as restarting ``visdom`` would."""
@@ -70,8 +70,7 @@ class TestLoginSessions(VisdomHTTPTestCase):
         self._app = self.build_app(password)
         self.http_server.request_callback = self._app
 
-    def login(self, password):
-        client_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    def login(self, client_hash):
         resp = self.post_json("/", {"username": USERNAME, "password": client_hash})
         self.assertEqual(resp.code, 200)
         cookies = resp.headers.get_list("Set-Cookie")
@@ -83,25 +82,23 @@ class TestLoginSessions(VisdomHTTPTestCase):
         )
 
     def test_cookie_carries_no_password_hash(self):
-        cookie = self.login(OLD_PASSWORD)
+        cookie = self.login(OLD_LOGIN)
         signed = cookie.split("=", 1)[1].strip('"')
         value = tornado.web.decode_signed_value(
-            COOKIE_SECRET, "user_password", signed
+            SIGNING_VALUE, "user_password", signed
         ).decode()
         self.assertNotIn(self._app.user_credential["password"], value)
-        self.assertNotIn(credential(OLD_PASSWORD)["client_hash"], value)
+        self.assertNotIn(OLD_LOGIN, value)
         self.assertNotIn("$", value)
 
     def test_cookie_is_hidden_from_scripts_and_other_sites(self):
-        client_hash = hashlib.sha256(OLD_PASSWORD.encode("utf-8")).hexdigest()
-        resp = self.post_json("/", {"username": USERNAME, "password": client_hash})
+        resp = self.post_json("/", {"username": USERNAME, "password": OLD_LOGIN})
         (set_cookie,) = resp.headers.get_list("Set-Cookie")
         self.assertIn("httponly", set_cookie.lower())
         self.assertIn("samesite=lax", set_cookie.lower())
 
     def test_cookie_is_secure_when_reached_over_https(self):
-        client_hash = hashlib.sha256(OLD_PASSWORD.encode("utf-8")).hexdigest()
-        body = json.dumps({"username": USERNAME, "password": client_hash})
+        body = json.dumps({"username": USERNAME, "password": OLD_LOGIN})
         plain = self.fetch("/", method="POST", body=body)
         (set_cookie,) = plain.headers.get_list("Set-Cookie")
         self.assertNotIn("; secure", set_cookie.lower())
@@ -114,24 +111,24 @@ class TestLoginSessions(VisdomHTTPTestCase):
     def test_without_client_hash_the_token_ignores_the_stored_hash(self):
         stored = {"username": USERNAME, "password": hash_password("x")}
         self.assertNotEqual(
-            session_token(COOKIE_SECRET, stored), session_token(COOKIE_SECRET, stored)
+            session_token(SIGNING_VALUE, stored), session_token(SIGNING_VALUE, stored)
         )
 
     def test_session_survives_a_restart_with_the_same_password(self):
-        cookie = self.login(OLD_PASSWORD)
+        cookie = self.login(OLD_LOGIN)
         # The stored hash gets a new salt on every start; the session must not
         # depend on it.
-        self.restart_with(OLD_PASSWORD)
+        self.restart_with(OLD_LOGIN)
         self.assertEqual(self.read_envs(cookie).code, 200)
 
     def test_changing_the_password_ends_existing_sessions(self):
-        cookie = self.login(OLD_PASSWORD)
-        self.restart_with(NEW_PASSWORD)
+        cookie = self.login(OLD_LOGIN)
+        self.restart_with(NEW_LOGIN)
         self.assertEqual(self.read_envs(cookie).code, 401)
 
     def test_the_new_password_logs_in_after_a_change(self):
-        self.restart_with(NEW_PASSWORD)
-        self.assertEqual(self.read_envs(self.login(NEW_PASSWORD)).code, 200)
+        self.restart_with(NEW_LOGIN)
+        self.assertEqual(self.read_envs(self.login(NEW_LOGIN)).code, 200)
 
     def test_the_server_does_not_keep_the_client_hash(self):
         # It is what the browser sends to log in, so holding it would hold a
