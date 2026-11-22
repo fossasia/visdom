@@ -1276,20 +1276,20 @@ def test_a_corrupt_env_file_is_set_aside_and_the_env_starts_empty(store, env_pat
     assert "run" not in store.list_envs()
 
 
-def test_a_file_that_cannot_be_opened_is_not_moved(store, env_path, monkeypatch):
+@needs_file_permissions
+def test_a_file_that_cannot_be_opened_is_not_moved(store, env_path):
     """Only a file that was read and found damaged is set aside.
 
     A failed open can be transient (no file descriptors left, a network drive
     that dropped out), so it says nothing about the file and must not move it.
     """
     store.save_env("run", _env())
-    monkeypatch.setattr(
-        json_store_module,
-        "read_json_file",
-        lambda path, default=UNREADABLE_JSON, corrupt=None: default,
-    )
-
-    assert store.load_env("run") == {}
+    path = os.path.join(env_path, "run.json")
+    os.chmod(path, 0)
+    try:
+        assert store.load_env("run") == {}
+    finally:
+        os.chmod(path, 0o644)
     assert os.listdir(env_path) == ["run.json"]
 
 
@@ -1307,3 +1307,54 @@ def test_a_corrupt_file_that_cannot_be_moved_is_left_alone(
     assert store.load_env("run") == {}
     with open(path, "rb") as fn:
         assert fn.read() == damaged
+
+
+def test_json_nested_too_deep_to_decode_counts_as_corrupt(store, env_path):
+    """The decoder gives up with RecursionError, not ValueError, on such a file."""
+    path = os.path.join(env_path, "run.json")
+    with open(path, "w") as fn:
+        fn.write("[" * 100000 + "]" * 100000)
+
+    assert store.load_env("run") == {"jsons": {}, "reload": {}}
+    assert not os.path.exists(path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="long-name limits differ on Windows")
+def test_a_corrupt_file_with_a_long_name_is_set_aside_under_a_short_one(
+    store, env_path
+):
+    """A name with no room left for the suffix still gets set aside."""
+    eid = "x" * 240
+    path, damaged = _write_corrupt_env(store, env_path, eid)
+
+    assert store.load_env(eid) == {"jsons": {}, "reload": {}}
+
+    assert not os.path.exists(path)
+    (moved,) = [n for n in os.listdir(env_path) if ".corrupt-" in n]
+    assert moved.startswith("env-")
+    with open(os.path.join(env_path, moved), "rb") as fn:
+        assert fn.read() == damaged
+
+
+def test_a_file_saved_after_it_was_read_is_not_moved(store, env_path, monkeypatch):
+    """A save between reading a damaged file and moving it wins.
+
+    ``load_env`` also runs off the storage worker, so the worker can replace
+    the file in that gap. The file is checked again before it is moved, and
+    the env the save wrote is what the read returns.
+    """
+    path, _ = _write_corrupt_env(store, env_path)
+    real_read = json_store_module.read_json_file
+    calls = []
+
+    def read_then_save(*args, **kwargs):
+        result = real_read(*args, **kwargs)
+        if not calls:
+            store.save_env("run", _env("saved_meanwhile"))
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(json_store_module, "read_json_file", read_then_save)
+
+    assert list(store.load_env("run")["jsons"]) == ["saved_meanwhile"]
+    assert os.listdir(env_path) == ["run.json"]

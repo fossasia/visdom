@@ -172,6 +172,10 @@ class JSONStore(DataStore):
         self._meta_bytes = 0
         self._meta_cache_bytes = meta_cache_bytes
         self._meta_lock = threading.Lock()
+        # Held while a file is swapped into place and while a damaged one is
+        # moved aside, so a save landing between reading a file and moving it
+        # cannot have its fresh copy moved instead.
+        self._replace_lock = threading.Lock()
 
     def __deepcopy__(self, memo):
         """Return a store on the same path with an empty metadata cache.
@@ -289,7 +293,8 @@ class JSONStore(DataStore):
         tmp = path + ".tmp"
         with open(tmp, "w") as fn:
             fn.write(payload)
-        os.replace(tmp, path)
+        with self._replace_lock:
+            os.replace(tmp, path)
         # Every write this process makes passes through here, so dropping the
         # record is what keeps the metadata cache honest about our own saves.
         # The stat key in :meth:`_read_meta` then only has to catch edits made
@@ -360,7 +365,11 @@ class JSONStore(DataStore):
             return {}
         data = read_json_file(path, default=None, corrupt=CORRUPT_JSON)
         if data is CORRUPT_JSON:
-            return self._set_aside_corrupt_env(eid, path)
+            set_aside = self._set_aside_corrupt_env(eid, path)
+            if set_aside is not None:
+                return set_aside
+            # A save replaced the file after it was read; read the new one.
+            data = read_json_file(path, default=None)
         if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
             return {}
         env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
@@ -381,15 +390,39 @@ class JSONStore(DataStore):
 
         If the file cannot be moved, nothing is pretended: ``{}`` is returned
         as before, and the env stays unwritable rather than overwriting it.
+
+        ``load_env`` is also called off the storage worker, so a save of the
+        same env can land between the read and the move. The file is read
+        again under the lock every replace takes, and moved only if it is
+        still damaged; otherwise this returns None and the caller reads it.
         """
+        with self._replace_lock:
+            again = read_json_file(path, corrupt=CORRUPT_JSON)
+            if again is CORRUPT_JSON:
+                return self._move_corrupt_env(eid, path)
+            if not os.path.exists(path):
+                # Another reader of the same env moved it aside first.
+                return {"jsons": {}, "reload": {}}
+            return None
+
+    def _move_corrupt_env(self, eid, path):
+        """Rename a damaged env file aside and log it. Caller holds the lock."""
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        target = "{0}.corrupt-{1}".format(path, stamp)
-        n = 1
-        while os.path.exists(target):
-            target = "{0}.corrupt-{1}-{2}".format(path, stamp, n)
-            n += 1
+        target = self._corrupt_target(path, stamp)
         try:
-            os.rename(path, target)
+            try:
+                os.rename(path, target)
+            except OSError as e:
+                # A name already near the length limit has no room for the
+                # suffix; a short name derived from it still leaves the file
+                # findable next to where it was, and the log says which.
+                if (
+                    e.errno != errno.ENAMETOOLONG
+                    and getattr(e, "winerror", None) != 206
+                ):
+                    raise
+                target = self._corrupt_target(path, stamp, short=True)
+                os.rename(path, target)
         except OSError as e:
             if os.path.exists(path):
                 logging.error(
@@ -412,6 +445,26 @@ class JSONStore(DataStore):
             )
         self._forget_meta(path)
         return {"jsons": {}, "reload": {}}
+
+    @staticmethod
+    def _corrupt_target(path, stamp, short=False):
+        """A free name next to ``path`` to move a damaged env file to.
+
+        ``short`` swaps the file name for a digest of it, for a name too long
+        to take the suffix. Never one that exists: the storage worker is the
+        only thing that writes here, so a name free now is still free when
+        the file is moved.
+        """
+        directory, name = os.path.split(path)
+        if short:
+            digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+            name = "env-" + digest
+        base = os.path.join(directory, "{0}.corrupt-{1}".format(name, stamp))
+        target, n = base, 1
+        while os.path.exists(target):
+            target = "{0}-{1}".format(base, n)
+            n += 1
+        return target
 
     def _forget_meta(self, path):
         """Drop ``path``'s cached metadata, if any."""

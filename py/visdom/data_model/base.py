@@ -34,12 +34,14 @@ def read_json_file(path, default=UNREADABLE_JSON, corrupt=None):
 
     A caller that needs to tell a damaged file from one it could not open
     passes ``corrupt``, which is returned instead of ``default`` when the file
-    opened but did not parse.
+    opened but did not parse -- including JSON nested deeper than the decoder
+    can follow, which raises :class:`RecursionError` rather than a
+    :class:`ValueError`.
     """
     try:
         with open(path, "r", encoding="utf-8") as fn:
             return json.load(fn)
-    except ValueError:
+    except (ValueError, RecursionError):
         return default if corrupt is None else corrupt
     except OSError:
         return default
