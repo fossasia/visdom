@@ -426,6 +426,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
+- [`vis.show`](#visshow): embed the dashboard in a Jupyter or VS Code notebook cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1046,20 +1047,21 @@ environment). If you've also registered an event handler via
    "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
-This function plays audio. It takes as input the filename of the audio
-file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
-audio). The function does not support any plot-specific `opts`.
+This function plays audio. It takes as input the filename or `pathlib.Path` of the audio
+file (`audiofile` accepts string or `os.PathLike`) or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
+audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or
+`2xN`) is accepted too. The function does not support any plot-specific `opts`.
 
 The following `opts` are supported:
 
-- `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+- `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
 
 Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
 
 #### vis.video
-This function plays a video. It takes as input the filename of the video
-`videofile` or a `LxHxWxC`-sized
+This function plays a video. It takes as input the filename or `pathlib.Path` of the video
+`videofile` (`videofile` accepts string or `os.PathLike`) or a `LxHxWxC`-sized
 `tensor` containing all the frames of the video as input. The
 function does not support any plot-specific `opts`.
 
@@ -1438,9 +1440,12 @@ that specifies the value at each location in the contour plot.
 The following `opts` are supported:
 
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+- `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+When either color limit is supplied, the missing limit defaults to the corresponding
+minimum or maximum of `X`. Without explicit limits, Plotly chooses the color domain.
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the
@@ -1687,6 +1692,48 @@ Arguments:
 Returns a dict: `run_id`, `name`, `status`, `eid` (the env replayed into), `total` (calls recorded), `replayed` (successfully resent), `failed`, and `errors` (one message per failed call, if any). Raises `visdom.tracking.restore.RunRestoreError` if the run has no replayable data recorded, and `ValueError` up front for an invalid `delay`.
 
 Also available as `POST /restore_run` (body: `{"path": ..., "eid": ..., "delay": ...}`, `path` resolved under the `VISDOM_TRACKING_DIR` environment variable, defaulting to `visdom_runs`), so a run can be replayed directly into a running server without a Python client in between. Refused (`403`) in `-readonly` mode, and subject to the same per-workspace storage limits as any other write.
+
+#### vis.show
+
+Embeds the dashboard in a notebook cell, so the plots show up next to the code
+that drew them instead of in a separate browser tab. Works in Jupyter, VS Code
+and any other notebook frontend, and needs no extra dependency: notebooks
+render any object that has a `_repr_html_`, and this adds one rather than
+importing IPython.
+
+```python
+from visdom import Visdom
+vis = Visdom(env="run-7")
+vis.line(Y=losses, win="loss")
+
+vis              # renders the dashboard for env 'run-7' in the cell
+vis.show()       # the same thing, explicitly
+vis.show(env="baseline", height=400)
+```
+
+Arguments:
+- `env`: environment to open. Defaults to the client's own env, as elsewhere in the API. The embedded dashboard keeps its environment selector, so this is the starting point rather than a restriction.
+- `height`: iframe height. A number is pixels (default `600`) and has to be finite and positive — `nan` and `inf` are refused rather than formatted into a `nanpx` length; a string is a CSS length, e.g. `"40vh"`. Both are applied as CSS — the HTML `height` attribute is a legacy length that would read `40vh` as 40 pixels — so a dimension has to be a length and nothing else.
+- `width`: iframe width. Defaults to `"100%"`, the full width of the cell.
+
+Returns an object that renders as the iframe in a notebook and prints as the
+plain dashboard URL anywhere else, so it is also a quick way to get a link to
+the right environment from a script. An offline client (`offline=True`) has no
+server to embed and says so instead.
+
+The URL is built from the client's own `server`, `port` and `base_url`, so it
+has to be an address the **browser** can reach — which is not always the
+address the client uses:
+
+- **Kernel and browser on the same machine** (the usual local case): nothing to do.
+- **Remote kernel** (a GPU box, a cluster node, or a hosted notebook such as Colab or Kaggle): the browser cannot reach the kernel's `localhost`, so the frame stays blank. Forward the port (`ssh -L 8097:localhost:8097 <host>`), or put the server behind a reverse proxy, and point the client at that address — the embed follows the client.
+- **JupyterLab over HTTPS**: the browser blocks a plain-HTTP frame to another port. Serve visdom from the notebook's own origin, for example with [`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/), and construct the client for that address — `Visdom(server="https://lab.example.com", port=443, base_url="/proxy/8097")`. Pointing only `base_url` at the proxy prefix does not help: the URL would still name the visdom port.
+
+Two more limits: a server started with `-enable_login` serves its login form
+inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
+the server's default view, because a browser frame cannot send the
+`X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
+is the case.
 
 ### Experiments
 
