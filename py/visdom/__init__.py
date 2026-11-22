@@ -742,25 +742,33 @@ def _to_numpy(a):
 def _plain_scalar(value, what):
     """Turn a one-element tensor or numpy value into a plain Python number.
 
-    Anything else is returned as it is.
+    Anything else is returned as it is, except a complex number, which JSON
+    can't carry.
     """
     item = getattr(value, "item", None)
-    if not callable(item):
-        return value
-    numel = getattr(value, "numel", None)
-    count = numel() if callable(numel) else getattr(value, "size", 1)
-    if count != 1:
-        raise TypeError("{} must be a single value, got {} values".format(what, count))
-    # A masked value is missing; item() would give its hidden fill instead.
-    if np.ma.is_masked(value):
-        return None
-    value = item()
+    if callable(item):
+        numel = getattr(value, "numel", None)
+        count = numel() if callable(numel) else getattr(value, "size", 1)
+        if count != 1:
+            raise TypeError(
+                "{} must be a single value, got {} values".format(what, count)
+            )
+        # A masked value is missing; item() would give its hidden fill instead.
+        if np.ma.is_masked(value):
+            return None
+        value = item()
+    if isinstance(value, (complex, np.complexfloating)):
+        raise TypeError("{} must be a real number, got {}".format(what, value))
     if not isinstance(value, np.floating):
         return value
     # np.longdouble.item() stays a numpy scalar, which json can't encode.
     number = float(value)
+    # A float can't hold it, and inf or 0 would send a different value. The
+    # message uses str(): format() would print the value as that float.
     if math.isinf(number) and np.isfinite(value):
-        raise ValueError("{} is too large to send: {}".format(what, value))
+        raise ValueError("{} is too large to send: {!s}".format(what, value))
+    if number == 0 and value != 0:
+        raise ValueError("{} is too small to send: {!s}".format(what, value))
     return number
 
 

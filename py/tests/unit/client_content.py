@@ -33,6 +33,7 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import math
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -955,8 +956,69 @@ def test_an_unmasked_value_is_kept(offline_client):
 )
 def test_a_longdouble_too_large_for_a_float_is_refused(offline_client):
     """It would become inf and then be sent as null, losing the value."""
-    with pytest.raises(ValueError, match="metric 'loss' is too large to send"):
+    with pytest.raises(ValueError, match=r"'loss' is too large to send: 1e\+400$"):
         offline_client.log_metrics({"loss": np.longdouble("1e400")})
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).tiny >= np.finfo(np.float64).tiny,
+    reason="longdouble is no wider than float64 on this platform",
+)
+@pytest.mark.parametrize("text", ["1e-400", "-1e-400"], ids=["positive", "negative"])
+def test_a_longdouble_too_small_for_a_float_is_refused(offline_client, text):
+    """It would become 0 and be sent as a different value."""
+    with pytest.raises(
+        ValueError, match="'loss' is too small to send: {}$".format(text)
+    ):
+        offline_client.log_metrics({"loss": np.longdouble(text)})
+
+
+def test_a_zero_or_tiny_longdouble_a_float_can_hold_is_sent(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {
+                "zero": np.longdouble(0),
+                "neg_zero": np.longdouble("-0.0"),
+                "tiny": np.longdouble("1e-310"),
+            }
+        )
+    assert msg["metrics"] == {"zero": 0.0, "neg_zero": 0.0, "tiny": 1e-310}
+    assert math.copysign(1, msg["metrics"]["neg_zero"]) == -1
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        np.complex128(1 + 2j),
+        np.array([1j]),
+        np.array(0j),
+        np.clongdouble(1j),
+        complex(1, 0),
+    ],
+    ids=["numpy", "one_element", "zero_dim", "clongdouble", "python"],
+)
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v, x: v.log_metrics({"loss": x}),
+        lambda v, x: v.log_metrics({"loss": 0.1}, step=x),
+        lambda v, x: v.experiment(params={"lr": x}),
+        lambda v, x: v.experiment(tags={"seed": x}),
+    ],
+    ids=["metric", "step", "param", "tag"],
+)
+def test_a_complex_value_is_refused_before_sending(offline_client, call, value):
+    """JSON has no complex numbers; say so instead of failing to encode."""
+    with replies(offline_client, "{}") as sent:
+        with pytest.raises(TypeError, match="must be a real number"):
+            call(offline_client, value)
+    sent.assert_not_called()
+
+
+def test_a_complex_tensor_is_refused(offline_client):
+    torch = pytest.importorskip("torch")
+    with pytest.raises(TypeError, match="metric 'loss' must be a real number"):
+        offline_client.log_metrics({"loss": torch.tensor(1 + 2j)})
 
 
 def test_an_infinite_longdouble_is_not_mistaken_for_an_overflow(offline_client):
