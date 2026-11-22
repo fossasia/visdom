@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 /* Firefox clips the glyph bounds when Plotly measures a cloned MathJax SVG. */
-#js-plotly-tester g[class^='legend'][class$='text-math-group'] svg {
+#js-plotly-tester g[class$='-math-group'] > svg {
   overflow: visible !important;
 }
