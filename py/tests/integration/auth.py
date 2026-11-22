@@ -244,7 +244,10 @@ class TestLoginLockouts(LoginTestCase):
         resp = self.login(password=WRONG_HASH)
 
         self.assertEqual(resp.code, 429)
-        self.assertTrue(int(resp.headers["Retry-After"]) > 0)
+        # The lockout armed at the base delay on a clock frozen at zero,
+        # so the whole 30 seconds is still owed, advertised with the
+        # documented integer rounding.
+        self.assertEqual(resp.headers["Retry-After"], "30")
         self.assertEqual(resp.headers.get_list("Set-Cookie"), [])
 
     def test_even_the_right_password_is_refused_while_locked(self):
