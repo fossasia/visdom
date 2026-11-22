@@ -208,7 +208,7 @@ class Visdom:
     ) -> _NotebookEmbed: ...
     def text(
         self,
-        text: Text,
+        text: object,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
