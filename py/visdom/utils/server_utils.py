@@ -145,8 +145,9 @@ def set_cookie(value=None):
 def session_token(cookie_secret, user_credential):
     """Return the value the login cookie carries for the current credential.
 
-    It is the username plus an HMAC, keyed by the cookie secret, of the hash
-    the browser sends for the password (``client_hash``). So it stays the
+    It is the username plus a key derived, salted with the cookie secret,
+    from the hash the browser sends for the password (``client_hash``). So
+    it stays the
     same across restarts, changes when the username or password does -- which
     ends every session issued for the old credential -- and, unlike the
     stored password hash, tells someone who reads the cookie nothing they
@@ -155,15 +156,17 @@ def session_token(cookie_secret, user_credential):
     A caller that builds the application without ``client_hash`` gets a
     random seed instead, so the token never depends on the stored hash, and
     its sessions last only as long as the process.
+
+    The client hash is as good as the password, so it goes through the same
+    slow key derivation as the stored hash rather than a single HMAC: should
+    the cookie secret ever leak, a cookie must not be a cheap way to guess
+    the password. It runs once, at startup.
     """
     username = user_credential["username"]
     seed = user_credential.get("client_hash") or secrets.token_hex(32)
-    mac = hmac.new(
-        cookie_secret.encode("utf-8"),
-        "{0}\0{1}".format(username, seed).encode("utf-8"),
-        hashlib.sha256,
-    )
-    return "{0}:{1}".format(username, mac.hexdigest())
+    salt = "{0}\0{1}".format(cookie_secret, username).encode("utf-8")
+    key = hashlib.pbkdf2_hmac("sha256", seed.encode("utf-8"), salt, 100000)
+    return "{0}:{1}".format(username, key.hex())
 
 
 def current_session_user(handler):
