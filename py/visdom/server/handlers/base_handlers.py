@@ -69,45 +69,83 @@ def is_cross_site_request(request, get_changes_state=False):
         return False
     if origin == "null":
         return True
-    # Older browsers send Origin but not Sec-Fetch-Site, so it must equal this
-    # server's own origin exactly: a browser serializes it as scheme://host
+    # Older browsers send Origin but not Sec-Fetch-Site, so it must name this
+    # server's own origin: a browser serializes it as scheme://host[:port]
     # with no path, query or credentials, so anything else is refused too.
-    # A proxy may rewrite the scheme and host, so the ones the browser used
-    # may arrive as X-Forwarded-Proto/-Host. These are trusted without a
-    # proxy allow-list: a page cannot set them on a cross-site request without
-    # a CORS preflight, which visdom does not grant, and callers that can set
-    # them freely (curl, scripts) are not stopped by this check anyway.
+    # A proxy may rewrite the scheme, host and port, so the ones the browser
+    # used may arrive as X-Forwarded-Proto/-Host/-Port. These are trusted
+    # without a proxy allow-list: a page cannot set them on a cross-site
+    # request without a CORS preflight, which visdom does not grant, and
+    # callers that can set them freely (curl, scripts) are not stopped by
+    # this check anyway.
     #
     # Without X-Forwarded-Proto the server cannot know which scheme the
     # browser used, so it assumes the one the request arrived on and accepts
     # no other. Accepting both would let an http page post to a site served
-    # over https -- the downgrade a network attacker could use. Behind a proxy
-    # that ends TLS without that header an https page is refused instead, so
-    # that case is logged with what to set.
+    # over https -- the downgrade a network attacker could use. The same goes
+    # for the port: nginx's usual ``Host $host`` drops it, so a host without
+    # one stands for the scheme's default port unless X-Forwarded-Port says
+    # otherwise. A case this cannot match is logged with what to set.
+    wanted = _parse_origin(origin)
+    if wanted is None:
+        return True
     scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
-    hosts = {request.host.lower(), _first_forwarded(request, "X-Forwarded-Host")}
-    allowed = {"{0}://{1}".format(scheme, host) for host in hosts if host}
-    if origin.lower() in allowed:
+    forwarded_port = _first_forwarded(request, "X-Forwarded-Port")
+    ours = set()
+    for host in (request.host, _first_forwarded(request, "X-Forwarded-Host")):
+        own = _parse_origin("{0}://{1}".format(scheme, host), forwarded_port)
+        if host and own is not None:
+            ours.add(own)
+    if wanted in ours:
         return False
-    if scheme == "http" and origin.lower() in {"https://" + h for h in hosts if h}:
-        _warn_missing_forwarded_proto(origin)
+    if any(wanted[1] == hostname for _, hostname, _ in ours):
+        _warn_unmatched_proxy_origin(origin)
     return True
 
 
-_warned_missing_forwarded_proto = False
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def _warn_missing_forwarded_proto(origin):
-    """Say once why an https page was refused by a server reached over http."""
-    global _warned_missing_forwarded_proto
-    if _warned_missing_forwarded_proto:
+def _parse_origin(origin, port_if_missing=""):
+    """``(scheme, hostname, port)`` of a ``scheme://host[:port]`` origin.
+
+    Returns None for anything else -- a path, a query, credentials, a missing
+    host or an unknown scheme -- since no browser sends an Origin like that.
+    A missing port is ``port_if_missing`` when given, else the scheme's
+    default, so ``https://host`` and ``https://host:443`` compare equal.
+    """
+    scheme, sep, authority = origin.lower().partition("://")
+    if not sep or scheme not in DEFAULT_PORTS or not authority:
+        return None
+    if any(c in authority for c in "/?#@\\"):
+        return None
+    hostname, colon, port = authority.rpartition(":")
+    if not colon or hostname.endswith(":") or "]" in port:
+        hostname, port = authority, port_if_missing
+    if not hostname:
+        return None
+    try:
+        port = int(port) if port else DEFAULT_PORTS[scheme]
+    except ValueError:
+        return None
+    return scheme, hostname, port
+
+
+_warned_unmatched_proxy_origin = False
+
+
+def _warn_unmatched_proxy_origin(origin):
+    """Say once why a page on this server's own hostname was refused."""
+    global _warned_unmatched_proxy_origin
+    if _warned_unmatched_proxy_origin:
         return
-    _warned_missing_forwarded_proto = True
+    _warned_unmatched_proxy_origin = True
     logging.warning(
-        "Refused a request from %s because it arrived over plain http. If "
-        "Visdom runs behind a proxy that terminates TLS, have the proxy set "
-        "X-Forwarded-Proto (for nginx: proxy_set_header X-Forwarded-Proto "
-        "$scheme;).",
+        "Refused a request from %s: the host name matches this server, but "
+        "the scheme or port the browser used does not reach Visdom. If Visdom "
+        "runs behind a proxy, have it pass them on, e.g. for nginx: "
+        "proxy_set_header X-Forwarded-Proto $scheme; "
+        "proxy_set_header X-Forwarded-Port $server_port;",
         origin,
     )
 
@@ -243,6 +281,17 @@ class BaseWebSocketHandler(
         if not app or not app.settings.get("cookie_secret"):
             return None
         return self.get_secure_cookie("user_password")
+
+    def check_origin(self, origin):
+        """Apply the HTTP handlers' cross-site rule to the socket handshake.
+
+        tornado's own check trusts an Origin only when it matches the Host
+        header, so behind a proxy that rewrites Host it refused the dashboard's
+        own socket, and before tornado 6.6 it ignored Sec-Fetch-Site. Opening a
+        socket subscribes it to every update, so the handshake is checked like
+        a request that changes state, with the same proxy headers honoured.
+        """
+        return not is_cross_site_request(self.request, get_changes_state=True)
 
     def write_message(self, message, binary=False):
         try:

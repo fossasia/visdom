@@ -121,7 +121,7 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         # A proxy that ends TLS without X-Forwarded-Proto leaves no way to tell
         # an https page from an http one, so only the scheme the request came
         # in on is accepted, and the operator is told what to set.
-        handlers.base_handlers._warned_missing_forwarded_proto = False
+        handlers.base_handlers._warned_unmatched_proxy_origin = False
         here = "localhost:%d" % self.get_http_port()
         with self.assertLogs(level="WARNING") as logs:
             resp = self.post_from(
@@ -130,6 +130,46 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 403)
         self.assertTrue(self.env_exists("victim"))
         self.assertIn("X-Forwarded-Proto", "\n".join(logs.output))
+
+    # nginx's usual ``proxy_set_header Host $host`` drops the port.
+
+    def behind_nginx(self, origin, **forwarded):
+        headers = {"Host": "visdom.example.org", "X-Forwarded-Proto": "https"}
+        headers.update(forwarded)
+        return self.post_from(
+            "/delete_env", {"eid": "victim"}, Origin=origin, **headers
+        )
+
+    def test_nginx_on_the_default_port_is_allowed(self):
+        resp = self.behind_nginx("https://visdom.example.org")
+        self.assertEqual(resp.code, 200)
+
+    def test_an_explicit_default_port_in_host_is_allowed(self):
+        resp = self.behind_nginx(
+            "https://visdom.example.org", Host="visdom.example.org:443"
+        )
+        self.assertEqual(resp.code, 200)
+
+    def test_nginx_on_another_port_is_allowed_with_forwarded_port(self):
+        resp = self.behind_nginx(
+            "https://visdom.example.org:8443", **{"X-Forwarded-Port": "8443"}
+        )
+        self.assertEqual(resp.code, 200)
+
+    def test_nginx_on_another_port_without_forwarded_port_is_refused(self):
+        handlers.base_handlers._warned_unmatched_proxy_origin = False
+        with self.assertLogs(level="WARNING") as logs:
+            resp = self.behind_nginx("https://visdom.example.org:8443")
+        self.assertEqual(resp.code, 403)
+        self.assertIn("X-Forwarded-Port", "\n".join(logs.output))
+
+    def test_a_page_on_another_port_of_this_host_is_refused(self):
+        here = "localhost:%d" % self.get_http_port()
+        resp = self.post_from(
+            "/delete_env", {"eid": "victim"}, Origin="http://localhost:9", Host=here
+        )
+        self.assertEqual(resp.code, 403)
+        self.assertTrue(self.env_exists("victim"))
 
     def test_https_behind_a_proxy_that_sets_forwarded_proto_is_allowed(self):
         here = "localhost:%d" % self.get_http_port()
@@ -178,24 +218,49 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200)
         self.assertTrue(json.loads(resp.body)["success"])
 
-    # WebSockets are covered by tornado itself: WebSocketHandler.check_origin
-    # refuses a handshake whose Origin is not this server's own host.
+    # The socket handshake goes through the same check as the HTTP handlers.
 
-    async def open_socket(self, path, origin):
+    async def open_socket(self, path, **headers):
         here = "127.0.0.1:%d" % self.get_http_port()
-        request = HTTPRequest("ws://%s%s" % (here, path), headers={"Origin": origin})
+        request = HTTPRequest("ws://%s%s" % (here, path), headers=headers)
         return await websocket_connect(request)
+
+    async def assert_socket_refused(self, **headers):
+        for path in ("/socket", "/vis_socket"):
+            with self.assertRaises(HTTPClientError) as refused:
+                await self.open_socket(path, **headers)
+            self.assertEqual(refused.exception.code, 403, path)
+
+    async def assert_socket_opens(self, **headers):
+        for path in ("/socket", "/vis_socket"):
+            connection = await self.open_socket(path, **headers)
+            connection.close()
 
     @gen_test
     async def test_cross_site_websockets_are_refused(self):
-        for path in ("/socket", "/vis_socket"):
-            with self.assertRaises(HTTPClientError) as refused:
-                await self.open_socket(path, "http://attacker.example")
-            self.assertEqual(refused.exception.code, 403, path)
+        await self.assert_socket_refused(Origin="http://attacker.example")
+
+    @gen_test
+    async def test_websockets_marked_cross_site_are_refused(self):
+        # tornado before 6.6 compared Origin with Host only, and ignored this.
+        await self.assert_socket_refused(
+            Origin="http://127.0.0.1:%d" % self.get_http_port(),
+            **{"Sec-Fetch-Site": "cross-site"},
+        )
 
     @gen_test
     async def test_own_websockets_are_allowed(self):
-        here = "http://127.0.0.1:%d" % self.get_http_port()
-        for path in ("/socket", "/vis_socket"):
-            connection = await self.open_socket(path, here)
-            connection.close()
+        await self.assert_socket_opens(
+            Origin="http://127.0.0.1:%d" % self.get_http_port()
+        )
+
+    @gen_test
+    async def test_websockets_behind_a_proxy_that_rewrites_host_are_allowed(self):
+        # tornado's own check refused these: Host is the upstream address.
+        await self.assert_socket_opens(
+            Origin="https://visdom.example.org",
+            **{
+                "X-Forwarded-Host": "visdom.example.org",
+                "X-Forwarded-Proto": "https",
+            },
+        )
