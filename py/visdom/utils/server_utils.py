@@ -197,6 +197,7 @@ class LoginThrottle:
         max_failures=5,
         base_delay=30.0,
         max_delay=900.0,
+        max_entries=10_000,
         clock=time.monotonic,
     ):
         self._max_failures = max_failures
@@ -214,6 +215,16 @@ class LoginThrottle:
             )
         self._clock = clock
         self._lock = threading.Lock()
+        # The map is bounded here, not merely expired by idleness: new
+        # addresses arriving faster than old ones go quiet would otherwise
+        # grow it without bound, and every row they add is another row for
+        # the idle scan to walk. Admission makes room for an unseen client
+        # by dropping the longest-resident entry, and the scan runs when
+        # the clock crosses a window rather than on every operation --
+        # both in the methods below.
+        self._max_entries = max_entries
+        # The first moment at which the idle scan is worth a full pass.
+        self._prune_at = float("-inf")
         # key -> attempts reserved, failures confirmed, past lockouts,
         # locked-until, last-seen
         self._entries = {}
@@ -221,7 +232,7 @@ class LoginThrottle:
     def retry_after(self, key):
         """Seconds ``key`` still has to wait, or ``None`` when it may try."""
         with self._lock:
-            self._prune()
+            self._maintain()
             entry = self._entries.get(key)
             if entry is None:
                 return None
@@ -245,9 +256,19 @@ class LoginThrottle:
         """
         with self._lock:
             now = self._clock()
-            self._prune()
+            self._maintain()
             entry = self._entries.get(key)
             if entry is None:
+                # Forgetting by idleness alone cannot bound the map while
+                # new addresses keep arriving, so this -- the moment an
+                # unseen client is first counted -- is also the moment the
+                # cap is enforced: the longest-resident entry makes room,
+                # in constant time, no scan. A displaced client is handed
+                # a fresh budget; an attacker needs a network's worth of
+                # peers to profit from that, and a legitimate one meets
+                # no lockout at all.
+                if len(self._entries) >= self._max_entries:
+                    self._entries.pop(next(iter(self._entries)))
                 self._entries[key] = [1, 0, 0, 0.0, now]
                 return None
             if now < entry[3]:
@@ -281,7 +302,7 @@ class LoginThrottle:
         """
         with self._lock:
             now = self._clock()
-            self._prune()
+            self._maintain()
             entry = self._entries.get(key)
             if entry is None:
                 return 0.0
@@ -335,8 +356,32 @@ class LoginThrottle:
         exponent = min(entry[2], self._max_exponent)
         return min(self._base_delay * 2**exponent, self._max_delay)
 
+    def _maintain(self):
+        """Run the idle scan when the clock calls for it, not every caller.
+
+        The caller holds the lock. ``_prune`` walks the whole map, which
+        was affordable while the map held a lab's worth of clients -- but
+        high-cardinality traffic, a botnet or a /64 of IPv6, can present
+        more distinct addresses than a scan per operation affords, every
+        attempt then costing more than the last. Idleness is a property
+        of time, so the scan runs once the clock has crossed
+        ``max_delay`` since the previous one: at most one pass per window
+        whatever the request rate, and a client gone quiet past the
+        window is still forgotten on its very next contact, exactly as
+        before. Between scans the entry cap in ``admit`` is what keeps
+        the map bounded.
+        """
+        now = self._clock()
+        if now < self._prune_at:
+            return
+        self._prune_at = now + self._max_delay
+        self._prune()
+
     def _prune(self):
-        """Drop entries idle past ``max_delay``, so the map stays bounded.
+        """Drop entries idle past ``max_delay``, wherever they hide.
+
+        Scheduled by ``_maintain`` and bounded in count by ``admit``; the
+        scan itself is unchanged.
 
         The caller holds the lock. A client that keeps failing keeps its
         entry alive, and so does the lockout it earned: idleness is

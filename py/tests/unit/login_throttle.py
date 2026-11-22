@@ -300,3 +300,63 @@ def test_a_client_that_goes_quiet_is_forgotten():
         assert attempt(throttle, "10.0.0.1") == 0.0
 
     assert throttle.retry_after("10.0.0.1") is None
+
+
+def test_the_map_keeps_only_so_many_clients():
+    """Forgetting by idleness cannot bound the map; the cap can.
+
+    A flood of distinct addresses -- a botnet, a /64 of IPv6 -- would
+    otherwise grow the map without bound while their entries are still
+    young enough to keep. Admission makes room for an unseen client by
+    dropping the longest-resident entry, so the flood displaces the
+    earliest arrivals and never grows the map past the cap.
+    """
+    clock = Clock()
+    throttle = LoginThrottle(max_failures=5, max_entries=2, clock=clock)
+
+    for _ in range(3):
+        attempt(throttle, "10.0.0.1")
+    throttle.admit("10.0.0.2")
+    throttle.admit("10.0.0.3")
+
+    # The cap held: the earliest arrival made room for the newcomer,
+    # and the displaced client is back to a fresh budget.
+    assert len(throttle._entries) == 2
+    assert "10.0.0.1" not in throttle._entries
+    assert throttle.retry_after("10.0.0.1") is None
+    assert attempt(throttle, "10.0.0.1") == 0.0
+
+
+def test_the_idle_scan_runs_once_per_window_not_per_request():
+    """High-cardinality traffic must not make every login a full scan.
+
+    The idle scan walks the whole map, so it runs when the clock has
+    crossed a ``max_delay`` window, whatever the request rate between
+    windows. A client gone quiet past the window is still forgotten on
+    its next contact -- the schedule changes the cost, not the rule.
+    """
+    clock = Clock()
+    throttle = LoginThrottle(max_failures=5, max_delay=10.0, clock=clock)
+
+    # ``_maintain`` resolves ``self._prune``, so an instance attribute
+    # counting the passes observes exactly the scans the calls schedule.
+    passes = []
+    original = throttle._prune
+
+    def spy():
+        passes.append(original())
+
+    throttle._prune = spy
+
+    # A flood of distinct clients within one window: the scan runs once,
+    # at the first contact, and not again for any of them.
+    for i in range(100):
+        throttle.admit("10.0.{}.{}".format(i // 256, i % 256))
+    assert len(passes) == 1
+
+    # The window rolls over, and the very next contact scans again --
+    # and still forgets whoever went quiet before it did.
+    clock.advance(10.0)
+    assert throttle.admit("10.1.0.0") is None
+    assert len(passes) == 2
+    assert "10.0.0.0" not in throttle._entries
