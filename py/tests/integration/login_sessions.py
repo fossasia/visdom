@@ -24,6 +24,7 @@ import tornado.web
 
 from visdom.server import app as app_module
 from visdom.server.app import Application
+from visdom.server.handlers.web_handlers import IndexHandler
 from visdom.utils.server_utils import hash_password, session_token
 
 from testutils.http import VisdomHTTPTestCase
@@ -106,6 +107,21 @@ class TestLoginSessions(VisdomHTTPTestCase):
             "/", method="POST", body=body, headers={"X-Forwarded-Proto": "https"}
         )
         (set_cookie,) = tls.headers.get_list("Set-Cookie")
+        self.assertIn("; secure", set_cookie.lower())
+
+    def test_a_direct_tls_connection_stays_secure_whatever_the_header_says(self):
+        original = IndexHandler.prepare
+
+        async def as_if_over_tls(handler):
+            handler.request.protocol = "https"
+            return await original(handler)
+
+        body = json.dumps({"username": USERNAME, "password": OLD_LOGIN})
+        with patch.object(IndexHandler, "prepare", as_if_over_tls):
+            resp = self.fetch(
+                "/", method="POST", body=body, headers={"X-Forwarded-Proto": "http"}
+            )
+        (set_cookie,) = resp.headers.get_list("Set-Cookie")
         self.assertIn("; secure", set_cookie.lower())
 
     def test_without_client_hash_the_token_ignores_the_stored_hash(self):

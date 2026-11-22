@@ -1426,8 +1426,11 @@ class IndexHandler(BaseHandler):
             # Secure whenever the browser reached Visdom over https, directly
             # or through a proxy that says so, so it is never sent in clear.
             # Over plain http it cannot be, or the browser would drop it.
-            forwarded = self.request.headers.get("X-Forwarded-Proto", "")
-            scheme = forwarded.split(",")[0].strip().lower() or self.request.protocol
+            # A direct TLS connection is https whatever the header claims.
+            scheme = self.request.protocol
+            if scheme != "https":
+                forwarded = self.request.headers.get("X-Forwarded-Proto", "")
+                scheme = forwarded.split(",")[0].strip().lower() or scheme
             self.set_secure_cookie(
                 "user_password",
                 self.application.session_token,
