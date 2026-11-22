@@ -2450,6 +2450,15 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        if hasattr(features, "toarray"):
+            features = features.toarray()
+        try:
+            features = np.asarray(features)
+        except (ValueError, TypeError):
+            raise ValueError("features must be a 2D array")
+        if features.ndim != 2 or not np.issubdtype(features.dtype, np.number):
+            raise ValueError("features must be a 2D array")
+
         loading_message = {
             "content": {"isLoading": True},
             "type": "embeddings",
