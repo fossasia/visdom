@@ -23,6 +23,7 @@ fixture here points that at a temporary directory first, so nothing touches a
 real installation.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -31,6 +32,8 @@ import unittest
 from unittest.mock import patch
 
 import pytest
+from tornado.httputil import HTTPServerRequest
+from tornado.ioloop import IOLoop
 
 from visdom.server import app as app_module
 from visdom.server.app import Application
@@ -289,6 +292,68 @@ class TestLoginLockouts(LoginTestCase):
         self.assertTrue(
             any("user_password" in c for c in resp.headers.get_list("Set-Cookie"))
         )
+
+    def test_a_reoffender_is_told_the_doubled_wait(self):
+        """The header advertises the lockout that is actually coming.
+
+        The second lockout doubles, and ``Retry-After`` has to say so:
+        a client told 30 seconds for a lockout that holds it 60 comes
+        back early to a second refusal it was never warned about.
+        """
+        self.fail_five_times()
+        self.clock.now += 30.1
+        self.fail_five_times()
+
+        resp = self.login(password=WRONG_HASH)
+
+        self.assertEqual(resp.code, 429)
+        self.assertEqual(resp.headers["Retry-After"], "60")
+
+    def test_a_request_cancelled_mid_attempt_releases_its_reservation(self):
+        """An abandoned attempt hands its reservation back, unjudged.
+
+        A request abandoned mid-derivation delivers the cancellation as a
+        ``BaseException``, which the cleanup clause for ordinary failures
+        never catches: the reservation stayed counted against the client's
+        budget with no verdict ever releasing it, so enough abandoned
+        requests refused the client's later logins without a single failure
+        having been confirmed. Cancellation is not a verdict, so the fix is
+        to release the reservation rather than confirm a failure.
+        """
+
+        class DetachedConnection:
+            """Just enough connection for a handler built off a socket.
+
+            Tornado wires a close callback in the constructor; there is no
+            socket to wire here, and none is ever fired.
+            """
+
+            def set_close_callback(self, callback):
+                pass
+
+        request = HTTPServerRequest(method="POST", uri="/", headers={})
+        request.remote_ip = "203.0.113.7"
+        request.connection = DetachedConnection()
+        handler = web_handlers.IndexHandler(
+            self._app, request, server_state=self._app.server_state
+        )
+
+        async def abandoned(self, client):
+            raise asyncio.CancelledError
+
+        with patch.object(web_handlers.IndexHandler, "_attempt_login", abandoned):
+            for _ in range(5):
+                with self.assertRaises(asyncio.CancelledError):
+                    asyncio.run(handler.post(""))
+
+        # Every reservation was handed back: nothing was confirmed, no
+        # lockout is armed, and the client still has its whole budget --
+        # with the leak, the fifth reservation alone would have had
+        # ``admit`` refuse the next attempt with the base delay.
+        self.assertIsNone(
+            self._app.server_state.login_throttle.retry_after("203.0.113.7")
+        )
+        self.assertIsNone(self._app.server_state.login_throttle.admit("203.0.113.7"))
 
     def test_a_successful_login_forgets_the_failures(self):
         for _ in range(4):
