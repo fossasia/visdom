@@ -254,8 +254,16 @@ class TestLoginLockouts(LoginTestCase):
         self.fail_five_times()
 
         # Correct credentials, but the client is locked out, so the server
-        # does not even spend the derivation that would check them.
-        self.assertEqual(self.login().code, 429)
+        # does not even spend the derivation that would check them: the
+        # refusal lands at admission, before _attempt_login is entered.
+        with patch.object(
+            web_handlers,
+            "hash_password_off_loop",
+            wraps=web_handlers.hash_password_off_loop,
+        ) as derive:
+            self.assertEqual(self.login().code, 429)
+
+        self.assertEqual(derive.call_count, 0)
 
     def test_the_lockout_expires_and_lets_the_client_back_in(self):
         self.fail_five_times()
