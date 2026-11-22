@@ -83,6 +83,31 @@ def test_in_flight_attempts_count_against_the_limit():
     assert throttle.admit("10.0.0.1") == 30.0
 
 
+def test_a_burst_arms_only_when_the_fifth_failure_is_confirmed():
+    """Reservations alone do not arm the lockout; confirmed failures do.
+
+    A burst of five spends the limit at admission, but spending the
+    limit is not the same as five attempts failing: the lockout waits
+    for the fifth verdict to land, so a burst whose attempts were all
+    admitted and then abandoned by the client's own side has cost some
+    derivations, not a lockout.
+    """
+    clock = Clock()
+    throttle = LoginThrottle(max_failures=5, base_delay=30.0, clock=clock)
+
+    for _ in range(5):
+        assert throttle.admit("10.0.0.1") is None
+    for _ in range(4):
+        assert throttle.record_failure("10.0.0.1") == 0.0
+
+    # Four reservations confirmed: nothing armed yet.
+    assert throttle.retry_after("10.0.0.1") is None
+
+    # The fifth confirm arms the lockout, and only that confirm.
+    assert throttle.record_failure("10.0.0.1") == 30.0
+    assert throttle.retry_after("10.0.0.1") == 30.0
+
+
 def test_a_success_releases_the_outstanding_reservations():
     throttle = LoginThrottle(max_failures=5, clock=Clock())
 
@@ -142,16 +167,17 @@ def test_reoffending_forever_stays_at_the_cap():
     clock = Clock()
     throttle = LoginThrottle(base_delay=1.0, max_delay=900.0, clock=clock)
 
-    # Two attempts per lockout: one refused through the standing lockout,
-    # one admitted after it expires and confirmed into the next.
+    # One full lockout per turn -- five confirmed failures, then the wait
+    # served -- for four thousand lockouts, walking the exponent far
+    # past any value a float holds.
     for _ in range(4000):
-        delay = attempt(throttle, "10.0.0.1")
+        delay = lock_out(throttle, "10.0.0.1")
         assert delay <= 900.0
         clock.advance(delay)
 
-    # The client has reoffended thousands of times, well past any
-    # exponent a float holds, and the answer is still a delay.
-    assert attempt(throttle, "10.0.0.1") <= 900.0
+    # The client has reoffended thousands of times, and the very next
+    # lockout is the cap exactly.
+    assert lock_out(throttle, "10.0.0.1") == 900.0
 
 
 def test_a_login_that_gets_in_forgets_the_client():

@@ -214,7 +214,8 @@ class LoginThrottle:
             )
         self._clock = clock
         self._lock = threading.Lock()
-        # key -> attempts counted, past lockouts, locked-until, last-seen
+        # key -> attempts reserved, failures confirmed, past lockouts,
+        # locked-until, last-seen
         self._entries = {}
 
     def retry_after(self, key):
@@ -224,7 +225,7 @@ class LoginThrottle:
             entry = self._entries.get(key)
             if entry is None:
                 return None
-            wait = entry[2] - self._clock()
+            wait = entry[3] - self._clock()
             return wait if wait > 0 else None
 
     def admit(self, key):
@@ -246,31 +247,34 @@ class LoginThrottle:
             self._prune()
             entry = self._entries.get(key)
             if entry is None:
-                self._entries[key] = [1, 0, 0.0, now]
+                self._entries[key] = [1, 0, 0, 0.0, now]
                 return None
-            if now < entry[2]:
-                return entry[2] - now
-            if entry[0] >= self._max_failures:
-                # The limit is spent on attempts still in flight. Their
-                # failures arm the lockout when the verdicts land; until
-                # then this client waits out the delay those verdicts are
-                # about to earn.
+            if now < entry[3]:
+                return entry[3] - now
+            if entry[0] + entry[1] >= self._max_failures:
+                # The limit is spent on failures already confirmed and
+                # attempts still in flight alike. Their failures arm the
+                # lockout when the verdicts land; until then this client
+                # waits out the delay those verdicts are about to earn.
                 return self._base_delay
             entry[0] += 1
-            entry[3] = now
+            entry[4] = now
             return None
 
     def record_failure(self, key):
         """Confirm an admitted attempt as rejected; the seconds it earned.
 
-        The attempt was already counted at admission, so this is only the
-        verdict landing: the count reaching the limit arms the lockout,
-        doubling per reoffense and capped at ``max_delay``, and a confirm
-        refused during a standing lockout extends nothing -- that client
-        already costs nothing, and a steady stream of refused requests must
-        not wedge the lock open forever. A client a concurrent success has
-        forgotten is left forgotten: the reservation left with the entry
-        that held it.
+        The reservation ``admit`` took is released here and the verdict
+        counted on its own, because only confirmed failures arm a
+        lockout: a burst whose attempts were all admitted has spent the
+        client's limit, but the lockout waits for the fifth failure to
+        actually be confirmed. The confirmed count reaching the limit
+        arms a lockout doubling per reoffense and capped at
+        ``max_delay``, and a confirm refused during a standing lockout
+        extends nothing -- that client already costs nothing, and a
+        steady stream of refused requests must not wedge the lock open
+        forever. A client a concurrent success has forgotten is left
+        forgotten: the reservation left with the entry that held it.
         """
         with self._lock:
             now = self._clock()
@@ -278,16 +282,18 @@ class LoginThrottle:
             entry = self._entries.get(key)
             if entry is None:
                 return 0.0
-            entry[3] = now
-            if now < entry[2]:
-                return entry[2] - now
-            if entry[0] < self._max_failures:
-                return 0.0
+            entry[0] = max(entry[0] - 1, 0)
+            entry[4] = now
+            if now < entry[3]:
+                return entry[3] - now
             entry[1] += 1
-            entry[0] = 0
-            exponent = min(entry[1] - 1, self._max_exponent)
+            if entry[1] < self._max_failures:
+                return 0.0
+            entry[2] += 1
+            entry[1] = 0
+            exponent = min(entry[2] - 1, self._max_exponent)
             delay = min(self._base_delay * 2**exponent, self._max_delay)
-            entry[2] = now + delay
+            entry[3] = now + delay
             return delay
 
     def record_success(self, key):
@@ -309,7 +315,7 @@ class LoginThrottle:
         for key in [
             key
             for key, entry in self._entries.items()
-            if now - max(entry[3], entry[2]) >= self._max_delay
+            if now - max(entry[4], entry[3]) >= self._max_delay
         ]:
             del self._entries[key]
 
