@@ -5,7 +5,19 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    IO,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Text,
+    Tuple,
+    Union,
+)
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -14,6 +26,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
 _OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
+_SaveTarget = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes], IO[bytes]]
+_OptSaveTarget = Optional[_SaveTarget]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -217,7 +231,7 @@ class Visdom:
     def svg(
         self,
         svgstr: _OptStr = ...,
-        svgfile: _OptStr = ...,
+        svgfile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -226,14 +240,14 @@ class Visdom:
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
     def save_plotly_figure(
-        self, figure: Any, filepath: Text, **kwargs: Any
+        self, figure: Any, filepath: _SaveTarget, **kwargs: Any
     ) -> None: ...
     def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        save_path: _OptStr = ...,
+        save_path: _OptSaveTarget = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(
