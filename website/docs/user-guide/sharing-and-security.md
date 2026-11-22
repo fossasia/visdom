@@ -47,6 +47,8 @@ Never hardcode credentials in scripts or commit them to version control. Use a s
 
 Failed logins are counted per client address. Five rejected attempts lock that client out for 30 seconds; each later lockout doubles (60s, 120s, ...) up to 15 minutes, and a successful login clears the counter. While locked out the endpoint answers `429 Too Many Requests` with a `Retry-After` header, and the credentials are not even checked.
 
+Behind a reverse proxy the server sees every visitor as the proxy's own address, so their lockouts would pool into one shared budget. Start the server with `-use_forwarded_client_ip` and have the proxy forward the visitor's address, as in the [reverse proxy](#using-a-reverse-proxy) example, and each visitor's real address is counted separately.
+
 ### Connecting with credentials
 
 ```python
@@ -119,12 +121,18 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
 
 :::note
 The `Upgrade` and `Connection` headers are required for WebSocket support, which Visdom uses for real-time updates and callbacks.
+:::
+
+:::warning
+When the server is behind a proxy, start it with `visdom -use_forwarded_client_ip`. The proxy's own address then no longer stands in for every visitor, so the [brute-force protection](#brute-force-protection) counts each visitor's real address instead of pooling all of them into one budget. Only enable this flag when the server is reachable only through the proxy — a client that reaches the server directly could otherwise forge `X-Forwarded-For` and claim a different address on every attempt.
 :::
 
 ## Custom base URL

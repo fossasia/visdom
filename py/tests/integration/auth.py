@@ -289,6 +289,68 @@ class TestLoginLockouts(LoginTestCase):
 
         self.assertEqual(self.login().code, 200)
 
+    def test_a_spoofed_forwarded_address_does_not_dodge_the_lockout(self):
+        """Without the flag, a forwarded header is never read.
+
+        The default server keys by the transport peer, so a locked-out
+        client cannot buy itself a fresh budget by sending an ``X-Real-IP``
+        the server was never told to trust.
+        """
+
+        def attempt(forwarded_ip):
+            return self.fetch(
+                "/",
+                method="POST",
+                body=json.dumps({"username": USERNAME, "password": WRONG_HASH}),
+                headers={"Content-Type": "application/json", "X-Real-IP": forwarded_ip},
+            )
+
+        for _ in range(5):
+            self.assertEqual(attempt("203.0.113.1").code, 400)
+
+        # The fifth failure locked the transport peer. A different claimed
+        # address is the same peer, so the lockout follows.
+        self.assertEqual(attempt("203.0.113.2").code, 429)
+
+
+class TestLoginLockoutBehindAProxy(LoginTestCase):
+    """``-use_forwarded_client_ip``: a lockout counts one visitor, not the proxy.
+
+    The harness serves the application with ``xheaders`` on, which is exactly
+    what the flag turns on in production. Every request then arrives with the
+    proxy's address as its transport peer, and the forwarded header is what
+    says who actually asked -- so without the flag every visitor would pool
+    into the proxy's single lockout budget, and five failures from one of
+    them would lock the rest out too.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.clock = _SteppableClock()
+        self._app.server_state.login_throttle = LoginThrottle(clock=self.clock)
+
+    def get_httpserver_options(self):
+        return {"xheaders": True}
+
+    def login_as(self, forwarded_ip, password=WRONG_HASH):
+        return self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": USERNAME, "password": password}),
+            headers={"Content-Type": "application/json", "X-Real-IP": forwarded_ip},
+        )
+
+    def test_one_visitors_lockout_spares_the_others(self):
+        for _ in range(5):
+            self.assertEqual(self.login_as("203.0.113.1").code, 400)
+
+        self.assertEqual(self.login_as("203.0.113.1").code, 429)
+
+        # Same proxy, different visitor: a different bucket entirely, so the
+        # correct password still gets in while the proxy's other user is
+        # locked out.
+        self.assertEqual(self.login_as("203.0.113.2", password=CLIENT_HASH).code, 200)
+
 
 # -- Authorization on the routes ---------------------------------------------
 

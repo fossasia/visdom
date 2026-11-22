@@ -1408,7 +1408,11 @@ class IndexHandler(BaseHandler):
         # client cannot all pass the limit check while the earliest
         # failure is still in flight; each admitted attempt is then
         # confirmed as a failure or released by a success, whatever the
-        # request did in between.
+        # request did in between. Behind a reverse proxy every visitor
+        # shares the proxy's transport address; -use_forwarded_client_ip
+        # tells the server to read the address the proxy forwarded, so
+        # each visitor is counted separately rather than pooling everyone
+        # behind one budget.
         client = self.request.remote_ip
         if self.login_enabled:
             wait = self.login_throttle.admit(client)
