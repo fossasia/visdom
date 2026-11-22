@@ -16,6 +16,7 @@ holds nothing that could be cracked back into the password.
 """
 
 import hashlib
+import json
 import os
 from unittest.mock import patch
 
@@ -24,7 +25,7 @@ import tornado.web
 
 from visdom.server import app as app_module
 from visdom.server.app import Application
-from visdom.utils.server_utils import hash_password
+from visdom.utils.server_utils import hash_password, session_token
 
 from testutils.http import VisdomHTTPTestCase
 
@@ -97,6 +98,24 @@ class TestLoginSessions(VisdomHTTPTestCase):
         (set_cookie,) = resp.headers.get_list("Set-Cookie")
         self.assertIn("httponly", set_cookie.lower())
         self.assertIn("samesite=lax", set_cookie.lower())
+
+    def test_cookie_is_secure_when_reached_over_https(self):
+        client_hash = hashlib.sha256(OLD_PASSWORD.encode("utf-8")).hexdigest()
+        body = json.dumps({"username": USERNAME, "password": client_hash})
+        plain = self.fetch("/", method="POST", body=body)
+        (set_cookie,) = plain.headers.get_list("Set-Cookie")
+        self.assertNotIn("; secure", set_cookie.lower())
+        tls = self.fetch(
+            "/", method="POST", body=body, headers={"X-Forwarded-Proto": "https"}
+        )
+        (set_cookie,) = tls.headers.get_list("Set-Cookie")
+        self.assertIn("; secure", set_cookie.lower())
+
+    def test_without_client_hash_the_token_ignores_the_stored_hash(self):
+        stored = {"username": USERNAME, "password": hash_password("x")}
+        self.assertNotEqual(
+            session_token(COOKIE_SECRET, stored), session_token(COOKIE_SECRET, stored)
+        )
 
     def test_session_survives_a_restart_with_the_same_password(self):
         cookie = self.login(OLD_PASSWORD)

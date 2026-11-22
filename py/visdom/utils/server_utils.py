@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import errno
+import secrets
 from collections import OrderedDict
 
 import tornado.escape
@@ -149,10 +150,14 @@ def session_token(cookie_secret, user_credential):
     same across restarts, changes when the username or password does -- which
     ends every session issued for the old credential -- and, unlike the
     stored password hash, tells someone who reads the cookie nothing they
-    could crack offline. Without ``client_hash`` the stored hash stands in.
+    could crack offline.
+
+    A caller that builds the application without ``client_hash`` gets a
+    random seed instead, so the token never depends on the stored hash, and
+    its sessions last only as long as the process.
     """
     username = user_credential["username"]
-    seed = user_credential.get("client_hash") or user_credential["password"]
+    seed = user_credential.get("client_hash") or secrets.token_hex(32)
     mac = hmac.new(
         cookie_secret.encode("utf-8"),
         "{0}\0{1}".format(username, seed).encode("utf-8"),

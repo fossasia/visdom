@@ -1423,11 +1423,17 @@ class IndexHandler(BaseHandler):
             # script injected into the page should not be able to either.
             # SameSite=Lax keeps a page on another site from sending it with
             # a POST or a fetch, while following a link to Visdom still works.
+            # Secure whenever the browser reached Visdom over https, directly
+            # or through a proxy that says so, so it is never sent in clear.
+            # Over plain http it cannot be, or the browser would drop it.
+            forwarded = self.request.headers.get("X-Forwarded-Proto", "")
+            scheme = forwarded.split(",")[0].strip().lower() or self.request.protocol
             self.set_secure_cookie(
                 "user_password",
                 self.application.session_token,
                 httponly=True,
                 samesite="Lax",
+                secure=scheme == "https",
             )
         else:
             self.set_status(400)
