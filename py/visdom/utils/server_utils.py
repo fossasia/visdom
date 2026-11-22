@@ -240,7 +240,8 @@ class LoginThrottle:
         or ``record_success``. Any other value is the seconds to wait: the
         remainder of a standing lockout, or -- when the limit is already
         spent on attempts not yet answered -- the delay their failures are
-        about to arm.
+        about to arm, doubled for a client that already has lockouts
+        behind it, as the lockout that is coming will be.
         """
         with self._lock:
             now = self._clock()
@@ -255,8 +256,10 @@ class LoginThrottle:
                 # The limit is spent on failures already confirmed and
                 # attempts still in flight alike. Their failures arm the
                 # lockout when the verdicts land; until then this client
-                # waits out the delay those verdicts are about to earn.
-                return self._base_delay
+                # waits out the delay those verdicts are about to earn,
+                # which for a client that reoffends is the doubled wait
+                # the next lockout will hold it for.
+                return self._next_lockout_delay(entry)
             entry[0] += 1
             entry[4] = now
             return None
@@ -300,6 +303,37 @@ class LoginThrottle:
         """Forget a client that got in: lockouts are for failures only."""
         with self._lock:
             self._entries.pop(key, None)
+
+    def release(self, key):
+        """Give back a reservation ``admit`` took, without judging it.
+
+        Cancellation is not a verdict: a request abandoned mid-derivation
+        never found out whether the credentials were right, so it must not
+        count as a failure -- but the reservation it took must not stay
+        either, or a client that keeps abandoning attempts would spend its
+        whole limit on requests that were never answered. The reservation
+        is returned and nothing else changes; ``asyncio.CancelledError``
+        escapes ``except Exception``, so the handler has to hand it back
+        explicitly.
+        """
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return
+            entry[0] = max(entry[0] - 1, 0)
+            entry[4] = self._clock()
+
+    def _next_lockout_delay(self, entry):
+        """The delay the next lockout for the entry would arm at.
+
+        The caller holds the lock, and the entry carries the lockouts the
+        client has already served. The lockout the next confirmed failure
+        past the limit arms is doubled per past one and capped as every
+        lockout is, so this is also what a refusal during the arming
+        phase advertises: the wait the client is actually about to serve.
+        """
+        exponent = min(entry[2], self._max_exponent)
+        return min(self._base_delay * 2**exponent, self._max_delay)
 
     def _prune(self):
         """Drop entries idle past ``max_delay``, so the map stays bounded.

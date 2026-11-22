@@ -1422,6 +1422,15 @@ class IndexHandler(BaseHandler):
                 return
             try:
                 await self._attempt_login(client)
+            except asyncio.CancelledError:
+                # Cancellation is not a verdict, but it took a reservation
+                # on the way in. CancelledError is a BaseException, so the
+                # clause below never sees it -- the reservation has to be
+                # handed back here, or requests abandoned mid-derivation
+                # would spend the client's whole limit while never being
+                # judged at all.
+                self.login_throttle.release(client)
+                raise
             except Exception:
                 # The attempt failed before it could be judged -- a body
                 # that is not the login form, a missing field -- and it

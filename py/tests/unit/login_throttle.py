@@ -83,6 +83,29 @@ def test_in_flight_attempts_count_against_the_limit():
     assert throttle.admit("10.0.0.1") == 30.0
 
 
+def test_the_arming_phase_advertises_the_next_lockouts_delay():
+    """A reoffender is told the doubled wait, not the base one.
+
+    While the failures that will arm the next lockout are still in
+    flight, the refusal used to quote the base delay whatever the client
+    had behind it, so a client that had already earned doubling was told
+    to wait 30 seconds for a lockout that would hold it 60.
+    """
+    clock = Clock()
+    throttle = LoginThrottle(
+        max_failures=5, base_delay=30.0, max_delay=900.0, clock=clock
+    )
+
+    lock_out(throttle, "10.0.0.1")
+    clock.advance(30.0)
+
+    # The second burst is all in flight; the client already has one
+    # lockout behind it, so the next one is the doubled one.
+    for _ in range(5):
+        assert throttle.admit("10.0.0.1") is None
+    assert throttle.admit("10.0.0.1") == 60.0
+
+
 def test_a_burst_arms_only_when_the_fifth_failure_is_confirmed():
     """Reservations alone do not arm the lockout; confirmed failures do.
 
@@ -116,6 +139,51 @@ def test_a_success_releases_the_outstanding_reservations():
     throttle.record_success("10.0.0.1")
 
     # The client was forgotten whole, reservations and all.
+    assert throttle.admit("10.0.0.1") is None
+
+
+def test_a_cancelled_attempt_releases_its_reservation():
+    """Abandoning an attempt must not spend the client's budget.
+
+    ``asyncio.CancelledError`` is a ``BaseException``, so the cleanup clause
+    for ordinary failures never saw it: the reservation stayed counted
+    against the limit with no verdict ever releasing it, and a client that
+    kept abandoning requests -- a page closed mid-submission, a shutdown --
+    was refused logins without a single failure having been confirmed.
+    """
+    throttle = LoginThrottle(max_failures=5, base_delay=30.0, clock=Clock())
+
+    for _ in range(5):
+        assert throttle.admit("10.0.0.1") is None
+        throttle.release("10.0.0.1")
+
+    # The whole budget is back: a fresh attempt is admitted, not refused
+    # with the delay the leaked reservations would have quoted.
+    assert throttle.admit("10.0.0.1") is None
+    throttle.release("10.0.0.1")
+
+
+def test_a_release_never_counts_as_a_failure():
+    """Cancellation is not a verdict, so it arms nothing either."""
+    clock = Clock()
+    throttle = LoginThrottle(max_failures=5, base_delay=30.0, clock=clock)
+
+    for _ in range(10):
+        assert throttle.admit("10.0.0.1") is None
+        throttle.release("10.0.0.1")
+
+    assert throttle.retry_after("10.0.0.1") is None
+
+    # No lockout was armed, and no failure was confirmed: the client still
+    # needs five fresh judged failures before one is.
+    assert lock_out(throttle, "10.0.0.1") == 30.0
+
+
+def test_releasing_a_client_the_throttle_never_saw_is_a_noop():
+    throttle = LoginThrottle(max_failures=5, clock=Clock())
+
+    throttle.release("10.0.0.1")
+
     assert throttle.admit("10.0.0.1") is None
 
 
