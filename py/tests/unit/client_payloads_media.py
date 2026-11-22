@@ -34,6 +34,7 @@ asserted here.
 
 import base64
 import io
+import os
 import sys
 from unittest.mock import patch
 
@@ -795,6 +796,62 @@ def test_audio_accepts_a_stereo_tensor(capture_send):
     assert "<audio controls>" in content(sent)
 
 
+def _wav(sent):
+    """Decode the WAV visdom embedded in the pane."""
+    import base64
+    import io
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[1]
+
+
+def _expected_wav(samples):
+    """What audio() writes for (N,) or (N, 2) samples: scaled to int16."""
+    return np.int16(samples / np.max(np.abs(samples)) * 32767)
+
+
+@pytest.mark.parametrize("shape", [(1, 64), (64, 1)], ids=["1xN", "Nx1"])
+def test_audio_plays_a_single_row_or_column_as_mono(capture_send, shape):
+    wave = np.sin(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=wave.reshape(shape)))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(wave))
+
+
+def test_audio_accepts_channels_first_stereo(capture_send):
+    """torchaudio and librosa return (2, N); each row stays its own channel."""
+    left = np.sin(np.linspace(0, 6, 64))
+    right = 0.5 * np.cos(np.linspace(0, 6, 64))
+    sent = capture_send(lambda v: v.audio(tensor=np.stack([left, right])))
+    np.testing.assert_array_equal(
+        _wav(sent), _expected_wav(np.stack([left, right], axis=1))
+    )
+
+
+def test_audio_channels_first_matches_channels_last(capture_send):
+    stereo = np.random.RandomState(0).rand(64, 2) - 0.5
+    first = capture_send(lambda v: v.audio(tensor=stereo.T.copy()))
+    last = capture_send(lambda v: v.audio(tensor=stereo))
+    assert content(first) == content(last)
+
+
+@pytest.mark.parametrize(
+    "tensor, frames",
+    [
+        (np.array([[0.5, -0.25], [0.25, 0.75]]), [[0.5, -0.25], [0.25, 0.75]]),
+        (np.array([[0.5, -0.25]]), [[0.5, -0.25]]),
+        (np.array([[0.5], [-0.25]]), [[0.5, -0.25]]),
+    ],
+    ids=["2x2", "1x2", "2x1"],
+)
+def test_audio_keeps_short_stereo_as_stereo(capture_send, tensor, frames):
+    """(2, 2) and (1, 2) stay (N, 2) frames as before; (2, 1) is one frame."""
+    sent = capture_send(lambda v: v.audio(tensor=tensor))
+    np.testing.assert_array_equal(_wav(sent), _expected_wav(np.array(frames)))
+
+
 @pytest.mark.parametrize("extension", ["wav", "mp3", "ogg", "flac"])
 def test_audio_maps_the_file_extension_to_a_mime_type(
     capture_send, tmp_path, extension
@@ -803,6 +860,35 @@ def test_audio_maps_the_file_extension_to_a_mime_type(
     path.write_bytes(b"not really audio")
     sent = capture_send(lambda v: v.audio(audiofile=str(path)))
     assert 'type="audio/{}"'.format(extension) in content(sent)
+
+
+def test_audio_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
+
+
+class _BytesPath:
+    def __init__(self, path):
+        self._path = os.fsencode(path)
+
+    def __fspath__(self):
+        return self._path
+
+
+def test_audio_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=_BytesPath(path)))
+    assert 'type="audio/wav"' in content(sent)
+
+
+def test_audio_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "café_音频_test.wav"
+    path.write_bytes(b"RIFF....WAVE")
+    sent = capture_send(lambda v: v.audio(audiofile=path))
+    assert 'type="audio/wav"' in content(sent)
 
 
 def test_audio_escapes_the_caption(capture_send):
@@ -827,11 +913,158 @@ def test_audio_rejects_an_unknown_file_type(offline_client, tmp_path):
     [
         ({}, "should specify audio tensor or file"),
         (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((6, 100))), "tensor should be 1D vector or 2D matrix"),
     ],
 )
 def test_audio_rejects_malformed_input(offline_client, kwargs, message):
     with pytest.raises(AssertionError, match=message):
         offline_client.audio(**kwargs)
+
+
+def _wav_rate(sent):
+    """The sample rate in the header of the WAV that audio() embedded."""
+    import re
+
+    import scipy.io.wavfile
+
+    data = re.search(r"base64,([^\"]+)", content(sent)).group(1)
+    return scipy.io.wavfile.read(io.BytesIO(base64.b64decode(data)))[0]
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [16000, 16e3, 22050.0, np.float32(16000), np.int64(8000), np.array(16000)],
+)
+def test_audio_accepts_a_whole_number_sample_rate(capture_send, rate):
+    """16e3 or a rate read from a config is a float, which used to crash."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == int(rate)
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize("make", ["int", "float", "one_element"])
+def test_audio_accepts_a_sample_rate_tensor(capture_send, make):
+    """torch.tensor(16000) worked before; float and 1-element tensors too now."""
+    torch = pytest.importorskip("torch")
+    rate = {
+        "int": torch.tensor(16000),
+        "float": torch.tensor(16000.0),
+        "one_element": torch.tensor([16000]),
+    }[make]
+    sent = capture_send(
+        lambda v: v.audio(tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate})
+    )
+    assert _wav_rate(sent) == 16000
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is int
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [22050.5, 0, -16000, 2**32, 10**400, float("nan"), float("inf"), True, "16000"],
+    ids=[
+        "fraction",
+        "zero",
+        "negative",
+        "2**32",
+        "huge_int",
+        "nan",
+        "inf",
+        "bool",
+        "str",
+    ],
+)
+def test_audio_rejects_an_invalid_sample_rate(offline_client, rate):
+    with pytest.raises(ValueError, match="positive whole number"):
+        offline_client.audio(
+            tensor=np.sin(np.arange(64)), opts={"sample_frequency": rate}
+        )
+
+
+@pytest.mark.parametrize(
+    "wave, limit",
+    [
+        (np.sin(np.arange(64)), 2**31 - 1),
+        (np.sin(np.arange(128)).reshape(64, 2), 2**30 - 1),
+        (np.array([[0.5, -0.5]]), 2**30 - 1),
+        (np.sin(np.arange(128)).reshape(2, 64), 2**30 - 1),
+        (np.sin(np.arange(64)).reshape(1, 64), 2**31 - 1),
+    ],
+    ids=["mono", "stereo", "one_stereo_frame", "channels_first", "one_channel_first"],
+)
+def test_audio_sample_rate_limit_counts_the_channels(capture_send, wave, limit):
+    """Bytes per second (rate * channels * 2) must fit the 32-bit header too."""
+    sent = capture_send(
+        lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit})
+    )
+    assert _wav_rate(sent) == limit
+    with pytest.raises(ValueError, match="up to {}".format(limit)):
+        capture_send(
+            lambda v: v.audio(tensor=wave, opts={"sample_frequency": limit + 1})
+        )
+
+
+@requires_assertions
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({}, "should specify audio tensor or file"),
+        (dict(tensor=np.zeros((3, 3))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((3, 64))), "tensor should be 1D vector or 2D matrix"),
+        (dict(tensor=np.zeros((4, 2, 2))), "tensor should be 1D vector or 2D matrix"),
+    ],
+    ids=["nothing", "three_columns", "three_channels_first", "3d"],
+)
+def test_audio_checks_the_tensor_before_the_sample_rate(
+    offline_client, kwargs, message
+):
+    """A malformed tensor is reported as such, not as a bad sample rate."""
+    with pytest.raises(AssertionError, match=message):
+        offline_client.audio(opts={"sample_frequency": 0}, **kwargs)
+
+
+@pytest.fixture
+def clip(tmp_path):
+    path = tmp_path / "clip.mp3"
+    path.write_bytes(b"not really audio")
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [16000, 48000.0, 22050.5, 0, -16000, "16000"],
+    ids=["int", "float", "fraction", "zero", "negative", "str"],
+)
+def test_audio_passes_a_file_sample_rate_through(capture_send, clip, rate):
+    """A file plays at its own rate, so the option is sent as it was given."""
+    sent = capture_send(
+        lambda v: v.audio(audiofile=clip, opts={"sample_frequency": rate})
+    )
+    assert sent["payload"]["opts"]["sample_frequency"] == rate
+    assert type(sent["payload"]["opts"]["sample_frequency"]) is type(rate)
+
+
+def test_audio_keeps_the_default_sample_rate_for_a_file(capture_send, clip):
+    sent = capture_send(lambda v: v.audio(audiofile=clip))
+    assert sent["payload"]["opts"]["sample_frequency"] == 44100
+
+
+@pytest.mark.parametrize(
+    "opts",
+    [{}, {"sample_frequency": 16e3}, {"sample_frequency": 8000, "caption": "a"}],
+    ids=["empty", "float_rate", "rate_and_caption"],
+)
+@pytest.mark.parametrize("source", ["tensor", "file"])
+def test_audio_leaves_the_callers_opts_alone(capture_send, clip, opts, source):
+    """The rate, height and width are set on a copy, not on the caller's dict."""
+    opts, before = dict(opts), dict(opts)  # parametrize shares its dicts
+    if source == "tensor":
+        capture_send(lambda v: v.audio(tensor=np.sin(np.arange(64)), opts=opts))
+    else:
+        capture_send(lambda v: v.audio(audiofile=clip, opts=opts))
+    assert opts == before
+    assert all(type(opts[k]) is type(before[k]) for k in before)
 
 
 # ----------------------------------------------------------------- video ----
@@ -844,6 +1077,27 @@ def test_video_is_sent_as_a_text_pane_holding_a_player(capture_send, tmp_path):
     assert sent["payload"]["data"][0]["type"] == "text"
     assert "<video controls" in content(sent)
     assert "data:video/mp4;base64," in content(sent)
+
+
+def test_video_accepts_pathlib_path(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_bytes_pathlike(capture_send, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=_BytesPath(path)))
+    assert 'type="video/mp4"' in content(sent)
+
+
+def test_video_accepts_non_ascii_path(capture_send, tmp_path):
+    path = tmp_path / "vidéo_café_動画.mp4"
+    path.write_bytes(b"not really video")
+    sent = capture_send(lambda v: v.video(videofile=path))
+    assert 'type="video/mp4"' in content(sent)
 
 
 @pytest.mark.parametrize(

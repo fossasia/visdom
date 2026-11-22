@@ -961,6 +961,7 @@ _PROXIED = frozenset(
         "properties",
         "quiver",
         "replay_log",
+        "restore_run",
         "roc_curve",
         "sankey",
         "save",
