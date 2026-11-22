@@ -45,7 +45,7 @@ Never hardcode credentials in scripts or commit them to version control. Use a s
 
 ### Brute-force protection
 
-Failed logins are counted per client address. Five rejected attempts lock that client out for 30 seconds; each later lockout doubles (60s, 120s, ...) up to 15 minutes, and a successful login clears the counter. While locked out the endpoint answers `429 Too Many Requests` with a `Retry-After` header, and the credentials are not even checked.
+Failed logins are counted per client address. Five rejected attempts lock that client out for 30 seconds; each later lockout doubles (60s, 120s, ...) up to 15 minutes, and a successful login clears the counter. While locked out the endpoint answers `429 Too Many Requests` with a `Retry-After` header, and the credentials are not even checked — the login form shows the advertised wait rather than reporting a wrong password.
 
 Behind a reverse proxy the server sees every visitor as the proxy's own address, so their lockouts would pool into one shared budget. Start the server with `-use_forwarded_client_ip` and have the proxy forward the visitor's address, as in the [reverse proxy](#using-a-reverse-proxy) example, and each visitor's real address is counted separately.
 

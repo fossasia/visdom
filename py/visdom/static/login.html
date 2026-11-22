@@ -54,6 +54,17 @@ LICENSE file in the root directory of this source tree.
                   body: dataToSend,
               })
                   .then((response) => {
+                      if (response.status === 429) {
+                          // The server locked this client out after too many
+                          // failed logins, without checking the credentials:
+                          // the right password would have been refused too.
+                          // Retry-After says when trying again is worthwhile.
+                          const wait = response.headers.get('Retry-After');
+                          document.getElementById("errorMessage").textContent =
+                              "Too many failed attempts. Try again in " +
+                              (wait ? wait + " seconds." : "a moment.");
+                          return;
+                      }
                       if (!response.ok) {
                           throw new Error('Invalid login');
                       }

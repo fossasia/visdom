@@ -104,6 +104,19 @@ class TestLoginPage(LoginTestCase):
         self.assertEqual(resp.code, 200)
         self.assertIn("Visdom Login", resp.body.decode())
 
+    def test_the_form_explains_a_lockout_instead_of_calling_it_a_bad_password(self):
+        """A 429 is not a wrong password: the form shows the advertised wait.
+
+        The server never checks the credentials once a client is locked
+        out, so telling a user with the right password that it is wrong
+        would send them hunting for a typo that is not there. The page
+        has to branch on the 429 and say what ``Retry-After`` says.
+        """
+        page = self.fetch("/").body.decode()
+
+        self.assertIn("response.status === 429", page)
+        self.assertIn("Retry-After", page)
+
     def test_the_dashboard_is_not_served_to_a_stranger(self):
         self.assertNotIn("visdom-container", self.fetch("/").body.decode())
 
