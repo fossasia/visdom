@@ -116,7 +116,8 @@ def _gpu_plots(reader):
             (GPU_MEM_WIN, "GPU memory (MB)", reader.mem),
         ):
             try:
-                read(handle)
+                if read(handle) is None:
+                    continue
             except Exception:
                 continue
             name = "gpu{}".format(i)

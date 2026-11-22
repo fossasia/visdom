@@ -689,6 +689,7 @@ class TestGpu(unittest.TestCase):
             [(c.kwargs["win"], c.kwargs["Y"]) for c in calls],
             [(GPU_MEM_WIN, [2048])],
         )
+        monitor._gpu._amdsmi.amdsmi_get_gpu_activity.assert_called_once()
 
     def test_one_failing_gpu_keeps_the_others(self):
         monitor = self._gpu_monitor({"pynvml": _fake_nvml(), "amdsmi": None})
