@@ -695,3 +695,37 @@ def test_dual_axis_lines_explicit_xtype_overrides_date(capture_send):
         )
     )
     assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+@pytest.mark.parametrize(
+    "invalid_x",
+    [
+        [object(), object()],
+        [{"a": 1}, {"b": 2}],
+        [None, None],
+        [True, False],
+        [datetime.date(2023, 1, 1), object()],
+    ],
+)
+def test_dual_axis_lines_rejects_invalid_x_element_types(offline_client, invalid_x):
+    with pytest.raises(
+        TypeError,
+        match="values of X must be numeric, datetime, or string categories",
+    ):
+        offline_client.dual_axis_lines(
+            X=invalid_x,
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+
+
+def test_dual_axis_lines_accepts_object_array_of_numbers(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array([1, 2], dtype=object),
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent["payload"]["data"][0]["x"] == [1.0, 2.0]
+    assert "xaxis" not in sent["payload"]["layout"]

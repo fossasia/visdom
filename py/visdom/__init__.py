@@ -5096,10 +5096,17 @@ class Visdom(object):
         assert X.ndim == 1, "values of X should be one-dimensional"
 
         inferred_xtype = None
-        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.datetime64):
+        if hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
+            X = X.astype(float).tolist()
+        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.datetime64):
             X = X.astype(str).tolist()
             inferred_xtype = "date"
-        elif any(
+        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character):
+            X = X.astype(str).tolist()
+            inferred_xtype = "category"
+        elif len(X) == 0:
+            X = []
+        elif all(
             isinstance(val, (datetime.date, datetime.datetime, np.datetime64))
             for val in X
         ):
@@ -5107,20 +5114,26 @@ class Visdom(object):
                 val.isoformat() if hasattr(val, "isoformat") else str(val) for val in X
             ]
             inferred_xtype = "date"
-        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.number):
-            X = X.astype(float).tolist()
-        elif hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character):
-            X = X.astype(str).tolist()
+        elif all(isinstance(val, str) for val in X):
+            X = [str(val) for val in X]
             inferred_xtype = "category"
-        elif any(isinstance(val, str) for val in X):
-            X = [str(value) for value in X]
+        elif all(
+            isinstance(val, (int, float, np.number))
+            and not isinstance(val, (bool, np.bool_))
+            for val in X
+        ):
+            X = [float(val) for val in X]
+        elif all(
+            isinstance(val, (str, int, float, np.number))
+            and not isinstance(val, (bool, np.bool_))
+            for val in X
+        ) and any(isinstance(val, str) for val in X):
+            X = [str(val) for val in X]
             inferred_xtype = "category"
         else:
-            try:
-                X = X.astype(float).tolist()
-            except (ValueError, TypeError):
-                X = [str(value) for value in X]
-                inferred_xtype = "category"
+            raise TypeError(
+                "values of X must be numeric, datetime, or string categories"
+            )
 
         Y1 = Y1.astype(float).tolist()
         Y2 = Y2.astype(float).tolist()
