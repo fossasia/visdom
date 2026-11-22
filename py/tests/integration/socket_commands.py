@@ -229,6 +229,48 @@ def test_undo_of_an_unknown_environment_is_a_noop(env):
     assert commands(sub) == ["register", "layout_update", "env_update"]
 
 
+def reopen(env):
+    """A window created under ``win_0`` after it was closed, as an append does."""
+    reopened = pane(content={"data": [{"x": [3], "y": [3]}], "layout": {}})
+    env.state["expt"]["jsons"]["win_0"] = reopened
+    return reopened
+
+
+def test_undo_leaves_a_reopened_pane_alone(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopened = reopen(env)
+
+    send(sub, cmd="undo", eid="expt")
+
+    assert env.state["expt"]["jsons"]["win_0"] is reopened
+
+
+def test_undo_restores_the_pane_under_a_new_id_when_its_id_is_taken(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopen(env)
+
+    send(sub, cmd="undo", eid="expt")
+
+    [restored] = [p for w, p in env.state["expt"]["jsons"].items() if w != "win_0"]
+    assert restored["content"] == pane()["content"]
+    assert env.state["expt"]["jsons"][restored["id"]] is restored
+
+
+def test_a_taken_id_does_not_block_older_closes(env):
+    env.state["expt"]["jsons"]["win_1"] = pane("win_1")
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_1")
+    send(sub, cmd="close", eid="expt", data="win_0")
+    reopen(env)
+
+    send(sub, cmd="undo", eid="expt")
+    send(sub, cmd="undo", eid="expt")
+
+    assert "win_1" in env.state["expt"]["jsons"]
+
+
 # -- delete_env --------------------------------------------------------------
 
 
