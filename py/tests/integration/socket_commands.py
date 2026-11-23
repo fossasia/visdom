@@ -312,6 +312,27 @@ def test_save_repoints_the_socket_at_the_new_environment(env):
     assert sub.eid == "copy"
 
 
+@pytest.mark.parametrize("layout", [[], None, "wide"], ids=["list", "null", "string"])
+def test_save_keeps_the_panes_but_not_a_layout_that_is_not_an_object(env, layout):
+    sub = open_sub(env)
+
+    send(sub, cmd="save", eid="copy", prev_eid="expt", data=layout)
+
+    assert "win_0" in env.state["copy"]["jsons"]
+    assert env.state["copy"]["reload"] == {}
+    assert env.storage.load_env("copy")["reload"] == {}
+
+
+def test_save_tells_the_client_its_layout_was_not_saved(env):
+    sub = open_sub(env)
+
+    send(sub, cmd="save", eid="copy", prev_eid="expt", data="wide")
+
+    note = last(sub, "notification")
+    assert note["data"]["type"] == "warning"
+    assert "layout" in note["data"]["message"]
+
+
 def test_save_without_a_known_source_is_a_noop(env):
     sub = open_sub(env)
 
@@ -435,6 +456,18 @@ def test_layout_item_update_records_the_position(env):
     send(sub, cmd="layout_item_update", eid="expt", win="win_0", data=[0, 0, 4, 4])
 
     assert env.state["expt"]["reload"]["win_0"] == [0, 0, 4, 4]
+
+
+@pytest.mark.parametrize("layout", [[], None, "wide"], ids=["list", "null", "string"])
+def test_layout_item_update_starts_afresh_over_a_layout_that_is_not_an_object(
+    env, layout
+):
+    env.state["expt"]["reload"] = layout
+    sub = open_sub(env)
+
+    send(sub, cmd="layout_item_update", eid="expt", win="win_0", data=[0, 0, 4, 4])
+
+    assert env.state["expt"]["reload"] == {"win_0": [0, 0, 4, 4]}
 
 
 @pytest.mark.parametrize(
