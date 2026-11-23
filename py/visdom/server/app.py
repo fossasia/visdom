@@ -105,7 +105,6 @@ tornado_settings = {
     "debug": "/dbg/" in __file__,
     "static_path": get_visdom_path("static"),
     "template_path": get_visdom_path("static"),
-    "compiled_template_cache": False,
 }
 
 
