@@ -297,17 +297,16 @@ def test_a_socket_with_a_key_waits_before_it_reconnects(monkeypatch):
     assert waits == [3, 3]
 
 
-def test_keyed_socket_read_timeouts_preserve_idle_connections(monkeypatch):
+def test_keyed_socket_stop_aborts_read_and_cleans_up(monkeypatch):
     client = _socket_client(1)
     ws = Mock()
     ws.getstatus.return_value = 101
-    ws.recv.side_effect = [
-        websocket.WebSocketTimeoutException("idle"),
-        '{"command": "alive", "data": "vis_alive"}',
-        websocket.WebSocketTimeoutException("idle again"),
-        "event",
-        "",
-    ]
+
+    def stop_during_read():
+        client.use_socket = False
+        raise OSError("read interrupted by shutdown")
+
+    ws.recv.side_effect = stop_during_read
     connect = Mock(return_value=ws)
     monkeypatch.setattr("visdom.websocket.create_connection", connect)
     on_message, on_error, on_close = Mock(), Mock(), Mock()
@@ -330,14 +329,13 @@ def test_keyed_socket_read_timeouts_preserve_idle_connections(monkeypatch):
         timeout=20,
         **options,
     )
-    ws.settimeout.assert_called_once_with(1)
-    assert [call.args[1] for call in on_message.call_args_list] == [
-        '{"command": "alive", "data": "vis_alive"}',
-        "event",
-    ]
+    ws.settimeout.assert_called_once_with(None)
+    on_message.assert_not_called()
     on_error.assert_not_called()
-    ws.close.assert_called_once_with()
+    ws.abort.assert_called_once_with()
+    ws.shutdown.assert_called_once_with()
     on_close.assert_called_once_with(ws)
+    assert client._keyed_websocket is None
 
 
 def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):

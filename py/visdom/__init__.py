@@ -1496,6 +1496,18 @@ class Visdom(object):
             if self.use_socket:
                 time.sleep(3)
 
+    @property
+    def use_socket(self):
+        return self._use_socket
+
+    @use_socket.setter
+    def use_socket(self, enabled):
+        self._use_socket = enabled
+        ws = getattr(self, "_keyed_websocket", None)
+        if not enabled and ws is not None:
+            # Wake recv() even while bytes are still arriving for a frame.
+            ws.abort()
+
     def _run_keyed_websocket(
         self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
     ):
@@ -1510,15 +1522,13 @@ class Visdom(object):
                     "Refused to follow the socket to {}, which would hand it "
                     "the API key".format(location)
                 )
-            # Recheck use_socket even when the peer sends no (complete) frame.
-            # Idle sockets stay connected; only connection setup has a deadline.
-            ws.settimeout(1)
+            # Apply the timeout only to connection setup. The setter interrupts
+            # reads when the client stops the socket.
+            ws.settimeout(None)
+            self._keyed_websocket = ws
             while self.use_socket:
-                try:
-                    message = ws.recv()
-                except websocket.WebSocketTimeoutException:
-                    continue
-                if not message:
+                message = ws.recv()
+                if not self.use_socket or not message:
                     break
                 on_message(ws, message)
         except websocket.WebSocketConnectionClosedException:
@@ -1526,10 +1536,15 @@ class Visdom(object):
         except Exception as error:
             if ws is None:
                 ws = websocket.WebSocket()
-            on_error(ws, error)
+            if self.use_socket:
+                on_error(ws, error)
         finally:
+            self._keyed_websocket = None
             if ws is not None:
-                ws.close()
+                if self.use_socket:
+                    ws.close()
+                else:
+                    ws.shutdown()
             on_close(ws)
 
     def setup_polling(self):

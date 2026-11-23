@@ -10,6 +10,7 @@
 
 import base64
 import hashlib
+import select
 import socket
 import threading
 from unittest.mock import Mock
@@ -22,30 +23,29 @@ from visdom import Visdom
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize(
-    "prefix, suffix",
+    "prefix, suffix, expected_messages",
     [
-        (b"", b""),
-        (b"\x81\x05hello", b""),
-        (b"\x81\x05he", b""),
-        (b"\x81\x05he", b"llo"),
+        (b"", b"", []),
+        (b"\x81\x05hello", b"", ["hello"]),
+        (b"\x81\x05he", b"", []),
+        (b"\x81\x05he", b"llo", ["hello"]),
     ],
 )
 def test_keyed_socket_can_stop_while_peer_keeps_connection_open(
-    monkeypatch, prefix, suffix
+    monkeypatch, prefix, suffix, expected_messages
 ):
     client = Visdom.__new__(Visdom)
     client.use_socket = True
     client_socket, peer_socket = socket.socketpair()
     release_peer = threading.Event()
-    read_timed_out = threading.Event()
+    read_waiting = threading.Event()
     peer_errors = []
 
     def serve():
         try:
             with peer_socket:
-                peer_socket.settimeout(5)
+                peer_socket.settimeout(15)
                 request = b""
                 while b"\r\n\r\n" not in request:
                     chunk = peer_socket.recv(4096)
@@ -65,7 +65,7 @@ def test_keyed_socket_can_stop_while_peer_keeps_connection_open(
                     b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
                     b"Sec-WebSocket-Accept: " + accept + b"\r\n\r\n" + prefix
                 )
-                release_peer.wait(10)
+                release_peer.wait()
         except Exception as error:
             peer_errors.append(error)
 
@@ -73,16 +73,19 @@ def test_keyed_socket_can_stop_while_peer_keeps_connection_open(
 
     def connect(*args, **kwargs):
         ws = create_connection(*args, **kwargs)
-        recv = ws.recv
+        # Signal the read that would block, after queued bytes are consumed.
+        sock = ws.sock
 
-        def observed_recv():
-            try:
-                return recv()
-            except websocket.WebSocketTimeoutException:
-                read_timed_out.set()
-                raise
+        class ObservedSocket:
+            def __getattr__(self, name):
+                return getattr(sock, name)
 
-        monkeypatch.setattr(ws, "recv", observed_recv)
+            def recv(self, size):
+                if not select.select([sock], [], [], 0)[0]:
+                    read_waiting.set()
+                return sock.recv(size)
+
+        ws.sock = ObservedSocket()
         return ws
 
     monkeypatch.setattr("visdom.websocket.create_connection", connect)
@@ -107,20 +110,17 @@ def test_keyed_socket_can_stop_while_peer_keeps_connection_open(
     try:
         peer.start()
         runner.start()
-        assert read_timed_out.wait(3), "socket read has no finite timeout"
+        assert read_waiting.wait(15), "worker did not reach the socket read"
         if suffix:
             peer_socket.sendall(suffix)
         else:
             client.use_socket = False
-        # websocket-client also allows three seconds for the close handshake.
-        runner.join(6)
+        runner.join(10)
 
         assert not runner.is_alive(), "silent peer blocked socket shutdown"
         assert peer.is_alive(), "peer must remain open until the worker exits"
         assert not peer_errors
-        assert [call.args[1] for call in on_message.call_args_list] == (
-            ["hello"] if prefix == b"\x81\x05hello" or suffix else []
-        )
+        assert [call.args[1] for call in on_message.call_args_list] == expected_messages
         on_error.assert_not_called()
         on_close.assert_called_once()
     finally:
