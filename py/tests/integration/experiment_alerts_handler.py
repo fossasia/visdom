@@ -138,6 +138,20 @@ class TestAlertsEndpoint(AlertsTestCase):
 
         self.assertEqual([rule["condition"] for rule in rules], ["nan"])
 
+    def test_set_and_clear_agree_on_a_metric_with_whitespace_around_it(self):
+        # Whichever way a rule treats a padded metric name, both halves of
+        # this endpoint have to treat it the same way: a rule that can be set
+        # is a rule that can be cleared under the name it was set with. The
+        # handler holds no opinion of its own about what names a series, and
+        # this is what says so if it ever starts to.
+        self.set_alert(metric="  loss  ", condition="> 2.0")
+        self.assertEqual(len(self.stored_alerts()), 1)
+
+        rules = json.loads(self.clear_alert("  loss  ").body)
+
+        self.assertEqual(rules, [])
+        self.assertEqual(self.stored_alerts(), [])
+
     def test_a_condition_may_be_named_without_its_operand(self):
         self.set_alert(condition="> 2.0")
         rules = json.loads(self.clear_alert("loss", condition=">").body)

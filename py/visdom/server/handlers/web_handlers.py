@@ -2235,7 +2235,10 @@ class AlertsHandler(BaseHandler):
 
     The JSON body carries an ``action``:
 
-    * ``"get"`` (the default) -- this environment's rules, as a list.
+    * ``"get"`` (the default) -- this environment's rules, as a list. An
+      unnamed environment is ``main``, as it is everywhere else; there is no
+      read of every environment's rules, because a rule is something you set
+      on the run you are watching rather than something you browse.
     * ``"set"`` -- define one rule, given as the ``alert`` object. A repeat of
       the same metric and condition replaces that rule rather than adding a
       second one.
@@ -2306,6 +2309,15 @@ class AlertsHandler(BaseHandler):
         """What a clear names, as ``((metric, condition), error)``.
 
         The condition may be absent, which names every rule on the metric.
+
+        The metric is normalized here the way :class:`Alert` normalizes its
+        own ``key``, because ``clear_alerts`` matches the two with ``==``: a
+        rule that can be set is a rule that has to be clearable by the name
+        it was set under. The two are kept honest by
+        ``test_set_and_clear_agree_on_a_metric_with_whitespace_around_it``
+        rather than by this comment -- if the rule ever stops normalizing,
+        that test fails here instead of a padded metric name quietly becoming
+        a rule nobody can remove.
         """
         metric = args.get("metric")
         if not isinstance(metric, str) or not metric.strip():
