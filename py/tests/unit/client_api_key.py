@@ -338,6 +338,33 @@ def test_keyed_socket_stop_aborts_read_and_cleans_up(monkeypatch):
     assert client._keyed_websocket is None
 
 
+@pytest.mark.parametrize("transport_closed", [True, False])
+def test_disabling_keyed_socket_handles_transport_cleared_during_abort(
+    transport_closed,
+):
+    client = _socket_client(1)
+    ws = Mock()
+    client._keyed_websocket = ws
+    error = AttributeError("shutdown")
+
+    def abort():
+        if transport_closed:
+            ws.sock = None
+        raise error
+
+    ws.abort.side_effect = abort
+
+    if transport_closed:
+        client.use_socket = False
+    else:
+        with pytest.raises(AttributeError) as raised:
+            client.use_socket = False
+        assert raised.value is error
+
+    assert client.use_socket is False
+    ws.abort.assert_called_once_with()
+
+
 def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):
     client = _socket_client(1)
     error = websocket.WebSocketTimeoutException("handshake timed out")

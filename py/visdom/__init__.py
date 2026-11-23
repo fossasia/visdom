@@ -1506,7 +1506,13 @@ class Visdom(object):
         ws = getattr(self, "_keyed_websocket", None)
         if not enabled and ws is not None:
             # Wake recv() even while bytes are still arriving for a frame.
-            ws.abort()
+            try:
+                ws.abort()
+            except AttributeError:
+                # Older websocket-client versions can race with recv() clearing
+                # the transport after abort() checks whether it is connected.
+                if ws.sock is not None:
+                    raise
 
     def _run_keyed_websocket(
         self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
