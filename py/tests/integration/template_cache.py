@@ -8,12 +8,12 @@
 
 """Tests for compiled template caching behavior in server settings."""
 
-import tornado.web
 import pytest
+import tornado.web
 
 from visdom.server.app import tornado_settings
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 
 def test_tornado_settings_does_not_disable_template_caching():
@@ -23,7 +23,9 @@ def test_tornado_settings_does_not_disable_template_caching():
 
 def test_template_caching_active_in_production():
     """In production mode (debug=False), Tornado enables template caching by default."""
-    app = tornado.web.Application([], **tornado_settings)
+    settings = dict(tornado_settings)
+    settings["debug"] = False
+    app = tornado.web.Application([], **settings)
     assert app.settings.get("compiled_template_cache", True) is True
 
 
