@@ -31,6 +31,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from testutils import recording_array
 from visdom import (
     _average_precision,
     _binary_clf_curve,
@@ -447,6 +448,87 @@ def test_confusion_matrix_rejects_bad_input(y_true, y_pred, message):
         _compute_confusion_matrix(np.asarray(y_true), np.asarray(y_pred), [0, 1])
 
 
+def test_confusion_matrix_counts_without_iterating_the_samples():
+    """The label dict is consulted per distinct value, not per sample.
+
+    The counting used to be a Python ``for t, p in zip(y_true, y_pred)`` with
+    two dict lookups and an in-place matrix increment per sample, so a run of
+    20k predictions cost 11 ms to tally ten labels.
+    """
+    y_true = recording_array([0, 1, 1, 2, 0, 1], dtype=int)
+    y_pred = recording_array([0, 1, 2, 2, 1, 1], dtype=int)
+    cm = _compute_confusion_matrix(y_true, y_pred, [0, 1, 2])
+    np.testing.assert_array_equal(cm, [[1, 1, 0], [0, 2, 1], [0, 0, 1]])
+    assert y_true.counts["iter"] == 0 and y_true.counts["getitem"] == 0
+    assert y_pred.counts["iter"] == 0 and y_pred.counts["getitem"] == 0
+
+
+@pytest.mark.parametrize("n", [1, 7, 300])
+def test_confusion_matrix_matches_a_per_sample_tally(n):
+    """Cross-check against the loop it replaced, unknown labels included.
+
+    The value vectors carry labels that are deliberately absent from
+    ``labels``, so both the kept and the skipped counts are exercised.
+    """
+    rng = np.random.default_rng(n)
+    labels = [0, 1, 2]
+    pool = np.array(labels + [9])
+    y_true = pool[rng.integers(0, pool.shape[0], n)]
+    y_pred = pool[rng.integers(0, pool.shape[0], n)]
+
+    expected = np.zeros((len(labels), len(labels)), dtype=int)
+    for actual, predicted in zip(y_true.tolist(), y_pred.tolist()):
+        if actual in labels and predicted in labels:
+            expected[labels.index(actual), labels.index(predicted)] += 1
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        cm = _compute_confusion_matrix(y_true, y_pred, labels)
+    np.testing.assert_array_equal(cm, expected)
+
+
+def test_confusion_matrix_tolerates_an_unsorted_label_list():
+    """``labels`` fixes the row and column order; it is not re-sorted.
+
+    The vectorised mapping goes through ``np.unique`` on the *values*, which is
+    sorted, so the indices it produces have to come back out of the caller's
+    own ``labels`` order.
+    """
+    cm = _compute_confusion_matrix(np.array([2, 0]), np.array([0, 2]), [2, 0, 1])
+    assert cm[0][1] == 1
+    assert cm[1][0] == 1
+    assert cm.sum() == 2
+
+
+@pytest.mark.parametrize(
+    "y_true, y_pred, labels, expected, skipped",
+    [
+        ([0, None, 1], [0, 1, 1], [0, 1], [[1, 0], [0, 1]], 1),
+        (["a", 1], [1, "a"], ["a", 1], [[0, 1], [1, 0]], 0),
+        ([None, None], [None, None], [None], [[2]], 0),
+    ],
+)
+def test_confusion_matrix_accepts_labels_that_cannot_be_sorted(
+    y_true, y_pred, labels, expected, skipped
+):
+    """Object arrays keep the per-sample lookup, which only needs hashing.
+
+    ``np.unique`` sorts, so an object array holding ``None`` beside numbers,
+    or numbers beside strings, raises a TypeError on comparison. The loop this
+    replaced never ordered anything, so those inputs used to work and still
+    have to.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cm = _compute_confusion_matrix(
+            np.asarray(y_true, dtype=object),
+            np.asarray(y_pred, dtype=object),
+            labels,
+        )
+    np.testing.assert_array_equal(cm, expected)
+    assert len(caught) == (1 if skipped else 0)
+
+
 def test_roc_curve_from_raw_labels_sends_two_traces(capture_send):
     """The curve itself plus the dashed chance baseline."""
     sent = capture_send(
@@ -829,3 +911,37 @@ def test_confusion_matrix_input_errors(offline_client, kwargs, message):
     """Every ValueError guard on the public method."""
     with pytest.raises(ValueError, match=message):
         offline_client.confusion_matrix(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "dtype,value", [(np.float16, 40000), (np.int64, 2**62), (np.uint64, 2**63)]
+)
+@pytest.mark.parametrize("normalize", [None, "true", "pred", "all"])
+def test_confusion_matrix_accumulates_counts_without_overflow(
+    capture_send, dtype, value, normalize
+):
+    matrix = np.full((2, 2), value, dtype=dtype)
+    original = matrix.copy()
+    with np.errstate(over="raise", invalid="raise"):
+        sent = capture_send(
+            lambda v: v.confusion_matrix(
+                cm=matrix, normalize=normalize, opts={"showPercent": True}
+            )
+        )
+    payload = sent["payload"]
+    expected = (
+        matrix
+        if normalize is None
+        else np.full((2, 2), 0.25 if normalize == "all" else 0.5)
+    )
+    np.testing.assert_allclose(payload["data"][0]["z"], expected)
+    percent = "50.0%" if normalize in ("true", "pred") else "25.0%"
+    assert all(
+        a["text"].endswith("<br>" + percent) for a in payload["layout"]["annotations"]
+    )
+    if np.issubdtype(dtype, np.integer):
+        assert all(
+            a["text"].startswith(str(value) + "<br>")
+            for a in payload["layout"]["annotations"]
+        )
+    np.testing.assert_array_equal(matrix, original)

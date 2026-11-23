@@ -116,6 +116,9 @@ class FakeHandler:
         """Record an environment the server flagged as needing a save."""
         self.dirtied.append(eid)
 
+    def storage_refusal(self):
+        return None
+
     def write(self, chunk):
         self.written.append(chunk)
 
