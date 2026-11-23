@@ -15,11 +15,14 @@ missing envs and windows, twenty creations in a row, empty and enormous and
 markup-bearing content, and the pages that render straight from state.
 """
 
+import json
 import logging
 import os
 import unittest
 
 import pytest
+
+from visdom.utils.server_utils import LazyEnvData
 
 from testutils.fakes import FakeSocket
 from testutils.http import VisdomHTTPTestCase
@@ -284,6 +287,25 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.body, b"")
         self.assertEqual(subscriber.eid, ["main", "main"])
         self.assertEqual(subscriber.commands(), ["reload", "window", "layout"])
+
+    def test_compare_leaves_out_an_env_whose_file_cannot_be_read(self):
+        """One unreadable env file does not stop the others being compared."""
+        with open(os.path.join(self.env_path, "broken.json"), "w") as fn:
+            json.dump({"jsons": [], "reload": {}}, fn)
+        self._app.state["broken"] = LazyEnvData(self._app.storage, "broken")
+        subscriber = FakeSocket(sid="valid-session-id")
+        self._app.subs[subscriber.sid] = subscriber
+
+        resp = self.post_json(
+            "/compare/main+broken", {"sid": "valid-session-id", "show_all": False}
+        )
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("layout", subscriber.commands())
+        notes = [m for m in subscriber.sent if m.get("command") == "notification"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["data"]["type"], "warning")
+        self.assertIn("'broken'", notes[0]["data"]["message"])
 
 
 if __name__ == "__main__":

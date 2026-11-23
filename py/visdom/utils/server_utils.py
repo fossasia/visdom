@@ -821,13 +821,47 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 state[eid] = env
                 envs[eid] = env
 
+    # One env that cannot be read is left out of the comparison rather than
+    # taking the others down with it.
+    left_out = []
     for name, env in list(envs.items()):
-        if not env_is_readable(env):
-            raise ValueError(f"environment {name!r} is not a readable environment")
+        if warmed and isinstance(env, LazyEnvData) and not env.is_loaded:
+            # the caller's read of it failed; reading it again here would only
+            # fail the same way, and on the loop.
+            readable = False
+        else:
+            try:
+                readable = env_is_readable(env)
+            except ValueError:
+                readable = False
+        if not readable:
+            del envs[name]
+            left_out.append(name)
+            continue
         warn_unreadable_file(socket, name, store)
         panes, unreadable = readable_panes(env)
         if unreadable:
             envs[name] = dict(env, jsons=panes)
+    if left_out:
+        logging.warning(
+            "compare: leaving out environment(s) that cannot be read: %s",
+            ", ".join(left_out),
+        )
+        socket.write_message(
+            json.dumps(
+                {
+                    "command": "notification",
+                    "data": {
+                        "message": "Compared without {}: {} could not be read.".format(
+                            ", ".join("'{}'".format(name) for name in left_out),
+                            "it" if len(left_out) == 1 else "they",
+                        ),
+                        "type": "warning",
+                    },
+                },
+                cls=NanSafeEncoder,
+            )
+        )
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -1018,8 +1052,9 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
         "commentsDisabled": True,
     }
     if "reload" in res:
+        layout = res["reload"] if reload_is_readable(res) else {}
         socket.write_message(
-            json.dumps({"command": "reload", "data": res["reload"]}, cls=NanSafeEncoder)
+            json.dumps({"command": "reload", "data": layout}, cls=NanSafeEncoder)
         )
 
     jsons = list(res.get("jsons", {}).values())
@@ -1113,8 +1148,12 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
         raise ValueError(f"environment {eid!r} is not a readable environment")
 
     if "reload" in env:
+        # The store only serves a readable layout, but one can also reach
+        # ``state`` from elsewhere; the client walks it key by key, so anything
+        # else goes out as an empty layout.
+        layout = env["reload"] if reload_is_readable(env) else {}
         socket.write_message(
-            json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder)
+            json.dumps({"command": "reload", "data": layout}, cls=NanSafeEncoder)
         )
 
     panes, _ = readable_panes(env)

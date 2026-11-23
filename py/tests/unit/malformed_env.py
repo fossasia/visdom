@@ -100,6 +100,12 @@ def _notifications(socket):
     return [m for m in socket.sent if m.get("command") == "notification"]
 
 
+def last_reload(socket):
+    reloads = [m for m in socket.sent if m.get("command") == "reload"]
+    assert reloads, "no layout was sent"
+    return reloads[-1]["data"]
+
+
 @pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
 def test_an_env_without_panes_to_read_is_not_readable(name, payload):
     assert env_is_readable(payload) is False
@@ -288,13 +294,81 @@ def test_a_readable_env_is_served_without_a_warning(store, fake_socket):
     assert _notifications(fake_socket) == []
 
 
+def _plot(title="loss", trace="run"):
+    return {
+        "command": "window",
+        "id": "p",
+        "type": "plot",
+        "title": title,
+        "i": 0,
+        "content": {"data": [{"name": trace, "x": [1], "y": [1]}], "layout": {}},
+    }
+
+
+def _plot_env():
+    return {"jsons": {"p": _plot()}, "reload": {}}
+
+
 @pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
-def test_comparing_an_env_that_cannot_be_read_is_a_value_error(
+def test_comparing_leaves_out_an_env_that_cannot_be_read(
     name, payload, store, fake_socket
 ):
     state = {"good": env_payload(), "broken": payload}
-    with pytest.raises(ValueError):
-        compare_envs(state, ["good", "broken"], fake_socket, store)
+    compare_envs(state, ["good", "broken"], fake_socket, store)
+    notes = _notifications(fake_socket)
+    assert len(notes) == 1
+    assert "'broken'" in notes[0]["data"]["message"]
+    assert notes[0]["data"]["type"] == "warning"
+    assert "layout" in fake_socket.commands()
+
+
+def test_one_unreadable_env_does_not_stop_the_others_being_compared(store, fake_socket):
+    state = {"a": _plot_env(), "broken": {"jsons": []}, "b": _plot_env()}
+    compare_envs(state, ["a", "broken", "b"], fake_socket, store)
+    compared = [w for w in _windows(fake_socket) if w.get("title") == "loss"]
+    assert len(compared) == 1
+    names = [trace["name"] for trace in compared[0]["content"]["data"]]
+    assert names == ["a_run", "b_run"]
+
+
+def test_a_cold_env_the_caller_could_not_read_is_left_out_unread(
+    store, env_path, fake_socket
+):
+    _write(env_path, "broken", {"jsons": []})
+    cold = LazyEnvData(store, "broken")
+    state = {"good": env_payload(), "broken": cold}
+    compare_envs(state, ["good", "broken"], fake_socket, store, warmed=True)
+    assert not cold.is_loaded
+    assert "'broken'" in _notifications(fake_socket)[0]["data"]["message"]
+
+
+def test_comparing_readable_envs_leaves_nothing_out(store, fake_socket):
+    state = {"a": _plot_env(), "b": _plot_env()}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _notifications(fake_socket) == []
+
+
+@pytest.mark.parametrize("name, payload", BAD_RELOAD, ids=BAD_RELOAD_IDS)
+def test_a_layout_that_is_not_a_mapping_reaches_a_client_empty(
+    name, payload, store, fake_socket
+):
+    # the store never serves one, but an env in state can still carry it
+    load_env({"r": dict(payload)}, "r", fake_socket, store)
+    assert last_reload(fake_socket) == {}
+
+
+@pytest.mark.parametrize("name, payload", BAD_RELOAD, ids=BAD_RELOAD_IDS)
+def test_comparing_sends_a_layout_that_is_not_a_mapping_empty(
+    name, payload, store, fake_socket
+):
+    state = {"a": dict(_plot_env(), reload=payload["reload"]), "b": _plot_env()}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert last_reload(fake_socket) == {}
+
+
+def test_a_readable_layout_reaches_a_client_as_it_is(store, fake_socket):
+    load_env({"r": env_payload(reload={"win_0": {"x": 1}})}, "r", fake_socket, store)
+    assert last_reload(fake_socket) == {"win_0": {"x": 1}}
 
 
 def test_comparing_warns_about_a_pane_it_is_not_getting(store, env_path, fake_socket):

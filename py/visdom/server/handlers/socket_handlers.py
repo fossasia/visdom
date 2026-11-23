@@ -18,6 +18,7 @@ import logging
 import time
 import types
 from collections import deque
+from collections.abc import Mapping
 from enum import Enum
 
 import tornado.ioloop
@@ -239,7 +240,24 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.state[msg["eid"]] = retarget_experiment(
                     snapshot_env(source), msg["eid"]
                 )
-                self.state[msg["eid"]]["reload"] = msg["data"]
+                layout = msg["data"]
+                if not isinstance(layout, Mapping):
+                    # The layout is sent back to every client that opens the
+                    # env, and the client walks it key by key, so keep the
+                    # panes and save the env without a layout instead.
+                    logging.warning(
+                        "save: layout for env %r is not an object; saving it empty",
+                        msg["eid"],
+                    )
+                    notify(
+                        self,
+                        f"Environment '{msg['eid']}' was saved without its layout:"
+                        " the layout sent could not be read.",
+                        type="warning",
+                        target_subs=[self],
+                    )
+                    layout = {}
+                self.state[msg["eid"]]["reload"] = layout
                 self.eid = msg["eid"]
                 await save_env_off_loop(self, self.eid)
 
@@ -320,7 +338,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     f" not found, dropping event"
                 )
                 return
-            self.state[eid]["reload"][win] = msg.get("data")
+            env = self.state[eid]
+            if not isinstance(env.get("reload"), Mapping):
+                # nothing readable to update; start the layout afresh rather
+                # than fail every later move of a pane in this env.
+                env["reload"] = {}
+            env["reload"][win] = msg.get("data")
             self.mark_dirty(eid)
 
         elif cmd == "update_plot_layout":

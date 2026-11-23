@@ -1245,7 +1245,12 @@ class CompareHandler(BaseHandler):
                 # state -- so each one is brought into memory here, where the
                 # read costs a worker thread rather than the loop.
                 for eid in eids:
-                    await ensure_env_present(self, eid)
+                    try:
+                        await ensure_env_present(self, eid)
+                    except ValueError:
+                        # left cold; compare_envs leaves it out and says so,
+                        # so the envs that can be read are still compared.
+                        logging.warning("compare: environment %r cannot be read", eid)
                 compare_envs(
                     self.state,
                     eids,
