@@ -12,9 +12,11 @@ import logging
 import socket
 import threading
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import requests
+import websocket
 
 from visdom import Visdom
 from visdom.async_client import _AsyncTransport
@@ -293,3 +295,71 @@ def test_a_socket_with_a_key_waits_before_it_reconnects(monkeypatch):
 
     assert len(attempts) == 2
     assert waits == [3, 3]
+
+
+def test_keyed_socket_read_timeouts_preserve_idle_connections(monkeypatch):
+    client = _socket_client(1)
+    ws = Mock()
+    ws.getstatus.return_value = 101
+    ws.recv.side_effect = [
+        websocket.WebSocketTimeoutException("idle"),
+        '{"command": "alive", "data": "vis_alive"}',
+        websocket.WebSocketTimeoutException("idle again"),
+        "event",
+        "",
+    ]
+    connect = Mock(return_value=ws)
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+    options = {"sslopt": {"cert_reqs": 0}, "http_proxy_host": "proxy"}
+    header = {"X-API-KEY": "visdom_live_abc"}
+
+    client._run_keyed_websocket(
+        "wss://visdom.example/vis_socket",
+        header,
+        options,
+        on_message,
+        on_error,
+        on_close,
+    )
+
+    connect.assert_called_once_with(
+        "wss://visdom.example/vis_socket",
+        header=header,
+        redirect_limit=0,
+        timeout=20,
+        **options,
+    )
+    ws.settimeout.assert_called_once_with(1)
+    assert [call.args[1] for call in on_message.call_args_list] == [
+        '{"command": "alive", "data": "vis_alive"}',
+        "event",
+    ]
+    on_error.assert_not_called()
+    ws.close.assert_called_once_with()
+    on_close.assert_called_once_with(ws)
+
+
+def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):
+    client = _socket_client(1)
+    error = websocket.WebSocketTimeoutException("handshake timed out")
+    connect = Mock(side_effect=error)
+    ws = Mock()
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    monkeypatch.setattr("visdom.websocket.WebSocket", Mock(return_value=ws))
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+
+    client._run_keyed_websocket(
+        "ws://visdom.example/vis_socket",
+        {},
+        {},
+        on_message,
+        on_error,
+        on_close,
+    )
+
+    assert connect.call_args.kwargs["timeout"] == 20
+    on_message.assert_not_called()
+    on_error.assert_called_once_with(ws, error)
+    ws.close.assert_called_once_with()
+    on_close.assert_called_once_with(ws)

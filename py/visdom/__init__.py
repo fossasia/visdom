@@ -1502,7 +1502,7 @@ class Visdom(object):
         ws = None
         try:
             ws = websocket.create_connection(
-                sock_addr, header=header, redirect_limit=0, **connect_kwargs
+                sock_addr, header=header, redirect_limit=0, timeout=20, **connect_kwargs
             )
             if ws.getstatus() != 101:
                 location = (ws.getheaders() or {}).get("location")
@@ -1510,8 +1510,14 @@ class Visdom(object):
                     "Refused to follow the socket to {}, which would hand it "
                     "the API key".format(location)
                 )
+            # Recheck use_socket even when the peer sends no (complete) frame.
+            # Idle sockets stay connected; only connection setup has a deadline.
+            ws.settimeout(1)
             while self.use_socket:
-                message = ws.recv()
+                try:
+                    message = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    continue
                 if not message:
                     break
                 on_message(ws, message)
