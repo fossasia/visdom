@@ -51,8 +51,9 @@ caller reports them like any other malformed query rather than crashing.
 
 The public surface is deliberately tiny: :func:`parse_query` (text → AST),
 the :class:`Query` convenience wrapper, :func:`build_record` (Experiment →
-queryable dict) with the :class:`ExperimentLike` shape it accepts, and
-:class:`QueryParseError`.
+queryable dict) with the :class:`ExperimentLike` shape it accepts,
+:func:`latest_metric_values` (the one value per metric key that record holds),
+and :class:`QueryParseError`.
 """
 
 from __future__ import annotations
@@ -76,6 +77,7 @@ __all__ = [
     "Query",
     "build_record",
     "ExperimentLike",
+    "latest_metric_values",
     "MAX_QUERY_LENGTH",
     "MAX_QUERY_DEPTH",
     "Node",
@@ -386,17 +388,43 @@ def _lookup(record: dict, key: str) -> Any:
     return cursor
 
 
-def _to_number(value: Any) -> Optional[float]:
-    """Coerce ``value`` to a float for numeric comparison, or ``None``.
+def _to_number(value: Any) -> Optional[int | float]:
+    """Coerce ``value`` to a number for comparison, or ``None``.
 
     ``bool`` is intentionally not treated as a number so that ``amp = 1`` does
     not silently match a boolean ``True``; booleans compare via :func:`_to_bool`.
+
+    A value that is already a number is returned unchanged rather than cast to
+    ``float``. JSON puts no bound on integer length, so a param can hold an
+    integer far too wide for a float — and ``float()`` does not saturate on one
+    of those, it raises ``OverflowError``. Since nothing between here and the
+    request catches it, that turns a comparison against such a value into a 500
+    for the whole search. :func:`~visdom.experiments.store._is_number` already
+    guards the sort path against exactly this; the filter path is the other
+    half of it.
+
+    Keeping the integer also keeps the comparison exact. Casting to ``float``
+    rounds anything past 53 bits of mantissa, which made two genuinely
+    different values compare equal — ``steps = 100000000000000000001`` matched
+    a run that logged ``100000000000000000000``. Python compares ``int``
+    against ``float`` without routing either through the other's precision, so
+    the values now answer for themselves.
+
+    Only a string still needs converting. One spelling an integer is read with
+    ``int`` first, so a stored ``"100000000000000000001"`` keeps the same digits
+    a literal of that value does. Anything else falls back to ``float``, which
+    cannot raise the same way: it saturates an over-large *string* to ``inf``,
+    and that includes a digit string longer than ``int`` will parse.
     """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return value
     if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            pass
         try:
             return float(value)
         except ValueError:
@@ -424,17 +452,23 @@ def _equals(actual: Any, expected: Any) -> bool:
         return actual_bool is not None and actual_bool == expected
     if isinstance(expected, (int, float)):
         actual_number = _to_number(actual)
-        return actual_number is not None and actual_number == float(expected)
+        return actual_number is not None and actual_number == expected
     return str(actual) == str(expected)
 
 
 def _order(actual: Any, op: str, expected: Any) -> bool:
-    """Apply an ordering operator, numerically when the literal is numeric."""
+    """Apply an ordering operator, numerically when the literal is numeric.
+
+    The literal is used as parsed, for the reason :func:`_to_number` gives: a
+    query may carry an integer wider than a float, and casting it would raise
+    ``OverflowError`` rather than saturate. ``MAX_QUERY_LENGTH`` bounds how wide
+    that is, so the comparison stays cheap.
+    """
     if isinstance(expected, (int, float)) and not isinstance(expected, bool):
         left = _to_number(actual)
         if left is None:
             return False
-        right: Any = float(expected)
+        right: Any = expected
     else:
         left = str(actual)
         right = str(expected)
@@ -494,6 +528,12 @@ class ExperimentLike(Protocol):
     without inheriting from or knowing about it, and :mod:`query` needs no import
     of :mod:`~visdom.experiments.models`. Anything experiment-shaped — including
     a test fake — is accepted.
+
+    An implementation may additionally answer ``latest_metric_values()`` with
+    ``{key: latest value}``, which :func:`latest_metric_values` prefers over
+    walking :attr:`metrics`. It is deliberately not a member here: every member
+    of a protocol is required of every implementation, and this one is an
+    optimisation an experiment is free not to offer.
     """
 
     env_id: str
@@ -514,6 +554,27 @@ class ExperimentLike(Protocol):
     @property
     def tags(self) -> Sequence[_KeyValueLike]:
         ...
+
+
+def latest_metric_values(experiment: ExperimentLike) -> dict:
+    """Return ``{key: latest value}`` across ``experiment``'s metric series.
+
+    Metrics are a time series, but every reader of one — a query record, a
+    comparison, a hyper-parameter pane — wants a single value per key, and it
+    is the newest. An experiment that keeps its observations in their stored
+    form can answer that without building an object per observation, so it is
+    asked first; one that only exposes :attr:`metrics` is answered by the walk
+    back over the series this module has always done. The shortcut stays an
+    optimisation that way, rather than becoming part of the shape
+    :class:`ExperimentLike` requires.
+    """
+    answer = getattr(experiment, "latest_metric_values", None)
+    if answer is not None:
+        return answer()
+    latest: dict[str, Any] = {}
+    for metric in reversed(experiment.metrics):
+        latest.setdefault(metric.key, metric.value)
+    return latest
 
 
 def build_record(experiment: ExperimentLike) -> dict:
@@ -541,10 +602,7 @@ def build_record(experiment: ExperimentLike) -> dict:
     for param in experiment.params:
         record.setdefault(param.key, param.value)
         record["param." + param.key] = param.value
-    latest_metrics: dict[str, Any] = {}
-    for metric in reversed(experiment.metrics):
-        latest_metrics.setdefault(metric.key, metric.value)
-    for key, value in latest_metrics.items():
+    for key, value in latest_metric_values(experiment).items():
         record.setdefault(key, value)
         record["metric." + key] = value
     for tag in experiment.tags:

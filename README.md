@@ -214,6 +214,18 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
+11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
+12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
+
+The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
+
+- `VISDOM_INTERNAL_READ_KEYS`: keys that may read `/_activity` and `/_metrics`.
+- `VISDOM_INTERNAL_ADMIN_KEYS`: keys for endpoints that change or remove data.
+- `VISDOM_METRICS_TOKENS`: bearer tokens for `/_metrics`, for scrapers that cannot sign.
+
+Behind a proxy that spreads workspaces over several servers, set `VISDOM_PROXY_URL` and each server asks the proxy every `VISDOM_OWNERSHIP_INTERVAL` seconds (30) which server owns the workspaces it has viewers for, and closes the viewers of any that moved, so they reconnect to the new one.
+
+A signed request sends `X-Visdom-Timestamp` (Unix seconds) and `X-Visdom-Signature`, the hex HMAC-SHA256 of the method, the path with its query, the timestamp and the hex SHA-256 of the body, joined by newlines. A signature older or newer than 60 seconds is refused. With no key set, every signed request is refused, and `/_metrics` answers only a metrics token. `visdom.server.internal.signed_headers` builds the headers.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
@@ -290,6 +302,8 @@ The python visdom client takes a few options:
 - `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
+- `api_key`: API key sent as the `X-API-KEY` header on every request and on the socket, for servers behind a gateway that checks keys (default: `None`)
+- `workspace`: workspace sent as the `X-Visdom-Workspace` header alongside `api_key`, required when `api_key` is given (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 - `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
@@ -410,6 +424,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
+- [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
+- [`vis.show`](#visshow): embed the dashboard in a Jupyter or VS Code notebook cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -487,6 +503,9 @@ Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()
 - `env`: environment name (default: auto-generated from timestamp)
 - `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
 - `params`: dict of hyperparameters; opts into experiment tracking (default: `None`, tracking off)
+- `is_main_process`: `True` or `False` to choose whether this process plots (default: `None`, only global rank 0 plots); any other type raises `TypeError`
+
+**Distributed training:** under `torchrun`, SLURM or `mp.spawn`, only global rank 0 plots and tracks; other ranks just validate their inputs, so one window is created per metric and nothing extra needs to be passed. The plotted value is whatever rank 0 logs, so to log a global average every rank must call `dist.all_reduce` and divide by `dist.get_world_size()` before `tracker.log()`. An `mp.spawn` worker has no rank to go by until `dist.init_process_group` has run, so create the logger after it or pass `is_main_process=(rank == 0)`. Pass `is_main_process=True` or `False` to pick the plotting process yourself, for example the last stage of a pipeline-parallel job, or when SLURM starts independent runs with `srun -n N`. Single-GPU and `nn.DataParallel` scripts run as one process and plot as before.
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
@@ -799,6 +818,44 @@ the trial is running. Optuna does not support `trial.report()` or
 `trial.should_prune()` for multi-objective studies, so intermediate-value and
 pruning support applies only to single-objective studies.
 
+### System Monitor
+
+**Requirements:** `pip install psutil`
+
+`visdom.loggers.VisdomSystemMonitor` plots the CPU and RAM usage of the running script. A background thread samples the current process and its child processes (for example `DataLoader` workers) and appends the values to two line plots, `CPU usage (%)` and `RAM usage (MB)`. The x-axis is seconds since `start()`. The values come straight from the OS through psutil, so it works with any framework or none.
+
+```python
+import visdom
+from visdom.loggers import VisdomSystemMonitor
+
+viz = visdom.Visdom()
+
+with VisdomSystemMonitor(viz, env="my_run", interval=5):
+    train()
+```
+
+Or start and stop it yourself:
+
+```python
+monitor = VisdomSystemMonitor(viz, env="my_run").start()
+train()
+monitor.stop()
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment to plot in (default: the client's own env)
+- `interval`: seconds between samples (default: 5)
+- `is_main_process`: set `True` or `False` to choose which process is monitored; by default only global rank 0 of a distributed job is
+
+**Note:** the windows have fixed ids (`system_cpu`, `system_ram`), so a second run in the same env replaces them instead of adding more.
+
+**Note:** CPU is the summed usage of the script and its children, divided by the number of cores the script may use. That is the size of its CPU affinity mask (a SLURM job pinned to 8 of 64 cores tops out at 100%), or all cores where the OS has no such mask, such as macOS. A container CPU quota is not taken into account. RAM is RSS summed per process, so memory shared between workers is counted once per worker.
+
+**Note:** sampling and sending run on a daemon thread, so a slow or unreachable server never stalls training. While the server keeps failing, the wait between samples doubles up to 16 times `interval`, and goes back to `interval` once a sample gets through. A warning is raised once. Without psutil, `start()` warns and the monitor does nothing.
+
+See `example/system_monitor_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
@@ -820,6 +877,7 @@ img = img.permute(2, 0, 1)     # PyTorch
 The following `opts` are supported:
 
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
@@ -861,6 +919,7 @@ The following `opts` are supported:
 - `colormap`: matplotlib colormap name (`string`; default = `'jet'`). Falls back to a blue-red gradient if matplotlib is not installed.
 - `caption`: caption for the image pane
 - `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
+- `compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
 
 > **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
@@ -875,6 +934,7 @@ The following arguments and `opts` are supported:
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
 - `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `opts.compresslevel`: PNG compression level (`integer` 0-9; default = `6`). Lower is faster and larger, `0` stores the image uncompressed. Ignored when `jpgquality` selects JPEG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
@@ -986,20 +1046,21 @@ environment). If you've also registered an event handler via
    "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
-This function plays audio. It takes as input the filename of the audio
-file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
-audio). The function does not support any plot-specific `opts`.
+This function plays audio. It takes as input the filename or `pathlib.Path` of the audio
+file (`audiofile` accepts string or `os.PathLike`) or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
+audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or
+`2xN`) is accepted too. The function does not support any plot-specific `opts`.
 
 The following `opts` are supported:
 
-- `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+- `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
 
 Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
 
 #### vis.video
-This function plays a video. It takes as input the filename of the video
-`videofile` or a `LxHxWxC`-sized
+This function plays a video. It takes as input the filename or `pathlib.Path` of the video
+`videofile` (`videofile` accepts string or `os.PathLike`) or a `LxHxWxC`-sized
 `tensor` containing all the frames of the video as input. The
 function does not support any plot-specific `opts`.
 
@@ -1353,9 +1414,12 @@ that specifies the value at each location in the contour plot.
 The following `opts` are supported:
 
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+- `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+When either color limit is supplied, the missing limit defaults to the corresponding
+minimum or maximum of `X`. Without explicit limits, Plotly chooses the color domain.
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the
@@ -1577,6 +1641,73 @@ This function takes the contents of a visdom log and replays them to the current
 
 Arguments:
 - `log_filename`: log file to replay the contents of.
+
+#### vis.restore_run
+
+Replays a run's plots from the files a `visdom.tracking.RunTracker(..., record_data=True)` run wrote (`RunTracker.track(vis)` wraps a client so its chart calls auto-log to the run): reconstructs every chart the run plotted, in the order it plotted them, into a target environment. `record_data=True` is what makes a run replayable at all — without it, a run's files describe what happened but don't keep the exact data needed to redraw it.
+
+```python
+from visdom import Visdom
+vis = Visdom(server="http://localhost", port=8097)
+result = vis.restore_run(
+    "visdom_runs/mnist_baseline_20261020-123155_a4828e4c.json",
+    env="mnist_replay",
+)
+print(result)
+```
+
+By default every recorded update is sent back-to-back, as fast as the server accepts them, which for a run with many epochs can make the dashboard jump straight to its final state instead of filling in step by step. Pass `delay` (seconds) to instead wait that long between each replayed update, so the dashboard fills in the way the original run did. The server paces this with `asyncio.sleep` on its own event loop rather than blocking it, so other clients' requests are still served normally while a replay with `delay` is running.
+
+Arguments:
+- `json_path`: path to the run's `<run_id>.json` metadata file; its sibling `<run_id>.events.jsonl` (the run's full timeline) must be alongside it.
+- `env`: environment to replay into. Defaults to the env the run's own calls were originally sent to.
+- `delay`: seconds to wait between replayed updates. Defaults to `None` (no delay, replay as fast as possible).
+
+Returns a dict: `run_id`, `name`, `status`, `eid` (the env replayed into), `total` (calls recorded), `replayed` (successfully resent), `failed`, and `errors` (one message per failed call, if any). Raises `visdom.tracking.restore.RunRestoreError` if the run has no replayable data recorded, and `ValueError` up front for an invalid `delay`.
+
+Also available as `POST /restore_run` (body: `{"path": ..., "eid": ..., "delay": ...}`, `path` resolved under the `VISDOM_TRACKING_DIR` environment variable, defaulting to `visdom_runs`), so a run can be replayed directly into a running server without a Python client in between. Refused (`403`) in `-readonly` mode, and subject to the same per-workspace storage limits as any other write.
+
+#### vis.show
+
+Embeds the dashboard in a notebook cell, so the plots show up next to the code
+that drew them instead of in a separate browser tab. Works in Jupyter, VS Code
+and any other notebook frontend, and needs no extra dependency: notebooks
+render any object that has a `_repr_html_`, and this adds one rather than
+importing IPython.
+
+```python
+from visdom import Visdom
+vis = Visdom(env="run-7")
+vis.line(Y=losses, win="loss")
+
+vis              # renders the dashboard for env 'run-7' in the cell
+vis.show()       # the same thing, explicitly
+vis.show(env="baseline", height=400)
+```
+
+Arguments:
+- `env`: environment to open. Defaults to the client's own env, as elsewhere in the API. The embedded dashboard keeps its environment selector, so this is the starting point rather than a restriction.
+- `height`: iframe height. A number is pixels (default `600`) and has to be finite and positive — `nan` and `inf` are refused rather than formatted into a `nanpx` length; a string is a CSS length, e.g. `"40vh"`. Both are applied as CSS — the HTML `height` attribute is a legacy length that would read `40vh` as 40 pixels — so a dimension has to be a length and nothing else.
+- `width`: iframe width. Defaults to `"100%"`, the full width of the cell.
+
+Returns an object that renders as the iframe in a notebook and prints as the
+plain dashboard URL anywhere else, so it is also a quick way to get a link to
+the right environment from a script. An offline client (`offline=True`) has no
+server to embed and says so instead.
+
+The URL is built from the client's own `server`, `port` and `base_url`, so it
+has to be an address the **browser** can reach — which is not always the
+address the client uses:
+
+- **Kernel and browser on the same machine** (the usual local case): nothing to do.
+- **Remote kernel** (a GPU box, a cluster node, or a hosted notebook such as Colab or Kaggle): the browser cannot reach the kernel's `localhost`, so the frame stays blank. Forward the port (`ssh -L 8097:localhost:8097 <host>`), or put the server behind a reverse proxy, and point the client at that address — the embed follows the client.
+- **JupyterLab over HTTPS**: the browser blocks a plain-HTTP frame to another port. Serve visdom from the notebook's own origin, for example with [`jupyter-server-proxy`](https://jupyter-server-proxy.readthedocs.io/), and construct the client for that address — `Visdom(server="https://lab.example.com", port=443, base_url="/proxy/8097")`. Pointing only `base_url` at the proxy prefix does not help: the URL would still name the visdom port.
+
+Two more limits: a server started with `-enable_login` serves its login form
+inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
+the server's default view, because a browser frame cannot send the
+`X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
+is the case.
 
 ### Experiments
 

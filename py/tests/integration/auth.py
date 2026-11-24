@@ -39,7 +39,9 @@ from visdom.server.handlers.socket_handlers import SocketWrapper, VisSocketWrapp
 from visdom.utils.server_utils import hash_password
 
 from testutils import socket_double
+from testutils.fakes import SpyStore
 from testutils.http import VisdomHTTPTestCase
+from testutils.payloads import env_payload
 
 pytestmark = pytest.mark.integration
 
@@ -108,6 +110,51 @@ class TestLoginPage(LoginTestCase):
 
         self.assertEqual(resp.code, 200)
         self.assertNotIn("Visdom Login", resp.body.decode())
+
+
+class TestLoginPageReadsNothing(LoginTestCase):
+    """Serving the login form touches no environment file.
+
+    It used to list every environment -- ``list_envs`` is a directory read --
+    and pass the result to ``login.html`` as ``items``. That template has never
+    rendered them: the listing was built and thrown away, on the IOLoop, for
+    every unauthenticated request that reached the server.
+    """
+
+    def get_app(self):
+        # ``ServerState`` keeps its own reference to the store, so the spy has
+        # to be what the application builds for itself.
+        with patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        return app
+
+    def setUp(self):
+        super().setUp()
+        # Written after the app booted, so only a fresh listing could find it.
+        self.spy.save_env("seeded", env_payload())
+        self.spy.threads.clear()
+
+    def test_the_page_is_served_without_reaching_the_store(self):
+        resp = self.fetch("/")
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(self.spy.threads, [])
+
+    def test_the_page_does_not_show_the_environments(self):
+        """The premise of dropping the listing: the form never displayed one.
+
+        If the login page is ever given an environment list to show, this is
+        what fails, and whoever adds it has to read it off the loop.
+        """
+        self.assertNotIn("seeded", self.fetch("/").body.decode())
+
+    def test_the_dashboard_is_served_without_reaching_the_store_either(self):
+        headers = self.session_headers()
+        self.spy.threads.clear()
+
+        self.assertEqual(self.fetch("/", headers=headers).code, 200)
+        self.assertEqual(self.spy.threads, [])
 
 
 class TestLoginCredentials(LoginTestCase):
@@ -207,6 +254,9 @@ class TestUnauthenticatedRequests(LoginTestCase):
 
     def test_logging_an_experiment_is_unauthorized(self):
         self._assert_401("/experiments/log", {"eid": "main", "params": {"lr": 0.1}})
+
+    def test_restoring_a_run_is_unauthorized(self):
+        self._assert_401("/restore_run", {"path": "whatever.json"})
 
     def test_an_unauthorized_response_carries_no_body(self):
         self.assertEqual(self._assert_401("/env_state", {}).body, b"")
@@ -414,6 +464,9 @@ class TestReadonlyRejectsWrites(VisdomHTTPTestCase):
         resp = self.post_json("/experiments/log", {"eid": "main", "params": {"a": 1}})
 
         self.assertEqual(resp.code, 403)
+
+    def test_restoring_a_run_is_refused(self):
+        self._assert_403("/restore_run", {"path": "whatever.json"})
 
 
 class TestReadonlyAllowsReads(VisdomHTTPTestCase):

@@ -8,7 +8,6 @@
 
 """Normalize key/value tags used by the environment tagging API."""
 
-
 MAX_TAG_LENGTH = 50
 MAX_TAGS_PER_ENV = 20
 
@@ -38,6 +37,10 @@ def normalize_tags(tags) -> dict[str, str]:
         if len(name) > MAX_TAG_LENGTH:
             raise ValueError(
                 "tag names must not exceed {0} characters".format(MAX_TAG_LENGTH)
+            )
+        if name in normalized:
+            raise ValueError(
+                "tag name {0!r} appears more than once after trimming".format(name)
             )
         normalized[name] = value
 

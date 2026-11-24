@@ -1,6 +1,7 @@
 pytest>=9.1.1
 pytest-cov
 matplotlib
+plotly>=6.0
 numpy
 av
 tensorflow
