@@ -20,6 +20,7 @@ import asyncio
 import contextvars
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
+import os
 from types import TracebackType
 from typing import (
     Any,
@@ -49,6 +50,7 @@ from visdom import (
     _ExperimentQueryReply,
     _ExperimentReply,
     _OptOps,
+    _OptPath,
     _OptStr,
     _SendReturn,
     _TagMap,
@@ -328,7 +330,7 @@ class AsyncVisdom:
     ) -> _ExperimentReply: ...
     async def text(
         self,
-        text: Text,
+        text: object,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -385,7 +387,7 @@ class AsyncVisdom:
     async def audio(
         self,
         tensor: Tensor = ...,
-        audiofile: _OptStr = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -394,7 +396,7 @@ class AsyncVisdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
