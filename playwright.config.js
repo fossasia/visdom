@@ -42,7 +42,13 @@ module.exports = defineConfig({
   projects: [
     {
       name: 'chromium',
+      grepInvert: /@firefox/,
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      grep: /@firefox/,
+      use: { ...devices['Desktop Firefox'] },
     },
   ],
 });
