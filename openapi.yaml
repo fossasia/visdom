@@ -842,7 +842,14 @@ paths:
         `POST /experiments/log` with `action: metrics`. A `toast` rule that
         fires broadcasts a `notification` command to the WebSocket and polling
         clients watching that environment; a `webhook` rule POSTs to its url
-        instead. Defining a rule on an experiment
+        instead, one JSON body per firing, carrying `env`, `metric`,
+        `condition`, `threshold`, `value`, `step`, `message`, `fire_count` and
+        `fired_at`. `message` is the same sentence the toast would have
+        carried. The request is the server's own — a fixed method, no
+        caller-chosen headers, redirects not followed, a short timeout — and
+        nothing waits for the answer: a webhook endpoint that is down or slow
+        leaves this call answering 200 with the observation recorded, and the
+        failure in the server log. Defining a rule on an experiment
         that has finished is refused with 409: it would never record another
         observation for the rule to judge. Clearing one is allowed.
       requestBody:

@@ -6,7 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Whether the server may post a webhook, and where.
+"""Whether the server may post a webhook, where, and the posting itself.
 
 A rule's url is shape-checked where the rule is built
 (:func:`visdom.experiments.alerts.parse_webhook_url`). What is decided here is
@@ -24,11 +24,26 @@ unreadable, and it does: it reloads, and it is refused when it tries to go
 out.
 """
 
+import asyncio
 import ipaddress
+import json
+import logging
 from urllib.parse import urlsplit
+
+from tornado.httpclient import AsyncHTTPClient
+
+from visdom.utils.shared_utils import NanSafeEncoder
 
 # Hostnames that name this machine without being an address.
 LOCAL_NAMES = ("localhost", "localhost.localdomain", "ip6-localhost")
+
+# A webhook is a courtesy to a third party rather than part of the observation
+# the caller asked to have recorded, so it is kept on a short leash.
+CONNECT_TIMEOUT = 2
+REQUEST_TIMEOUT = 5
+
+# How long a shutdown waits for deliveries already in flight.
+SHUTDOWN_DRAIN = 2
 
 
 def _is_local_address(host):
@@ -157,3 +172,113 @@ class WebhookPolicy:
                 "-webhook_hosts".format(host)
             )
         return None
+
+
+def payload(event, env_id, message):
+    """The JSON body one firing is posted as.
+
+    ``message`` is the sentence the toast would have carried, since a chat
+    endpoint renders a body it does not understand as nothing at all; the rest
+    is the firing taken apart for a receiver that is a program.
+    """
+    alert = event.alert
+    return {
+        "env": env_id,
+        "metric": alert.key,
+        "condition": alert.condition,
+        "threshold": alert.threshold,
+        "value": event.value,
+        "step": event.step,
+        "message": message,
+        "fire_count": alert.fire_count,
+        "fired_at": alert.last_fired_at,
+    }
+
+
+async def post(url, body, client=None):
+    """POST one webhook. Answers with what went wrong, never by raising.
+
+    Nothing from the rule reaches the request except its url: the method, the
+    headers and the body are the server's own, redirects are not followed so an
+    allowlisted host cannot bounce the request elsewhere, and the timeouts are
+    short because nobody is waiting on the answer.
+    """
+    client = AsyncHTTPClient() if client is None else client
+    try:
+        response = await client.fetch(
+            url,
+            method="POST",
+            body=json.dumps(body, cls=NanSafeEncoder),
+            headers={"Content-Type": "application/json"},
+            follow_redirects=False,
+            connect_timeout=CONNECT_TIMEOUT,
+            request_timeout=REQUEST_TIMEOUT,
+            raise_error=False,
+        )
+    except Exception as error:
+        # ``raise_error=False`` covers a refused connection, not a url the
+        # client cannot start on at all.
+        return "could not be reached: {0}".format(error)
+    if 200 <= response.code < 300:
+        return None
+    if 300 <= response.code < 400:
+        return "answered {0} with a redirect, which is not followed".format(
+            response.code
+        )
+    return "answered {0}".format(response.code)
+
+
+async def _deliver(url, body, client=None):
+    """One delivery attempt, with its failure ending in the log."""
+    refusal = await post(url, body, client=client)
+    if refusal is not None:
+        logging.warning("the alert webhook to %s %s", url, refusal)
+
+
+def dispatch(policy, event, env_id, message, pending, client=None):
+    """Send one fired rule to its webhook, without waiting for the answer.
+
+    The observation is recorded either way, so an endpoint that is down is no
+    reason to fail the training loop that logged a number: the task is started,
+    registered in ``pending`` so nothing garbage-collects it mid-flight, and
+    its failure ends in a log line. The policy is asked again here, and not
+    only at set time, because a rule outlives the flags it was set under.
+    """
+    refusal = policy.refusal(event.alert.url)
+    if refusal is not None:
+        logging.warning(
+            "not posting the alert for %r in %r: %s",
+            event.alert.key,
+            env_id,
+            refusal,
+        )
+        return None
+
+    body = payload(event, env_id, message)
+    try:
+        task = asyncio.ensure_future(_deliver(event.alert.url, body, client=client))
+    except RuntimeError:
+        # No running loop to attach to, and still not a reason to fail the
+        # thing that fired.
+        logging.warning(
+            "could not schedule the alert webhook for %r in %r", event.alert.key, env_id
+        )
+        return None
+    pending.add(task)
+    task.add_done_callback(pending.discard)
+    return task
+
+
+async def drain(pending, timeout=None):
+    """Wait for the deliveries already in flight.
+
+    For the two callers that have to: a test asserting on what arrived, and a
+    shutdown that would rather let a POST finish than kill it in flight.
+    """
+    while pending:
+        awaiting = list(pending)
+        if timeout is None:
+            await asyncio.gather(*awaiting, return_exceptions=True)
+        else:
+            await asyncio.wait(awaiting, timeout=timeout)
+            return

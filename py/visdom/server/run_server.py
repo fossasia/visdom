@@ -25,6 +25,7 @@ import socket
 import tornado.httpserver
 import tornado.netutil
 from visdom.server.app import Application
+from visdom.server import webhooks
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
@@ -309,6 +310,11 @@ async def _serve(
         server.stop()
         if internal_server is not None:
             internal_server.stop()
+        # Alert webhooks already in flight are given a moment to land, so the
+        # loop closing does not take them with it.
+        await webhooks.drain(
+            app.server_state.pending_webhooks, timeout=webhooks.SHUTDOWN_DRAIN
+        )
         app.drain_sockets()
         # Through the state that owns them: rebinding ``app.subs`` left both
         # the live sockets and the dictionaries the handlers share untouched.

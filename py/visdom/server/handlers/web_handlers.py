@@ -67,6 +67,7 @@ from visdom.utils.server_utils import (
 from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import alerts as alert_rules
+from visdom.server import webhooks
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
     Experiment,
@@ -1784,9 +1785,23 @@ class ExperimentLogHandler(BaseHandler):
         has gone away between the append and here must not take the request
         down with it -- the observation is already recorded, and the caller
         asked for a metric to be logged, not for an audience.
+
+        A webhook rule is handed to the dispatch instead, which starts the
+        request and does not wait for it.
         """
         for event in fired:
             message = alert_rules.describe(event, env_id=eid)
+
+            if event.alert.action == alert_rules.ACTION_WEBHOOK:
+                webhooks.dispatch(
+                    handler.webhook_policy,
+                    event,
+                    eid,
+                    message,
+                    handler.pending_webhooks,
+                )
+                continue
+
             try:
                 notify(handler, message, type="warning", eid=eid)
             except Exception:

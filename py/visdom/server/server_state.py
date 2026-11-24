@@ -80,6 +80,10 @@ class StateAccessorsMixin:
         return self.server_state.webhook_policy
 
     @property
+    def pending_webhooks(self):
+        return self.server_state.pending_webhooks
+
+    @property
     def wrap_socket(self):
         return self.server_state.wrap_socket
 
@@ -179,6 +183,10 @@ class ServerState:
         self.webhook_policy = (
             WebhookPolicy() if webhook_policy is None else webhook_policy
         )
+        # Webhook deliveries in flight. Nothing waits on these, but a task
+        # with no reference held to it can be garbage-collected mid-flight. On
+        # the state rather than the module so each application drains its own.
+        self.pending_webhooks = set()
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go

@@ -288,6 +288,11 @@ The same showcase for the asyncio client — concurrent plots, a single-request 
 python example/async_demo.py
 ```
 
+Metric alerts have their own demo — a threshold with a debounce in front of it, a metric that diverges, one that stops improving, and the same rule delivered to a webhook — in [`example/alerts_example.py`](example/alerts_example.py); see [`vis.set_alert`](#visset_alert).
+```bash
+python example/alerts_example.py
+```
+
 
 ## API
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
@@ -1860,6 +1865,24 @@ Arguments:
 Setting the same metric and condition again replaces that rule and resets its streak; a metric may carry several rules of different conditions at once. An environment is limited to 20 rules. Returns the environment's complete rule list.
 
 Rules live on the experiment record, so they are persisted, forked and restored with the environment, and a restarted server picks up a streak where it left off. A finished experiment refuses a new rule — it will record no further observations, so the rule could never fire.
+
+A `"webhook"` rule POSTs one JSON body per firing:
+
+```json
+{
+  "env": "run-7",
+  "metric": "val_loss",
+  "condition": ">",
+  "threshold": 2.0,
+  "value": 2.5,
+  "step": 4,
+  "message": "run-7: val_loss is 2.5, > 2 at step 4",
+  "fire_count": 1,
+  "fired_at": 1700000000.0
+}
+```
+
+`message` is the same sentence the toast would have shown, since a chat endpoint renders a body it does not understand as nothing at all; the rest is the firing taken apart, so a receiver that is a program does not have to parse the sentence back. Nothing from the rule reaches the request except its url: the method, headers and body are the server's, redirects are not followed, and the request is given a short timeout. Nobody waits for the answer — an endpoint that is down or slow leaves `log_metrics` answering normally with the observation recorded, and the failure in the server log.
 
 #### vis.list_alerts
 
