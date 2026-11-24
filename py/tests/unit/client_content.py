@@ -815,10 +815,29 @@ def test_delete_envs_rejects_a_non_list(offline_client, bad):
         offline_client.delete_envs(bad)
 
 
-def test_delete_envs_rejects_a_non_string_entry(offline_client):
-    with patch.object(offline_client, "delete_env"):
+@pytest.mark.parametrize("bad", [7, None, {}])
+@pytest.mark.parametrize("prefix", [["keep"], ["first", "second"]])
+def test_delete_envs_rejects_a_non_string_entry(offline_client, bad, prefix):
+    with patch.object(offline_client, "delete_env") as delete:
         with pytest.raises(TypeError):
-            offline_client.delete_envs(["ok", 7])
+            offline_client.delete_envs(prefix + [bad])
+        delete.assert_not_called()
+
+
+def test_delete_envs_uses_validated_ids_when_caller_mutates_list(offline_client):
+    ids = ["first", "second"]
+
+    def delete_and_mutate(env):
+        if env == "first":
+            ids[1] = None
+            ids.append("third")
+        return "ok"
+
+    with patch.object(
+        offline_client, "delete_env", side_effect=delete_and_mutate
+    ) as delete:
+        assert offline_client.delete_envs(ids) == ["ok", "ok"]
+    assert [call.args[0] for call in delete.call_args_list] == ["first", "second"]
 
 
 # -------------------------------------------------- experiment messages ----
