@@ -1522,8 +1522,14 @@ class Visdom(object):
     ):
         ws = None
         try:
+            read_timeout = websocket.getdefaulttimeout()
+            setup_timeout = 20 if read_timeout is None else min(20, read_timeout)
             ws = websocket.create_connection(
-                sock_addr, header=header, redirect_limit=0, timeout=20, **connect_kwargs
+                sock_addr,
+                header=header,
+                redirect_limit=0,
+                timeout=setup_timeout,
+                **connect_kwargs,
             )
             if ws.getstatus() != 101:
                 location = (ws.getheaders() or {}).get("location")
@@ -1531,9 +1537,8 @@ class Visdom(object):
                     "Refused to follow the socket to {}, which would hand it "
                     "the API key".format(location)
                 )
-            # Apply the timeout only to connection setup. The setter interrupts
-            # reads when the client stops the socket.
-            ws.settimeout(None)
+            # Restore the caller's read timeout after the handshake.
+            ws.settimeout(read_timeout)
             self._keyed_websocket = ws
             while self.use_socket:
                 message = ws.recv()
@@ -1549,12 +1554,14 @@ class Visdom(object):
                 on_error(ws, error)
         finally:
             self._keyed_websocket = None
-            if ws is not None:
-                if self.use_socket:
-                    ws.close()
-                else:
-                    ws.shutdown()
-            on_close(ws)
+            try:
+                if ws is not None:
+                    if self.use_socket:
+                        ws.close()
+                    else:
+                        ws.shutdown()
+            finally:
+                on_close(ws)
 
     def setup_polling(self):
         self.setup_socket(polling=True)

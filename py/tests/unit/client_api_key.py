@@ -297,7 +297,13 @@ def test_a_socket_with_a_key_waits_before_it_reconnects(monkeypatch):
     assert waits == [3, 3]
 
 
-def test_keyed_socket_stop_aborts_read_and_cleans_up(monkeypatch):
+@pytest.mark.parametrize(
+    ("read_timeout", "setup_timeout"), [(None, 20), (0, 0), (3, 3), (45, 20)]
+)
+def test_keyed_socket_stop_aborts_read_and_cleans_up(
+    monkeypatch, read_timeout, setup_timeout
+):
+    monkeypatch.setattr("visdom.websocket.getdefaulttimeout", lambda: read_timeout)
     client = _socket_client(1)
     ws = Mock()
     ws.getstatus.return_value = 101
@@ -326,10 +332,10 @@ def test_keyed_socket_stop_aborts_read_and_cleans_up(monkeypatch):
         "wss://visdom.example/vis_socket",
         header=header,
         redirect_limit=0,
-        timeout=20,
+        timeout=setup_timeout,
         **options,
     )
-    ws.settimeout.assert_called_once_with(None)
+    ws.settimeout.assert_called_once_with(read_timeout)
     on_message.assert_not_called()
     on_error.assert_not_called()
     ws.abort.assert_called_once_with()
@@ -400,3 +406,37 @@ def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):
     on_error.assert_called_once_with(ws, error)
     ws.close.assert_called_once_with()
     on_close.assert_called_once_with(ws)
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_keyed_socket_stop_during_setup_skips_read(monkeypatch, cleanup_fails):
+    client = _socket_client(1)
+    ws = Mock()
+    ws.getstatus.return_value = 101
+    if cleanup_fails:
+        ws.shutdown.side_effect = OSError("shutdown failed")
+
+    def connect(*args, **kwargs):
+        client.use_socket = False
+        return ws
+
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+
+    def run():
+        client._run_keyed_websocket(
+            "ws://visdom.example/vis_socket", {}, {}, on_message, on_error, on_close
+        )
+
+    if cleanup_fails:
+        with pytest.raises(OSError, match="shutdown failed"):
+            run()
+    else:
+        run()
+
+    ws.recv.assert_not_called()
+    ws.shutdown.assert_called_once_with()
+    on_message.assert_not_called()
+    on_error.assert_not_called()
+    on_close.assert_called_once_with(ws)
+    assert client._keyed_websocket is None
