@@ -1508,6 +1508,9 @@ class Visdom(object):
             # Wake recv() even while bytes are still arriving for a frame.
             try:
                 ws.abort()
+            except OSError:
+                # The transport can close before shutdown reaches the socket.
+                pass
             except AttributeError:
                 # Older websocket-client versions can race with recv() clearing
                 # the transport after abort() checks whether it is connected.

@@ -365,6 +365,18 @@ def test_disabling_keyed_socket_handles_transport_cleared_during_abort(
     ws.abort.assert_called_once_with()
 
 
+def test_disabling_keyed_socket_tolerates_oserror_from_abort():
+    client = _socket_client(1)
+    ws = Mock()
+    ws.abort.side_effect = OSError("socket already closed")
+    client._keyed_websocket = ws
+
+    client.use_socket = False
+
+    assert client.use_socket is False
+    ws.abort.assert_called_once_with()
+
+
 def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):
     client = _socket_client(1)
     error = websocket.WebSocketTimeoutException("handshake timed out")
