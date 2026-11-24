@@ -59,10 +59,10 @@ On-disk layout under `env_path`:
 ```
 <env_path>/
   <eid>.json                 # one file per environment
-  hash_<sha256>.json         # fallback for ids too long to be a filename
+  hash_<sha256>.json         # fallback for long ids or case-colliding filenames
   view/layouts.json          # saved-views layout blob
   .undo/<eid>.json           # per-env closed-pane undo stack (atomic writes)
-  .undo/hash_<sha256>.json   # undo fallback for over-long ids
+  .undo/hash_<sha256>.json   # undo fallback for long ids or case collisions
 ```
 
 Key behaviours:
