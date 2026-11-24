@@ -30,10 +30,8 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 _Path = Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]
 _OptPath = Optional[_Path]
 
-
 class _WritableBinary(Protocol):
     def write(self, s: bytes, /) -> Any: ...
-
 
 # Plotly's write_image also accepts writable binary streams and file-like targets.
 _PlotlyTarget = Union[_Path, io.BufferedIOBase, io.RawIOBase, _WritableBinary]
