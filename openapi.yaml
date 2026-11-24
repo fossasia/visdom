@@ -839,9 +839,10 @@ paths:
         `metric`, or only the one whose `condition` is named.
 
         A rule is evaluated where the metrics it watches arrive, in
-        `POST /experiments/log` with `action: metrics`, and a rule that fires
-        broadcasts a `notification` command to the WebSocket and polling
-        clients watching that environment. Defining a rule on an experiment
+        `POST /experiments/log` with `action: metrics`. A `toast` rule that
+        fires broadcasts a `notification` command to the WebSocket and polling
+        clients watching that environment; a `webhook` rule POSTs to its url
+        instead. Defining a rule on an experiment
         that has finished is refused with 409: it would never record another
         observation for the rule to judge. Clearing one is allowed.
       requestBody:
@@ -914,11 +915,29 @@ paths:
                         any other condition.
                     action:
                       type: string
-                      enum: [toast]
+                      enum: [toast, webhook]
                       default: toast
                       description: >
                         How a firing is delivered. `toast` notifies every
-                        browser watching the environment.
+                        browser watching the environment. `webhook` POSTs the
+                        firing as JSON to `url` instead, and is refused with
+                        403 unless the server allows it.
+                    url:
+                      type: string
+                      maxLength: 2000
+                      nullable: true
+                      description: >
+                        Where a `webhook` rule posts to, `http` or `https`.
+                        Required by that action and refused on `toast`, which
+                        posts nowhere. A url carrying credentials
+                        (`https://host@elsewhere/`) is refused. The server is
+                        what makes the request, so where it may post is the
+                        operator's decision: the rule is refused with 403
+                        unless the server was started with `-allow_webhooks`
+                        and this host is named in `-webhook_hosts`, and
+                        loopback, link-local and private addresses are
+                        refused on top of that without
+                        `-allow_local_webhooks`.
                     message:
                       type: string
                       maxLength: 200
@@ -936,7 +955,12 @@ paths:
         "401":
           description: Authentication required but not provided.
         "403":
-          description: Alert writes are disabled in readonly mode.
+          description: >
+            Alert writes are disabled in readonly mode, or the rule is a
+            webhook this server may not post: webhooks disabled, the host not
+            named in the allowlist, or an address off the internet without the
+            local opt-in. The body names the flag that would change the
+            answer.
         "404":
           description: Clearing a rule on an environment with no experiment.
         "409":

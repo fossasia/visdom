@@ -232,16 +232,15 @@ class TestAlertValidation:
         with pytest.raises(ValueError):
             build_alert("loss", "stalled", goal=goal)
 
-    @pytest.mark.parametrize("action", ["webhook", "email", "", None])
-    def test_only_the_delivered_action_is_accepted(self, action):
-        # The webhook action is a separate change: refusing it here is what
-        # keeps a caller from configuring a delivery that silently never
-        # happens.
-        if action is None:
-            assert build_alert("loss", "nan", action=action).action == ACTION_TOAST
-            return
+    @pytest.mark.parametrize("action", ["email", "toasted", "", 7])
+    def test_an_unknown_action_is_refused(self, action):
+        # An action nobody delivers is a rule configured to do nothing, which
+        # is worse than a refusal: it looks armed on the record.
         with pytest.raises(ValueError):
             build_alert("loss", "nan", action=action)
+
+    def test_the_action_defaults_to_the_toast(self):
+        assert build_alert("loss", "nan", action=None).action == ACTION_TOAST
 
     def test_a_message_is_trimmed_and_bounded(self):
         assert build_alert("loss", "nan", message="  diverged  ").message == "diverged"
@@ -271,6 +270,108 @@ class TestAlertValidation:
         restored = Alert.from_dict({"key": "loss", "condition": "nan"})
         assert restored.for_steps == 1
         assert restored.fire_count == 0
+
+
+class TestWebhookRules:
+    """The url half of a rule: required by one action and refused by the other.
+
+    None of this asks whether the server may *reach* the host -- that answer
+    comes from the flags the server was started with, so it lives next to the
+    request in ``visdom.server.webhooks`` and is tested there. What a rule
+    owes on its own is a url that is a url.
+    """
+
+    def test_a_webhook_rule_keeps_its_url(self):
+        alert = build_alert(
+            "loss", "nan", action="webhook", url="  https://hooks.example.com/t  "
+        )
+        assert alert.action == "webhook"
+        assert alert.url == "https://hooks.example.com/t"
+
+    @pytest.mark.parametrize("url", [None, "", "   "])
+    def test_a_webhook_rule_needs_a_url(self, url):
+        with pytest.raises(ValueError):
+            build_alert("loss", "nan", action="webhook", url=url)
+
+    def test_a_toast_rule_refuses_a_url(self):
+        # The same shape as patience off the stall watch: a url that posts
+        # nowhere is a rule its author would have to read the source to
+        # understand.
+        with pytest.raises(ValueError):
+            build_alert("loss", "nan", url="https://hooks.example.com/t")
+
+    def test_a_toast_rule_has_an_empty_url(self):
+        assert build_alert("loss", "nan").url == ""
+        assert build_alert("loss", "nan", url=None).url == ""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "ftp://hooks.example.com/t",
+            "javascript:alert(1)",
+            "hooks.example.com/t",
+        ],
+    )
+    def test_only_http_and_https_are_posted_to(self, url):
+        with pytest.raises(ValueError):
+            build_alert("loss", "nan", action="webhook", url=url)
+
+    def test_credentials_in_a_url_are_refused(self):
+        # https://hooks.example.com@attacker.example/ is a request to
+        # attacker.example, and a secret on the experiment record besides.
+        with pytest.raises(ValueError):
+            build_alert(
+                "loss",
+                "nan",
+                action="webhook",
+                url="https://hooks.example.com@attacker.example/t",
+            )
+
+    @pytest.mark.parametrize(
+        "url", ["https://", "https:///t", "http://[notanaddress]/t", "http://h:70000/"]
+    )
+    def test_a_url_the_stdlib_cannot_take_apart_is_refused(self, url):
+        # Including the two that raise out of an accessor rather than out of
+        # the split: a bracketed address that is not one, and a port that is
+        # not a port. Both would otherwise come back as an OverflowError or an
+        # AttributeError from somewhere far from here.
+        with pytest.raises(ValueError):
+            build_alert("loss", "nan", action="webhook", url=url)
+
+    def test_a_url_is_bounded(self):
+        with pytest.raises(ValueError):
+            build_alert(
+                "loss",
+                "nan",
+                action="webhook",
+                url="https://hooks.example.com/" + "t" * 2100,
+            )
+
+    def test_a_webhook_rule_round_trips_through_its_dict(self):
+        alert = build_alert(
+            "loss", "> 2.0", action="webhook", url="https://hooks.example.com/t"
+        )
+        restored = Alert.from_dict(alert.to_dict())
+        assert restored.to_dict() == alert.to_dict()
+        assert restored.url == "https://hooks.example.com/t"
+
+    def test_a_record_written_before_webhooks_loads_with_no_url(self):
+        assert Alert.from_dict({"key": "loss", "condition": "nan"}).url == ""
+
+    def test_a_stored_webhook_rule_with_a_bad_url_is_refused_on_load(self):
+        # Validation on the way in as well as on the way out: a record edited
+        # by hand, or written by a version that allowed something this one
+        # does not, must not become a request this server then makes.
+        with pytest.raises(ValueError):
+            Alert.from_dict(
+                {
+                    "key": "loss",
+                    "condition": "nan",
+                    "action": "webhook",
+                    "url": "file:///etc/passwd",
+                }
+            )
 
 
 # --------------------------------------------------------------------- fold --

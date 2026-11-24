@@ -1858,6 +1858,7 @@ class Visdom(object):
         goal=None,
         action="toast",
         message=None,
+        url=None,
         env=None,
     ):
         """Watch a metric and be told when a rule about it holds.
@@ -1888,9 +1889,16 @@ class Visdom(object):
         breaks, so a metric that stays over its threshold is one notification
         rather than one per step.
 
-        `action` is how the firing is delivered, and `"toast"` — a
-        notification in every browser watching that environment — is the only
-        one so far. `message` replaces the generated text with one of your own.
+        `action` is how the firing is delivered. `"toast"` (the default) is a
+        notification in every browser watching that environment.
+        `"webhook"` POSTs the firing as JSON to `url` instead, for a Slack or
+        Discord endpoint — a browser nobody has open shows nobody a toast, so
+        this is the one that reaches you at three in the morning. It needs a
+        server started with `-allow_webhooks` and the url's host named in
+        `-webhook_hosts`, and is refused (403) otherwise: the server is what
+        makes the request, so where it may post is the operator's decision and
+        not the rule author's. `message` replaces the generated text with one
+        of your own, in the toast and in the webhook body alike.
 
         Setting the same `metric` and condition again replaces that rule, with
         its streak reset; a metric may carry several rules of different
@@ -1914,6 +1922,8 @@ class Visdom(object):
                 raise ValueError("patience must be at least 1")
         if message is not None and not isstr(message):
             raise TypeError("message must be a string")
+        if url is not None and not isstr(url):
+            raise TypeError("url must be a string")
 
         return self._experiment_request(
             {
@@ -1927,6 +1937,7 @@ class Visdom(object):
                     "goal": goal,
                     "action": action,
                     "message": message,
+                    "url": url,
                 },
             },
             "experiments/alerts",

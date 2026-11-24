@@ -214,8 +214,11 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
-11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
-12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
+11. `-allow_webhooks` : Let metric alert rules post to a webhook when they fire. Off by default, so an upgrade adds no outbound traffic until an operator asks for it; the hosts that may be reached still have to be named with `-webhook_hosts`.
+12. `-webhook_hosts` : Comma-separated hosts an alert webhook may be posted to, for example `hooks.slack.com,.example.com`. An entry with a leading dot matches that domain and its subdomains. Empty (the default) refuses every target, so this is required alongside `-allow_webhooks`.
+13. `-allow_local_webhooks` : Allow webhook targets that are loopback, link-local or private addresses. Refused by default, which is what keeps a rule from reading a cloud metadata service; it does not skip `-webhook_hosts`.
+14. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
+15. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
 
 The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
 
@@ -1837,6 +1840,7 @@ This function watches one of an env's metrics and has the server notify you when
 vis.set_alert("val_loss", "> 2.0", for_steps=3)
 vis.set_alert("accuracy", "stalled", patience=10, goal="max")
 vis.set_alert("loss", "nan", message="the loss diverged")
+vis.set_alert("loss", "nan", action="webhook", url="https://hooks.slack.com/services/...")
 ```
 
 Arguments:
@@ -1848,8 +1852,9 @@ Arguments:
 - `for_steps`: How many consecutive observations of `metric` the condition has to hold for before the rule fires. Defaults to `1`. A rule fires on the observation that completes its streak and not again until the streak breaks, so a metric that sits over its threshold for an hour is one notification rather than one per observation.
 - `patience`: Observations without an improvement before `stalled` fires. Defaults to `10`, and applies to that condition alone.
 - `goal`: Which direction counts as an improvement for `stalled`, `"min"` (the default, for a loss) or `"max"` (for an accuracy). Applies to that condition alone.
-- `action`: How the firing is delivered. `"toast"` — a notification in every browser watching that environment — is the only one so far.
-- `message`: Replaces the generated text with one of your own.
+- `action`: How the firing is delivered. `"toast"` (the default) is a notification in every browser watching that environment. `"webhook"` POSTs the firing as JSON to `url` instead, which is the one that reaches you when no browser is open.
+- `url`: Where a `"webhook"` rule posts to, `http` or `https`. Required by that action and refused by `"toast"`, which posts nowhere. The server makes the request, so where it may post is the operator's decision, not the rule author's: a webhook rule is refused with `403` unless the server was started with `-allow_webhooks` and the url's host is named in `-webhook_hosts`. Loopback, link-local and private addresses are refused on top of that unless it was also started with `-allow_local_webhooks`.
+- `message`: Replaces the generated text with one of your own, in the toast and in the webhook body alike.
 - `env`: Environment whose metrics to watch. Defaults to the client's env.
 
 Setting the same metric and condition again replaces that rule and resets its streak; a metric may carry several rules of different conditions at once. An environment is limited to 20 rules. Returns the environment's complete rule list.

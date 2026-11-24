@@ -2249,6 +2249,13 @@ class AlertsHandler(BaseHandler):
 
     A rule is evaluated where the metrics it watches arrive, in
     :class:`ExperimentLogHandler`; nothing here fires one.
+
+    A rule whose ``action`` is ``"webhook"`` is refused with 403 unless the
+    server was started with the flags that allow one and with its host named
+    among them. That is checked here, at set time, rather than where the
+    request would be made: a rule this server will not post is a rule that
+    would sit on the record looking armed and deliver nothing, and the person
+    who set it is here now with a response to read.
     """
 
     VALID_ACTIONS = ("get", "set", "clear")
@@ -2295,11 +2302,27 @@ class AlertsHandler(BaseHandler):
                     goal=spec.get("goal"),
                     action=spec.get("action"),
                     message=spec.get("message"),
+                    url=spec.get("url"),
                 ),
                 None,
             )
         except (TypeError, ValueError) as error:
             return None, str(error)
+
+    @staticmethod
+    def _webhook_refusal(handler, alert):
+        """Why this server will not take this rule, or ``None`` when it will.
+
+        Only a webhook rule has anywhere to be refused from -- a toast is
+        delivered over a socket the browser already opened, which is why it
+        needs no flag and no allowlist. The policy is asked again where the
+        request is actually made, because a rule outlives the flags it was set
+        under: it is on the experiment record, and the record is reloaded and
+        forked long after this process is gone.
+        """
+        if alert.action != alert_rules.ACTION_WEBHOOK:
+            return None
+        return handler.webhook_policy.refusal(alert.url)
 
     @staticmethod
     def _target(args):
@@ -2342,6 +2365,11 @@ class AlertsHandler(BaseHandler):
             alert, error = AlertsHandler._build(args)
             if error is not None:
                 AlertsHandler._refuse(handler, 400, error)
+                return
+
+            refusal = AlertsHandler._webhook_refusal(handler, alert)
+            if refusal is not None:
+                AlertsHandler._refuse(handler, 403, refusal)
                 return
 
             def mutate(store):

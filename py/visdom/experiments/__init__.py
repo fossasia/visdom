@@ -7,10 +7,13 @@
 # LICENSE file in the root directory of this source tree.
 
 from visdom.experiments.alerts import (
+    ACTION_TOAST,
+    ACTION_WEBHOOK,
     Alert,
     AlertEvent,
     build_alert,
     MAX_ALERTS_PER_ENV,
+    parse_webhook_url,
 )
 from visdom.experiments.compare import (
     ComparableExperiment,
@@ -60,6 +63,8 @@ from visdom.experiments.tags import (
 )
 
 __all__ = [
+    "ACTION_TOAST",
+    "ACTION_WEBHOOK",
     "Alert",
     "AlertEvent",
     "And",
@@ -92,6 +97,7 @@ __all__ = [
     "build_record",
     "flatten_experiments",
     "parse_query",
+    "parse_webhook_url",
     "resolve_targets",
     "retarget_experiment",
     "STATUS_FAILED",

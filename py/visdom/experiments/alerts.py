@@ -42,6 +42,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 CONDITION_GT = ">"
 CONDITION_LT = "<"
@@ -55,7 +56,18 @@ THRESHOLD_CONDITIONS = (CONDITION_GT, CONDITION_LT, CONDITION_EQ)
 VALID_CONDITIONS = THRESHOLD_CONDITIONS + (CONDITION_NAN, CONDITION_STALLED)
 
 ACTION_TOAST = "toast"
-VALID_ACTIONS = (ACTION_TOAST,)
+ACTION_WEBHOOK = "webhook"
+VALID_ACTIONS = (ACTION_TOAST, ACTION_WEBHOOK)
+
+# The schemes a webhook may be posted to. Everything else -- ``file:``,
+# ``gopher:``, a scheme the url author invented -- is refused where the rule
+# is written rather than skipped where it would have been sent, so a rule that
+# can never be delivered cannot be stored in the first place.
+WEBHOOK_SCHEMES = ("http", "https")
+
+# A url is user input kept on the record, so it is bounded the way the message
+# is. Browsers stop caring somewhere above 2000 characters and so does this.
+MAX_URL_LENGTH = 2000
 
 GOAL_MIN = "min"
 GOAL_MAX = "max"
@@ -224,6 +236,57 @@ def condition_name(text: Any) -> str:
     return parse_condition(candidate)[0]
 
 
+def parse_webhook_url(text: Any) -> str:
+    """The url a webhook rule posts to, refusing everything it is not.
+
+    Shape only: a scheme this server speaks, a host to send it to, no
+    credentials, and a length. *Whether* that host may be reached is a
+    different question with a different answer, asked by
+    :mod:`visdom.server.webhooks` -- it depends on the flags the server was
+    started with rather than on the rule, so the same rule is legal on one
+    server and refused on another, and a rule reloaded from a record written
+    before those flags changed still has to parse.
+    """
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(
+            "the {0!r} action needs a url to post to".format(ACTION_WEBHOOK)
+        )
+    url = text.strip()
+    if len(url) > MAX_URL_LENGTH:
+        raise ValueError(
+            "a webhook url is limited to {0} characters".format(MAX_URL_LENGTH)
+        )
+
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        # Read for the check, not for the value. A bracketed address that is
+        # not one and a port that is not a number both raise out of the
+        # accessor rather than out of the split, which is why all three are in
+        # one try: a url the stdlib cannot take apart is not a url this server
+        # should be storing.
+        parsed.port
+    except ValueError as error:
+        raise ValueError("{0!r} is not a url: {1}".format(url, error))
+
+    if parsed.scheme not in WEBHOOK_SCHEMES:
+        raise ValueError(
+            "a webhook url must be {0}, got {1!r}".format(
+                " or ".join(WEBHOOK_SCHEMES), parsed.scheme or url
+            )
+        )
+    if "@" in parsed.netloc:
+        # Credentials in a url are a secret written onto the experiment record
+        # and the oldest way to make a hostile url read as a friendly one:
+        # https://hooks.example.com@attacker.example/ is a request to
+        # attacker.example. Refused rather than stripped, so nobody is told
+        # their secret was kept and then quietly dropped.
+        raise ValueError("a webhook url must not carry credentials")
+    if not host:
+        raise ValueError("{0!r} names no host to post to".format(url))
+    return url
+
+
 @dataclass
 class Alert:
     """One alert rule, with the state that decides when it fires.
@@ -237,6 +300,8 @@ class Alert:
     ``patience`` and ``goal`` belong to ``stalled`` alone and are refused on
     any other condition -- a ``patience`` silently doing nothing beside a
     ``>`` is a rule its author would have to read the source to understand.
+    ``url`` is the same shape of rule for ``action``: required by ``webhook``
+    and refused by ``toast``, which posts nowhere.
 
     The remaining fields are the fold's running state, and are part of the
     stored record on purpose: a restarted server picks up a streak where it
@@ -251,6 +316,7 @@ class Alert:
     goal: Optional[str] = None
     action: str = ACTION_TOAST
     message: str = ""
+    url: str = ""
     created_at: float = field(default_factory=time.time)
     streak: int = 0
     fire_count: int = 0
@@ -331,6 +397,17 @@ class Alert:
                 )
             )
 
+        if self.url is None:
+            self.url = ""
+        if self.action == ACTION_WEBHOOK:
+            self.url = parse_webhook_url(self.url)
+        elif self.url:
+            raise ValueError(
+                "a url applies to the {0!r} action only; {1!r} posts nowhere".format(
+                    ACTION_WEBHOOK, self.action
+                )
+            )
+
     @property
     def rule_id(self) -> tuple:
         """What makes two rules the same rule.
@@ -351,6 +428,7 @@ class Alert:
             "goal": self.goal,
             "action": self.action,
             "message": self.message,
+            "url": self.url,
             "created_at": self.created_at,
             "streak": self.streak,
             "fire_count": self.fire_count,
@@ -371,6 +449,7 @@ class Alert:
             goal=data.get("goal"),
             action=data.get("action", ACTION_TOAST),
             message=data.get("message", ""),
+            url=data.get("url", ""),
             created_at=data.get("created_at", time.time()),
             streak=data.get("streak", 0),
             fire_count=data.get("fire_count", 0),
@@ -410,6 +489,7 @@ def build_alert(
     goal: Any = None,
     action: Any = ACTION_TOAST,
     message: Any = None,
+    url: Any = None,
 ) -> Alert:
     """An :class:`Alert` from the written form a caller sends.
 
@@ -427,6 +507,7 @@ def build_alert(
         goal=goal,
         action=ACTION_TOAST if action is None else action,
         message=message,
+        url=url,
     )
 
 

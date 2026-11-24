@@ -165,6 +165,7 @@ class Visdom:
         goal: _OptStr = ...,
         action: Text = ...,
         message: _OptStr = ...,
+        url: _OptStr = ...,
         env: _OptStr = ...,
     ) -> _AlertList: ...
     def list_alerts(self, env: _OptStr = ...) -> _AlertQueryReply: ...

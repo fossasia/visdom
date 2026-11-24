@@ -249,6 +249,92 @@ class TestAlertsEndpoint(AlertsTestCase):
         self.assertEqual(len(self.stored_alerts("forked")), 1)
 
 
+class TestWebhookRulesAreRefusedByDefault(AlertsTestCase):
+    """A server nobody configured takes no webhook rule at all.
+
+    The refusal is at set time, which is the whole point of the flag: a rule
+    the server would never post is a rule that would sit on the record looking
+    armed, and the person who set it is here now with a response to read.
+    """
+
+    def test_a_webhook_rule_is_403(self):
+        response = self.set_alert(action="webhook", url="https://hooks.example.com/t")
+
+        self.assertEqual(response.code, 403)
+        body = json.loads(response.body)
+        self.assertFalse(body["success"])
+        self.assertIn("-allow_webhooks", body["error"])
+
+    def test_nothing_is_stored_for_a_refused_rule(self):
+        self.set_alert(action="webhook", url="https://hooks.example.com/t")
+        self.assertEqual(self.stored_alerts(), [])
+
+    def test_a_toast_rule_is_unaffected(self):
+        self.assertEqual(self.set_alert().code, 200)
+
+    def test_a_webhook_rule_with_no_url_is_400_not_403(self):
+        # The rule is unreadable before the policy is ever asked: a caller who
+        # forgot the url gets told that rather than being told about a flag.
+        response = self.set_alert(action="webhook")
+
+        self.assertEqual(response.code, 400)
+        self.assertNotIn("-allow_webhooks", json.loads(response.body)["error"])
+
+
+class TestWebhookRulesWithTheFlags(AlertsTestCase):
+    app_kwargs = {
+        "allow_webhooks": True,
+        "webhook_hosts": ["hooks.example.com", ".relay.example"],
+    }
+
+    def test_an_allowed_host_is_stored_with_its_url(self):
+        response = self.set_alert(action="webhook", url="https://hooks.example.com/t")
+
+        self.assertEqual(response.code, 200)
+        rules = json.loads(response.body)
+        self.assertEqual(rules[0]["action"], "webhook")
+        self.assertEqual(rules[0]["url"], "https://hooks.example.com/t")
+        self.assertEqual(self.stored_alerts(), rules)
+
+    def test_a_subdomain_of_a_dotted_entry_is_allowed(self):
+        response = self.set_alert(
+            metric="acc", action="webhook", url="https://eu.relay.example/t"
+        )
+        self.assertEqual(response.code, 200)
+
+    def test_a_host_nobody_named_is_403(self):
+        response = self.set_alert(action="webhook", url="https://attacker.example/t")
+
+        self.assertEqual(response.code, 403)
+        self.assertIn("-webhook_hosts", json.loads(response.body)["error"])
+
+    def test_a_loopback_target_is_403_even_when_named(self):
+        # The allowlist says which hosts, and the local flag says whether an
+        # address off the internet counts. This server set only the first.
+        response = self.set_alert(action="webhook", url="http://127.0.0.1:9/t")
+
+        self.assertEqual(response.code, 403)
+        self.assertIn("-allow_local_webhooks", json.loads(response.body)["error"])
+
+    def test_the_metadata_service_is_403(self):
+        response = self.set_alert(
+            action="webhook", url="http://169.254.169.254/latest/meta-data/"
+        )
+        self.assertEqual(response.code, 403)
+
+    def test_a_scheme_this_server_does_not_speak_is_400(self):
+        response = self.set_alert(action="webhook", url="file:///etc/passwd")
+        self.assertEqual(response.code, 400)
+
+    def test_a_toast_rule_still_refuses_a_url(self):
+        response = self.set_alert(url="https://hooks.example.com/t")
+        self.assertEqual(response.code, 400)
+
+    def test_a_webhook_rule_can_be_cleared_like_any_other(self):
+        self.set_alert(action="webhook", url="https://hooks.example.com/t")
+        self.assertEqual(json.loads(self.clear_alert().body), [])
+
+
 class TestAlertsReadonly(AlertsTestCase):
     app_kwargs = {"readonly": True}
 

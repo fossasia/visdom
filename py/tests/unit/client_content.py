@@ -1017,6 +1017,7 @@ def test_set_alert_message(offline_client):
         "goal": None,
         "action": "toast",
         "message": "too high",
+        "url": None,
     }
 
 
@@ -1024,6 +1025,18 @@ def test_set_alert_carries_the_stall_knobs_only_when_given(offline_client):
     with echoes(offline_client):
         msg, _ = offline_client.set_alert("acc", "stalled", patience=4, goal="max")
     assert (msg["alert"]["patience"], msg["alert"]["goal"]) == (4, "max")
+
+
+def test_set_alert_carries_a_webhook_target(offline_client):
+    # The client does not ask whether the server allows the host: the policy
+    # is the operator's and lives there, so the url goes up as written and
+    # comes back refused if it is not one that server may post to.
+    with echoes(offline_client):
+        msg, _ = offline_client.set_alert(
+            "loss", "nan", action="webhook", url="https://hooks.example.com/t"
+        )
+    assert msg["alert"]["action"] == "webhook"
+    assert msg["alert"]["url"] == "https://hooks.example.com/t"
 
 
 def test_set_alert_env_override(offline_client):
@@ -1085,6 +1098,7 @@ def test_set_alert_decodes_the_rule_list(offline_client):
         lambda v: v.set_alert("loss", "> 2.0", for_steps=True),
         lambda v: v.set_alert("loss", "stalled", patience=1.5),
         lambda v: v.set_alert("loss", "nan", message=7),
+        lambda v: v.set_alert("loss", "nan", action="webhook", url=7),
         lambda v: v.clear_alert(""),
         lambda v: v.clear_alert("loss", condition=7),
     ],
@@ -1098,6 +1112,7 @@ def test_set_alert_decodes_the_rule_list(offline_client):
         "for_steps_a_bool",
         "patience_not_an_int",
         "message_not_a_string",
+        "url_not_a_string",
         "clear_empty_metric",
         "clear_condition_not_a_string",
     ],
