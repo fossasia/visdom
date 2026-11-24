@@ -15,9 +15,8 @@ from abc import ABC, abstractmethod
 #: failure. Compared by identity, never by equality.
 UNREADABLE_JSON = object()
 
-#: Returned by :func:`read_json_file` instead of its default, when the caller
-#: asks for it, for a file that opened but did not parse. Only that case says
-#: the file itself is damaged: a failed open may be transient.
+#: Returned by :func:`read_json_file`, when asked for, if a file opened but did
+#: not parse.
 CORRUPT_JSON = object()
 
 
@@ -32,11 +31,8 @@ def read_json_file(path, default=UNREADABLE_JSON, corrupt=None):
     cannot be confused with a successful parse. ``UnicodeDecodeError`` needs
     no separate clause; it is a :class:`ValueError`.
 
-    A caller that needs to tell a damaged file from one it could not open
-    passes ``corrupt``, which is returned instead of ``default`` when the file
-    opened but did not parse -- including JSON nested deeper than the decoder
-    can follow, which raises :class:`RecursionError` rather than a
-    :class:`ValueError`.
+    ``corrupt``, if given, is returned instead when the file opened but did
+    not parse.
     """
     try:
         with open(path, "r", encoding="utf-8") as fn:

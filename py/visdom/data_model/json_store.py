@@ -172,9 +172,7 @@ class JSONStore(DataStore):
         self._meta_bytes = 0
         self._meta_cache_bytes = meta_cache_bytes
         self._meta_lock = threading.Lock()
-        # Held while a file is swapped into place and while a damaged one is
-        # moved aside, so a save landing between reading a file and moving it
-        # cannot have its fresh copy moved instead.
+        # Shared by saves and set-asides, so a save can't be moved aside.
         self._replace_lock = threading.Lock()
 
     def __deepcopy__(self, memo):
@@ -378,23 +376,9 @@ class JSONStore(DataStore):
         return env
 
     def _set_aside_corrupt_env(self, eid, path):
-        """Move an env file that does not parse out of the way; start it empty.
+        """Move a file that no longer parses aside and start the env empty.
 
-        A file cut short by a full disk, a crash or a sync tool used to leave
-        its env unwritable: every load failed, so every write to it answered
-        500 for as long as the file stayed there. Starting the env empty in
-        place would be worse -- its next save would overwrite the file and
-        whatever could still be recovered from it. So the file is renamed,
-        never edited or deleted, to a name ``list_envs`` does not pick up, the
-        new name is logged, and the env starts empty so logging can continue.
-
-        If the file cannot be moved, nothing is pretended: ``{}`` is returned
-        as before, and the env stays unwritable rather than overwriting it.
-
-        ``load_env`` is also called off the storage worker, so a save of the
-        same env can land between the read and the move. The file is read
-        again under the lock every replace takes, and moved only if it is
-        still damaged; otherwise this returns None and the caller reads it.
+        Returns None if a save replaced the file meanwhile.
         """
         with self._replace_lock:
             again = read_json_file(path, corrupt=CORRUPT_JSON)
@@ -413,9 +397,7 @@ class JSONStore(DataStore):
             try:
                 os.rename(path, target)
             except OSError as e:
-                # A name already near the length limit has no room for the
-                # suffix; a short name derived from it still leaves the file
-                # findable next to where it was, and the log says which.
+                # No room for the suffix: use a short name instead.
                 if (
                     e.errno != errno.ENAMETOOLONG
                     and getattr(e, "winerror", None) != 206
@@ -448,13 +430,7 @@ class JSONStore(DataStore):
 
     @staticmethod
     def _corrupt_target(path, stamp, short=False):
-        """A free name next to ``path`` to move a damaged env file to.
-
-        ``short`` swaps the file name for a digest of it, for a name too long
-        to take the suffix. Never one that exists: the storage worker is the
-        only thing that writes here, so a name free now is still free when
-        the file is moved.
-        """
+        """A free name next to ``path`` for a damaged env file."""
         directory, name = os.path.split(path)
         if short:
             digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]

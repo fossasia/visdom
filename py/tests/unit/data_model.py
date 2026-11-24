@@ -1278,11 +1278,7 @@ def test_a_corrupt_env_file_is_set_aside_and_the_env_starts_empty(store, env_pat
 
 @needs_file_permissions
 def test_a_file_that_cannot_be_opened_is_not_moved(store, env_path):
-    """Only a file that was read and found damaged is set aside.
-
-    A failed open can be transient (no file descriptors left, a network drive
-    that dropped out), so it says nothing about the file and must not move it.
-    """
+    """Only a file that was read and found damaged is set aside."""
     store.save_env("run", _env())
     path = os.path.join(env_path, "run.json")
     os.chmod(path, 0)
@@ -1337,12 +1333,7 @@ def test_a_corrupt_file_with_a_long_name_is_set_aside_under_a_short_one(
 
 
 def test_a_file_saved_after_it_was_read_is_not_moved(store, env_path, monkeypatch):
-    """A save between reading a damaged file and moving it wins.
-
-    ``load_env`` also runs off the storage worker, so the worker can replace
-    the file in that gap. The file is checked again before it is moved, and
-    the env the save wrote is what the read returns.
-    """
+    """A save between reading a damaged file and moving it wins."""
     path, _ = _write_corrupt_env(store, env_path)
     real_read = json_store_module.read_json_file
     calls = []
