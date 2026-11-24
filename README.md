@@ -1053,7 +1053,7 @@ audio). The `(channels, N)` layout that torchaudio and librosa return (`1xN` or
 
 The following `opts` are supported:
 
-- `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+- `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
 
 Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
@@ -1412,9 +1412,12 @@ that specifies the value at each location in the contour plot.
 The following `opts` are supported:
 
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+- `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+When either color limit is supplied, the missing limit defaults to the corresponding
+minimum or maximum of `X`. Without explicit limits, Plotly chooses the color domain.
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the
