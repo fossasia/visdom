@@ -630,7 +630,7 @@ pretty-printer the save path and the non-append `/update` still use.
 |---|------|-------------------|
 | 4f | Per-env write locks instead of one global storage worker | Gated on "only worth it once a profile shows the single worker is the bottleneck". The profile exists now and it does not: what the save path spent was the `copy.deepcopy` ahead of it, on the loop, which #2042 cut by 10x. The worker is not the queue. Still not worth doing, now for a measured reason rather than an assumed one |
 | 4h | Native async plotting bodies in `AsyncVisdom` | Same gate — "only worth doing if the bridge's thread pool shows up in a profile". It does not. What was actually expensive in a plotting body was per-point Python in the payload builders (#2022) and the import cost paid once (#1970), and both were fixed without forking a single method. The bar for forking 40+ plotting methods is now higher than before, not lower |
-| 7f | Drop `"compiled_template_cache": False` from the app settings | Removed from `tornado_settings` in `py/visdom/server/app.py`. In production mode (`debug=False`), Tornado enables compiled template caching by default rather than recompiling templates on every request; debug mode continues to disable template caching automatically. |
+| 7f | Drop `"compiled_template_cache": False` from the app settings | Removed from `tornado_settings` in `py/visdom/server/app.py` and added explicit `-debug` CLI flag and `debug` argument to `Application`. In production mode (`debug=False`), Tornado enables compiled template caching by default rather than recompiling templates on every request; debug mode disables template caching and enables live reload. |
 
 ---
 

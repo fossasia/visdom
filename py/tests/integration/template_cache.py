@@ -8,10 +8,12 @@
 
 """Tests for compiled template caching behavior in server settings."""
 
+import asyncio
+
 import pytest
 import tornado.web
 
-from visdom.server.app import tornado_settings
+from visdom.server.app import Application, tornado_settings
 
 pytestmark = pytest.mark.integration
 
@@ -36,3 +38,21 @@ def test_template_caching_disabled_in_debug():
     settings["autoreload"] = False
     app = tornado.web.Application([], **settings)
     assert app.settings.get("compiled_template_cache", True) is False
+
+
+def test_application_explicit_debug_flag(tmp_path):
+    """Application accepts an explicit debug flag and configures template caching."""
+    app_prod = Application(env_path=str(tmp_path), debug=False)
+    assert app_prod.settings.get("debug") is False
+    assert app_prod.settings.get("compiled_template_cache", True) is True
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        app_dbg = Application(env_path=str(tmp_path), debug=True)
+        assert app_dbg.settings.get("debug") is True
+        assert app_dbg.settings.get("compiled_template_cache", True) is False
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+

@@ -52,7 +52,7 @@ Add to all new files:
 
 ## Server Flags
 
-`-port` (8097), `--hostname`, `-base_url`, `-env_path` (~/.visdom/), `-logging_level`, `-readonly`, `-enable_login`, `-force_new_cookie`, `-bind_local`, `-eager_data_loading`, `-use_frontend_client_polling`.
+`-port` (8097), `--hostname`, `-base_url`, `-env_path` (~/.visdom/), `-logging_level`, `-readonly`, `-enable_login`, `-force_new_cookie`, `-bind_local`, `-eager_data_loading`, `-use_frontend_client_polling`, `-debug`.
 
 ## Auth via Environment
 

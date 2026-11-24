@@ -179,6 +179,7 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
         save_interval=DEFAULT_SAVE_INTERVAL,
         save_threshold=DEFAULT_SAVE_THRESHOLD,
+        debug=None,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
@@ -204,6 +205,8 @@ class Application(tornado.web.Application):
         self.wrap_socket = use_frontend_client_polling
 
         settings = dict(tornado_settings)
+        if debug is not None:
+            settings["debug"] = bool(debug)
         # Polling wrappers are reaped by ``ServerState`` instead; this reaches
         # only real websockets. The pong deadline is left at tornado's default,
         # which is the interval itself.
