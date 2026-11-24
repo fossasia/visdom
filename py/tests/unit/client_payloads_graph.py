@@ -636,6 +636,32 @@ def test_parallel_coordinates_keeps_an_explicit_size(capture_send):
     assert sent["payload"]["opts"]["height"] == 45
 
 
+def test_parallel_coordinates_leaves_caller_opts_alone(capture_send):
+    opts = {"title": "experiments"}
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(X=np.array([[1.0, 2.0]]), opts=opts)
+    )
+    assert sent["payload"]["opts"]["width"] == 600
+    assert sent["payload"]["opts"]["height"] == 450
+    assert opts == {"title": "experiments"}
+
+
+def test_parallel_coordinates_reuses_opts_without_stale_dimensions_or_size(
+    capture_send,
+):
+    opts = {"title": "experiments"}
+    sent_small = capture_send(
+        lambda v: v.parallel_coordinates(X=np.ones((2, 2)), opts=opts)
+    )
+    assert sent_small["payload"]["opts"]["width"] == 600
+
+    sent_wide = capture_send(
+        lambda v: v.parallel_coordinates(X=np.ones((2, 12)), opts=opts)
+    )
+    assert sent_wide["payload"]["opts"]["width"] == 12 * 140
+    assert opts == {"title": "experiments"}
+
+
 @requires_assertions
 @pytest.mark.parametrize(
     "kwargs, message",
