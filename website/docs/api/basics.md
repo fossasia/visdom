@@ -175,7 +175,7 @@ Using `tensor` input requires that ffmpeg is installed and working. Your ability
 vis.svg(svgstr=None, svgfile=None, win=None, env=None, opts=None)
 ```
 
-This function draws an SVG object. It takes as input a SVG string `svgstr` or the name of an SVG file `svgfile`. No specific `opts` are supported.
+This function draws an SVG object. It takes as input a SVG string `svgstr` or the name of an SVG file `svgfile` (`pathlib.Path`, `os.PathLike`, and `bytes` paths are accepted too). No specific `opts` are supported.
 
 ```python
 # From a string
@@ -221,7 +221,7 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 :::
 
-**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. Both require the optional `kaleido` package: `pip install kaleido`.
+**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. `save_path` and the `filepath` argument accept `pathlib.Path`, `os.PathLike`, and `bytes` paths, not just strings. Both methods require the optional `kaleido` package: `pip install kaleido`.
 
 ```python
 import plotly.graph_objects as go

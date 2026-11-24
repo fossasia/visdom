@@ -2417,8 +2417,8 @@ class Visdom(object):
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
         This function draws an SVG object. It takes as input an SVG string or
-        the name of an SVG file. The function does not support any
-        plot-specific `opts`.
+        the name or `pathlib.Path` of an SVG file (`os.PathLike` supported).
+        The function does not support any plot-specific `opts`.
         """
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
@@ -2494,8 +2494,10 @@ class Visdom(object):
         Args:
             figure: A Plotly Figure object (e.g. from plotly.graph_objects or
                 make_subplots).
-            filepath: Path for the output file (e.g. "plot.png", "figure.svg").
-                The format is inferred from the extension (png, svg, pdf, etc.).
+            filepath: Path for the output file (e.g. "plot.png", "figure.svg"),
+                or a `pathlib.Path` / `os.PathLike` / `bytes` value. The format
+                is inferred from the extension (png, svg, pdf, etc.). File-like
+                objects are forwarded to Plotly untouched.
             **kwargs: Optional arguments passed to Plotly's write_image (e.g.
                 width, height, scale).
 
@@ -2512,6 +2514,8 @@ class Visdom(object):
                 "Plotly must be installed to save Plotly figures. "
                 "Install with: pip install plotly"
             )
+        if isinstance(filepath, (os.PathLike, bytes)):
+            filepath = os.fsdecode(filepath)
         try:
             figure.write_image(filepath, **kwargs)
         except ValueError as e:
@@ -2529,7 +2533,8 @@ class Visdom(object):
         figure's layout.
 
         To save the figure as an image from code (without using the browser
-        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        download button), pass save_path (e.g. save_path="plot.png"; a
+        `pathlib.Path`, `os.PathLike`, or `bytes` is accepted too). Optional
         arguments for Plotly's write_image should be passed via save_kwargs,
         e.g. save_kwargs={"width": 800, "height": 600}. This requires the
         optional 'kaleido' package (pip install kaleido).
