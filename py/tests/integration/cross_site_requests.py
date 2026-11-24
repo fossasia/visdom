@@ -6,14 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Requests a browser sends on behalf of another site's page are refused.
-
-Browsers label where a request came from: ``Sec-Fetch-Site`` on current ones,
-``Origin`` on older ones. The visdom UI only talks to its own origin, so a
-state-changing request labelled as coming from elsewhere is refused with 403.
-Callers that are not browsers -- the python client, curl -- send neither
-header and must keep working, as must reads.
-"""
+"""State-changing requests from another site's page are refused with 403."""
 
 import json
 
@@ -47,8 +40,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertTrue(self.env_exists("victim"))
 
     def test_same_site_page_on_another_port_is_refused(self):
-        # localhost:9000 and localhost:8097 are the same site but not the same
-        # origin, so a page on another local port must not get through either.
         text_pane = {
             "eid": "planted",
             "data": [{"type": "text", "content": "<b>from another page</b>"}],
@@ -88,8 +79,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200)
 
     def test_origin_matching_the_proxy_forwarded_host_is_allowed(self):
-        # Behind a reverse proxy Host may be rewritten to the upstream name,
-        # while the browser's Origin carries the public one.
         resp = self.post_from(
             "/delete_env",
             {"eid": "victim"},
@@ -102,9 +91,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200)
 
     def test_an_http_page_is_refused_by_an_https_server(self):
-        # http://host and https://host are different origins. An http page is
-        # the one a network attacker can tamper with, so it must not reach a
-        # server the browser talks to over https.
         resp = self.post_from(
             "/delete_env",
             {"eid": "victim"},
@@ -118,9 +104,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertTrue(self.env_exists("victim"))
 
     def test_without_forwarded_proto_only_the_arrival_scheme_is_accepted(self):
-        # A proxy that ends TLS without X-Forwarded-Proto leaves no way to tell
-        # an https page from an http one, so only the scheme the request came
-        # in on is accepted, and the operator is told what to set.
         handlers.base_handlers._warned_unmatched_proxy_origin = False
         here = "localhost:%d" % self.get_http_port()
         with self.assertLogs(level="WARNING") as logs:
@@ -130,8 +113,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 403)
         self.assertTrue(self.env_exists("victim"))
         self.assertIn("X-Forwarded-Proto", "\n".join(logs.output))
-
-    # nginx's usual ``proxy_set_header Host $host`` drops the port.
 
     def behind_nginx(self, origin, **forwarded):
         headers = {"Host": "visdom.example.org", "X-Forwarded-Proto": "https"}
@@ -191,8 +172,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200)
 
     def test_origin_must_be_exactly_scheme_and_host(self):
-        # A browser sends Origin as scheme://host only; a path, query, missing
-        # host or credentials means it is not a real Origin, so it is refused.
         here = "localhost:%d" % self.get_http_port()
         for origin in (
             "http://%s/path" % here,
@@ -217,8 +196,6 @@ class TestCrossSiteRequests(VisdomHTTPTestCase):
         resp = self.fetch("/socket_wrap", headers={"Sec-Fetch-Site": "same-origin"})
         self.assertEqual(resp.code, 200)
         self.assertTrue(json.loads(resp.body)["success"])
-
-    # The socket handshake goes through the same check as the HTTP handlers.
 
     async def open_socket(self, path, **headers):
         here = "127.0.0.1:%d" % self.get_http_port()

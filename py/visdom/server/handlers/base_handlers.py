@@ -46,17 +46,9 @@ TRUSTED_FETCH_SITES = {"same-origin", "none"}
 
 
 def is_cross_site_request(request, get_changes_state=False):
-    """Return True when a browser sent this request from another site's page.
+    """True when a browser sent this request from another site's page.
 
-    A page on any site can make the user's browser POST to a visdom server,
-    and a text/plain body skips the CORS preflight, so the request would run
-    without the user knowing. Browsers mark where a request came from, and
-    the visdom UI only ever talks to its own origin, so anything else is
-    refused. The python client, curl and other non-browser callers send
-    neither header and are unaffected.
-
-    Reads are let through, except on handlers whose GET allocates server-side
-    state (``get_changes_state``), such as the polling handshake.
+    Non-browser clients send neither header and are not affected.
     """
     if request.method in SAFE_METHODS and not get_changes_state:
         return False
@@ -69,23 +61,8 @@ def is_cross_site_request(request, get_changes_state=False):
         return False
     if origin == "null":
         return True
-    # Older browsers send Origin but not Sec-Fetch-Site, so it must name this
-    # server's own origin: a browser serializes it as scheme://host[:port]
-    # with no path, query or credentials, so anything else is refused too.
-    # A proxy may rewrite the scheme, host and port, so the ones the browser
-    # used may arrive as X-Forwarded-Proto/-Host/-Port. These are trusted
-    # without a proxy allow-list: a page cannot set them on a cross-site
-    # request without a CORS preflight, which visdom does not grant, and
-    # callers that can set them freely (curl, scripts) are not stopped by
-    # this check anyway.
-    #
-    # Without X-Forwarded-Proto the server cannot know which scheme the
-    # browser used, so it assumes the one the request arrived on and accepts
-    # no other. Accepting both would let an http page post to a site served
-    # over https -- the downgrade a network attacker could use. The same goes
-    # for the port: nginx's usual ``Host $host`` drops it, so a host without
-    # one stands for the scheme's default port unless X-Forwarded-Port says
-    # otherwise. A case this cannot match is logged with what to set.
+    # Older browsers send only Origin. Compare it with our own origin, taking
+    # scheme, host and port from X-Forwarded-* when a proxy sets them.
     wanted = _parse_origin(origin)
     if wanted is None:
         return True
@@ -107,13 +84,7 @@ DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def _parse_origin(origin, port_if_missing=""):
-    """``(scheme, hostname, port)`` of a ``scheme://host[:port]`` origin.
-
-    Returns None for anything else -- a path, a query, credentials, a missing
-    host or an unknown scheme -- since no browser sends an Origin like that.
-    A missing port is ``port_if_missing`` when given, else the scheme's
-    default, so ``https://host`` and ``https://host:443`` compare equal.
-    """
+    """``(scheme, hostname, port)`` of an origin, or None if malformed."""
     scheme, sep, authority = origin.lower().partition("://")
     if not sep or scheme not in DEFAULT_PORTS or not authority:
         return None
@@ -283,14 +254,7 @@ class BaseWebSocketHandler(
         return self.get_secure_cookie("user_password")
 
     def check_origin(self, origin):
-        """Apply the HTTP handlers' cross-site rule to the socket handshake.
-
-        tornado's own check trusts an Origin only when it matches the Host
-        header, so behind a proxy that rewrites Host it refused the dashboard's
-        own socket, and before tornado 6.6 it ignored Sec-Fetch-Site. Opening a
-        socket subscribes it to every update, so the handshake is checked like
-        a request that changes state, with the same proxy headers honoured.
-        """
+        """Check the socket handshake like the HTTP handlers do."""
         return not is_cross_site_request(self.request, get_changes_state=True)
 
     def write_message(self, message, binary=False):
@@ -384,8 +348,7 @@ class BaseHandler(
             return False
         return True
 
-    # Set on handlers whose GET creates server-side state, so a cross-site
-    # page cannot trigger it either.
+    # True on handlers whose GET creates server-side state.
     get_changes_state = False
 
     def __init__(self, *request, **kwargs):
