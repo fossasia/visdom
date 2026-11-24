@@ -15,6 +15,7 @@ from visdom import server
 import os
 import os.path
 import requests
+import socket
 import ssl
 import traceback
 import threading
@@ -53,6 +54,45 @@ import sys
 
 if sys.version_info < (3, 12):
     raise RuntimeError("Visdom requires Python 3.12 or newer.")
+
+
+_KEYED_WEBSOCKET_SETUP_TIMEOUT = 20
+
+
+class _KeyedWebSocket(websocket.WebSocket):
+    def connect(self, url, **options):
+        # websocket-client's timeout applies to each read during the upgrade.
+        # Interrupt the transport if the whole handshake takes too long.
+        finished = threading.Event()
+        expired = threading.Event()
+
+        def interrupt_handshake():
+            expired.set()
+            while not finished.is_set():
+                transport = self.sock
+                if transport is not None:
+                    try:
+                        transport.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    return
+                # DNS, proxy, or TLS setup may still own the transport.
+                if finished.wait(0.05):
+                    return
+
+        timer = threading.Timer(_KEYED_WEBSOCKET_SETUP_TIMEOUT, interrupt_handshake)
+        timer.start()
+        try:
+            super().connect(url, **options)
+        finally:
+            finished.set()
+            timer.cancel()
+            timer.join()
+            if expired.is_set():
+                self.shutdown()
+                raise websocket.WebSocketTimeoutException(
+                    "WebSocket handshake timed out"
+                )
 
 
 def _normalize_tsne(Y):
@@ -1523,11 +1563,14 @@ class Visdom(object):
         ws = None
         try:
             read_timeout = websocket.getdefaulttimeout()
-            setup_timeout = 20 if read_timeout is None else min(20, read_timeout)
+            setup_timeout = _KEYED_WEBSOCKET_SETUP_TIMEOUT
+            if read_timeout is not None:
+                setup_timeout = min(setup_timeout, read_timeout)
             ws = websocket.create_connection(
                 sock_addr,
                 header=header,
                 redirect_limit=0,
+                class_=_KeyedWebSocket,
                 timeout=setup_timeout,
                 **connect_kwargs,
             )

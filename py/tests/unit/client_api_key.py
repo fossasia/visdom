@@ -18,7 +18,7 @@ import pytest
 import requests
 import websocket
 
-from visdom import Visdom
+from visdom import Visdom, _KeyedWebSocket
 from visdom.async_client import _AsyncTransport
 
 pytestmark = pytest.mark.unit
@@ -332,6 +332,7 @@ def test_keyed_socket_stop_aborts_read_and_cleans_up(
         "wss://visdom.example/vis_socket",
         header=header,
         redirect_limit=0,
+        class_=_KeyedWebSocket,
         timeout=setup_timeout,
         **options,
     )
@@ -440,3 +441,23 @@ def test_keyed_socket_stop_during_setup_skips_read(monkeypatch, cleanup_fails):
     on_error.assert_not_called()
     on_close.assert_called_once_with(ws)
     assert client._keyed_websocket is None
+
+
+def test_keyed_handshake_deadline_interrupts_transport(monkeypatch):
+    transport = Mock()
+    interrupted = threading.Event()
+    transport.shutdown.side_effect = lambda how: interrupted.set()
+    ws = _KeyedWebSocket()
+
+    def pending_upgrade(self, url, **options):
+        self.sock = transport
+        assert interrupted.wait(5)
+
+    monkeypatch.setattr("visdom._KEYED_WEBSOCKET_SETUP_TIMEOUT", 0.02)
+    monkeypatch.setattr(websocket.WebSocket, "connect", pending_upgrade)
+    with pytest.raises(
+        websocket.WebSocketTimeoutException, match="handshake timed out"
+    ):
+        ws.connect("ws://visdom.example/vis_socket")
+    transport.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    assert ws.sock is None
