@@ -122,6 +122,14 @@ def test_text_defaults_opts_to_an_empty_dict(capture_send):
     assert sent["payload"]["eid"] is None
 
 
+def test_text_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string; that must not rewrite the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.text("hi", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_text_passes_an_unrecognized_opt_through(capture_send):
     """``_assert_opts`` type-checks the opts it knows; it does not gate keys."""
     sent = capture_send(lambda v: v.text("hi", opts={"not_an_opt": 1}))
@@ -132,6 +140,68 @@ def test_text_passes_an_unrecognized_opt_through(capture_send):
 def test_text_rejects_a_mistyped_known_opt(capture_send):
     with pytest.raises(AssertionError):
         capture_send(lambda v: v.text("hi", opts={"colormap": 7}))
+
+
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_text_decodes_utf8_buffers_to_a_string(capture_send, wrap):
+    """bytes, bytearray and memoryview all decode, none renders as its repr."""
+    sent = capture_send(lambda v: v.text(wrap("café".encode("utf-8"))))
+    assert block(sent) == {"content": "café", "type": "text"}
+
+
+def test_text_decodes_a_strided_byte_memoryview(capture_send):
+    """A non-contiguous one-dimensional byte view still decodes its content."""
+    view = memoryview(np.frombuffer(b"h.i.", dtype=np.uint8))[::2]
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_cast_to_bytes(capture_send):
+    view = memoryview(np.array([104, 105], dtype=np.uint8)).cast("B")
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_over_a_bytearray(capture_send):
+    sent = capture_send(lambda v: v.text(memoryview(bytearray(b"hi"))))
+    assert block(sent)["content"] == "hi"
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.array([1, 2], dtype=np.int16)), id="int16"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_text_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    """Decoding raw memory would print control characters, so it is refused."""
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.text(make_view())
+
+
+def test_text_coerces_a_numpy_array_to_its_str_form(capture_send):
+    sent = capture_send(lambda v: v.text(np.array([1, 2, 3])))
+    assert block(sent)["content"] == "[1 2 3]"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        pytest.param(42, "42", id="int"),
+        pytest.param(3.5, "3.5", id="float"),
+        pytest.param(True, "True", id="bool"),
+        pytest.param(None, "None", id="none"),
+        pytest.param([1, 2, 3], "[1, 2, 3]", id="list"),
+    ],
+)
+def test_text_coerces_non_string_input_to_str(capture_send, value, expected):
+    """Values that happen to JSON-serialize still go through str() for a
+    stable content type on the wire."""
+    sent = capture_send(lambda v: v.text(value))
+    assert block(sent)["content"] == expected
 
 
 # ------------------------------------------------------------ properties ----
@@ -564,7 +634,14 @@ def test_register_embeddings_entity_selected_without_a_getter(offline_client):
 def test_register_embeddings_region_selected_reruns_tsne_on_the_subset(offline_client):
     offline_client.use_socket = True
     offline_client._register_embeddings(
-        FEATURES, LABELS, [], None, None, "w1", None, {}
+        FEATURES,
+        LABELS,
+        [{"group": group} for group in [0, 1, 0]],
+        None,
+        None,
+        "w1",
+        None,
+        {},
     )
     handler = offline_client.event_handlers[(None, "w1")][0]
 
@@ -815,6 +892,105 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+@pytest.mark.parametrize(
+    "labels, groups",
+    [
+        ([1, 3, 1], [0, 1, 0]),
+        ([10**9, 1, 10**9], [1, 0, 1]),
+        ([2.5, -1.5, 2.5], [1, 0, 1]),
+        (["zebra", "ant", "zebra"], [1, 0, 1]),
+        ([1, 2, 1], [0, 1, 0]),
+        ([0, 0, 0], [0, 0, 0]),
+    ],
+)
+def test_embedding_lasso_preserves_original_groups(offline_client, labels, groups):
+    offline_client.use_socket = True
+    calls = []
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client,
+        "_send",
+        side_effect=lambda message, **kwargs: calls.append(message) or "w",
+    ):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    original = calls[1]["data"][0]["content"]["data"]
+    assert [point["group"] for point in original] == groups
+    assert offline_client.win_data["w"]["points"] == original
+    handler = offline_client.event_handlers[("e", "w")][0]
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            original[i]["group"] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+        np.testing.assert_array_equal(
+            [point["position"] for point in selected], TSNE_XY[:2]
+        )
+
+
+@pytest.mark.parametrize(
+    "points", [[], None, [{"group": 9}], [{"group": 2}, {"group": 1}, {"group": 0}]]
+)
+def test_register_embeddings_lasso_groups_do_not_depend_on_points(
+    offline_client, points
+):
+    offline_client.use_socket = True
+    labels = ["zebra", "ant", "zebra"]
+    offline_client._register_embeddings(
+        FEATURES, labels, points, None, None, "w1", "e1", {}
+    )
+    assert offline_client.win_data["w1"]["points"] is points
+    handler = offline_client.event_handlers[("e1", "w1")][0]
+
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w1",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            [1, 0, 1][i] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+
+
+@pytest.mark.parametrize(
+    "labels", [[1, 3, 1], [2.5, -1.5, 2.5], ["zebra", "ant", "zebra"]]
+)
+def test_embeddings_reuses_groups_when_registering_events(offline_client, labels):
+    from visdom import _normalize_labels
+
+    offline_client.use_socket = True
+    with patch("visdom._normalize_labels", wraps=_normalize_labels) as normalize, patch(
+        "visdom.do_tsne", return_value=TSNE_XY
+    ), patch.object(offline_client, "_send", return_value="w"):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    normalize.assert_called_once_with(labels)
 
 
 # ------------------------------------------------------- alert messages ----
