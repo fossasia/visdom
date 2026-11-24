@@ -499,8 +499,7 @@ def main(print_func=None):
         user_credential = {
             "username": username,
             "password": hash_password(client_hash),
-            # used once at startup to derive a session token that survives
-            # restarts but not a password change; the app does not keep it
+            # Derives the session token; the app does not keep it.
             "client_hash": client_hash,
         }
 

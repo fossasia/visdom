@@ -6,14 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""What a login session is tied to, and what ends it.
-
-A session cookie is only signed, not encrypted, so anyone who sees it can
-read it, and a valid signature alone used to be enough to stay logged in. The
-cookie now carries a token derived from the current credential: it survives a
-restart with the same password, stops working once the password changes, and
-holds nothing that could be cracked back into the password.
-"""
+"""Login sessions end when the credential changes and survive restarts."""
 
 import json
 import os
@@ -33,8 +26,7 @@ pytestmark = pytest.mark.integration
 
 USERNAME = "visdom_user"
 SIGNING_VALUE = "test_signing_value"
-# What the browser sends to log in: the SHA-256 of the password typed. Fixed
-# values stand in for two different passwords, so no password is hashed here.
+# The SHA-256 of two passwords, as the browser sends them.
 OLD_LOGIN = "c4bbcb1fbec99d65bf59d85c8cb62ee2db963f0fe106f483d9afa73bd4e39a8a"
 NEW_LOGIN = "14dff91a22df24671c8fcf49b3fa0a9b3773bdf1802b7a3d91623f8d71b94f44"
 
@@ -132,8 +124,6 @@ class TestLoginSessions(VisdomHTTPTestCase):
 
     def test_session_survives_a_restart_with_the_same_password(self):
         cookie = self.login(OLD_LOGIN)
-        # The stored hash gets a new salt on every start; the session must not
-        # depend on it.
         self.restart_with(OLD_LOGIN)
         self.assertEqual(self.read_envs(cookie).code, 200)
 
@@ -147,6 +137,4 @@ class TestLoginSessions(VisdomHTTPTestCase):
         self.assertEqual(self.read_envs(self.login(NEW_LOGIN)).code, 200)
 
     def test_the_server_does_not_keep_the_client_hash(self):
-        # It is what the browser sends to log in, so holding it would hold a
-        # working password.
         self.assertNotIn("client_hash", self._app.user_credential)

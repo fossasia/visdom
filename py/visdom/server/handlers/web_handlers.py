@@ -1419,14 +1419,7 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
-            # The dashboard never reads this cookie from JavaScript, so a
-            # script injected into the page should not be able to either.
-            # SameSite=Lax keeps a page on another site from sending it with
-            # a POST or a fetch, while following a link to Visdom still works.
-            # Secure whenever the browser reached Visdom over https, directly
-            # or through a proxy that says so, so it is never sent in clear.
-            # Over plain http it cannot be, or the browser would drop it.
-            # A direct TLS connection is https whatever the header claims.
+            # Secure only over https; a direct TLS connection ignores the header.
             scheme = self.request.protocol
             if scheme != "https":
                 forwarded = self.request.headers.get("X-Forwarded-Proto", "")

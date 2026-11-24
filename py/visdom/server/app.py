@@ -200,7 +200,7 @@ class Application(tornado.web.Application):
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
-        # A copy, so dropping client_hash below leaves the caller's dict alone.
+        # Copy, so the caller's dict is left alone.
         if user_credential:
             user_credential = dict(user_credential)
         self.user_credential = user_credential
@@ -222,8 +222,7 @@ class Application(tornado.web.Application):
             self.session_token = session_token(
                 settings["cookie_secret"], user_credential
             )
-            # client_hash is what the browser sends to log in, so it is used
-            # once, to derive the token, and not kept.
+            # Works as a password, so it is not kept.
             user_credential.pop("client_hash", None)
 
         self.server_state = ServerState(

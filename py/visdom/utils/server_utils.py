@@ -143,24 +143,10 @@ def set_cookie(value=None):
 
 
 def session_token(cookie_secret, user_credential):
-    """Return the value the login cookie carries for the current credential.
+    """The login cookie's value for the current credential.
 
-    It is the username plus a key derived, salted with the cookie secret,
-    from the hash the browser sends for the password (``client_hash``). So
-    it stays the
-    same across restarts, changes when the username or password does -- which
-    ends every session issued for the old credential -- and, unlike the
-    stored password hash, tells someone who reads the cookie nothing they
-    could crack offline.
-
-    A caller that builds the application without ``client_hash`` gets a
-    random seed instead, so the token never depends on the stored hash, and
-    its sessions last only as long as the process.
-
-    The client hash is as good as the password, so it goes through the same
-    slow key derivation as the stored hash rather than a single HMAC: should
-    the cookie secret ever leak, a cookie must not be a cheap way to guess
-    the password. It runs once, at startup.
+    PBKDF2 of the client hash, so it survives restarts but not a password
+    change. Without ``client_hash`` a random seed is used instead.
     """
     username = user_credential["username"]
     seed = user_credential.get("client_hash") or secrets.token_hex(32)
@@ -170,12 +156,7 @@ def session_token(cookie_secret, user_credential):
 
 
 def current_session_user(handler):
-    """Return the login cookie when it was issued for the current credential.
-
-    A valid signature alone is not enough: a cookie issued before the
-    password changed is still signed with the same secret, so it must also
-    match the token for the credential the server runs with now.
-    """
+    """The login cookie, if it matches the current credential's token."""
     app = getattr(handler, "application", None)
     if not app or not app.settings.get("cookie_secret"):
         return None
