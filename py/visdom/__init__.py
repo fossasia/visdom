@@ -223,6 +223,40 @@ class _KeySession(requests.Session):
         super().rebuild_auth(prepared_request, response)
 
 
+class ServerError(Exception):
+    """The server answered with an HTTP error status.
+
+    Raised by a client created with ``raise_exceptions=True``. ``status`` and
+    ``reason`` are the server's own, and ``body`` is the error page a client
+    without ``raise_exceptions`` returns instead. A refusal (401, 402, 403)
+    never raises it; it is only warned about. The constructor raises
+    ``ConnectionError`` for it instead, as it does for a server it can't reach.
+    """
+
+    def __init__(self, status, reason="", body=""):
+        reason = "" if reason is None else reason  # requests can report None
+        message = "{} {}".format(status, reason) if reason else str(status)
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.body = body
+
+
+def _raise_for_status(status, reason, body):
+    """Raise :class:`ServerError` for an error status other than a refusal."""
+    if status >= 400 and status not in REFUSED_STATUSES:
+        raise ServerError(status, reason, body)
+
+
+def _json_object(text):
+    """``text`` decoded as a JSON object, or None if it isn't one."""
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
 
@@ -1257,7 +1291,16 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        result = self._send({"eid": env}, endpoint="env/" + env)
+        try:
+            result = self._send({"eid": env}, endpoint="env/" + env)
+        except ServerError as e:
+            # An error status here (a wrong base_url, a proxy, a crash) leaves no
+            # usable server either, so it raises the same ConnectionError.
+            raise ConnectionError(
+                "Could not connect to server at {}:{}: it answered {}.".format(
+                    self.server, self.port, e
+                )
+            ) from e
         if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
@@ -1619,6 +1662,17 @@ class Visdom(object):
             seen.popitem(last=False)
         logger.warning(message)
 
+    def _response_text(self, r):
+        """Return the body of ``r``, warning about a refusal.
+
+        With ``raise_exceptions`` set, any other error status raises
+        :class:`ServerError` instead.
+        """
+        self._note_refusal(r.status_code, r.text)
+        if self.raise_exceptions:
+            _raise_for_status(r.status_code, getattr(r, "reason", ""), r.text)
+        return r.text
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1631,8 +1685,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=(20, None))
-            self._note_refusal(r.status_code, r.text)
-            return r.text
+            return self._response_text(r)
         except requests.exceptions.SSLError:
             raise
         except (requests.ConnectionError, requests.Timeout):
@@ -1647,8 +1700,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=(20, None))
-            self._note_refusal(r.status_code, r.text)
-            return r.text
+            return self._response_text(r)
 
     def _send(
         self,
@@ -2010,7 +2062,14 @@ class Visdom(object):
         msg = {"params": params}
         if env is not None:
             msg["eid"] = env
-        return self._experiment_query(msg, "experiments/suggest")
+        try:
+            return self._experiment_query(msg, "experiments/suggest")
+        except ServerError as e:
+            # the stub's 501 reply is the documented return value
+            reply = _json_object(e.body)
+            if e.status == 501 and reply is not None:
+                return reply
+            raise
 
     def hparams(
         self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
@@ -2218,7 +2277,13 @@ class Visdom(object):
         assert isinstance(env, str), "env should be a string"
         if self.offline:
             return None
-        response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        try:
+            response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        except ServerError as e:
+            # the server's 404 for an env it doesn't have
+            if e.status == 404 and "error" in (_json_object(e.body) or {}):
+                return None
+            raise
         if response is False:
             return None
         parsed = json.loads(response)
@@ -2230,7 +2295,8 @@ class Visdom(object):
         """
         This function returns a bool indicating whether
         or not a window exists on the server already.
-        Returns None if something went wrong
+        Returns None if something went wrong; with raise_exceptions, an
+        error status from the server raises ServerError instead.
         """
         try:
             e = self._win_exists_wrap(win, env)
@@ -2250,9 +2316,12 @@ class Visdom(object):
         This function returns a bool indicating whether or
         not the server is connected.
         """
-        return (self.win_exists("") is not None) and (
-            self.socket_alive or not self.use_socket
-        )
+        try:
+            exists = self.win_exists("")
+        except ServerError:
+            # check_connection() answers False rather than raising
+            return False
+        return (exists is not None) and (self.socket_alive or not self.use_socket)
 
     def check_connection(self, timeout_seconds=0):
         """
