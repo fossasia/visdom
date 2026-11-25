@@ -2769,10 +2769,10 @@ fast-equals@^4.0.3:
   resolved "https://registry.yarnpkg.com/fast-equals/-/fast-equals-4.0.3.tgz#72884cc805ec3c6679b99875f6b7654f39f0e8c7"
   integrity sha512-G3BSX9cfKttjr+2o1O22tYMLq0DPluZnYtq1rXumE1SpL/F/SLIfHx08WYQoWSIpeMYf8sRbJ8++71+v6Pnxfg==
 
-fast-json-patch@^3.1.1:
-  version "3.1.1"
-  resolved "https://registry.npmjs.org/fast-json-patch/-/fast-json-patch-3.1.1.tgz"
-  integrity sha512-vf6IHUX2SBcA+5/+4883dsIjpBTqmfBjmYiWK1savxQmFk4JfBMLa7ynTYOs1Rolp/T1betJxHiGD3g1Mn8lUQ==
+fast-json-patch@^3.1.2:
+  version "3.1.2"
+  resolved "https://registry.yarnpkg.com/fast-json-patch/-/fast-json-patch-3.1.2.tgz#e6f745258f970186cc016f0212319d6794e8fa72"
+  integrity sha512-Dhr5mVii8hIvjkp0Xdrun9B3GlXe3j+L4Ymv8J0h3Di996xoBi8qSDQ/sqSNKZd1NEqx55ZfcseG1MphW7MkHg==
 
 fast-json-stable-stringify@^2.0.0:
   version "2.1.0"
@@ -3745,10 +3745,10 @@ latest-version@^5.1.0:
   dependencies:
     package-json "^6.3.0"
 
-less-loader@^13.1.0:
-  version "13.1.0"
-  resolved "https://registry.yarnpkg.com/less-loader/-/less-loader-13.1.0.tgz#8c74441e37d804613e263968a0d00c1298825e50"
-  integrity sha512-oUzF3nuumJeMbYSwCVcEb/DwNn+0R/YdeC9OLIf+oQqcwF2/I42Z4972aNPxUy6R8uEkNdX6vEhYs45T+wiooQ==
+less-loader@^13.1.1:
+  version "13.1.1"
+  resolved "https://registry.yarnpkg.com/less-loader/-/less-loader-13.1.1.tgz#b0ad20837890495c38086223aa3d9de2c5f98260"
+  integrity sha512-v/jsUf6w3TC6nBNVf11W7iROz7PCeMOPAy+HMjM2LZ1RLKnUlStJpyd1ev4EpUzulUvtUVzYSOlq9sPQSpDB6A==
   dependencies:
     "@types/less" "^3.0.8"
 
@@ -3835,10 +3835,10 @@ lru-cache@^5.1.1:
   dependencies:
     yallist "^3.0.2"
 
-lucide-react@^1.76.0:
-  version "1.76.0"
-  resolved "https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.76.0.tgz#05091ff8526e61d9e82cbce012fed8998380d99a"
-  integrity sha512-wRVHt2Xf64GXndB4rQOY9+3Wy9oJ59HDMYv6vwhT0hpSwUxQhG/RM9YijnOmvmIQ+VI/n+1V/FKd6gP4XL2aBQ==
+lucide-react@^1.77.0:
+  version "1.77.0"
+  resolved "https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.77.0.tgz#4d37be5f21367ba69edbc45bda7ae71fb4c74303"
+  integrity sha512-VS6sOi8ZUH1qm6swBL/tpI4xAhB6pFTdHvw3pfCJD+DaTJwpyynVzfOS6mdyMZ+OCdY/GMSQbqinOMOPbNSrQA==
 
 make-dir@^3.0.0:
   version "3.1.0"
