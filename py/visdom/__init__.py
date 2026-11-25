@@ -3412,10 +3412,13 @@ class Visdom(object):
             legend = names
             opts["legend"] = legend
         elif isinstance(opts["legend"], Mapping):
-            legend = [opts["legend"].get(name, name) for name in names]
+            mapping = opts["legend"]
+            labels = mapping.values()
             assert all(
-                isinstance(label, str) for label in legend
+                isinstance(label, str) for label in labels
             ), "legend mapping values should be strings"
+            assert len(set(labels)) == len(mapping), "legend labels should be unique"
+            legend = [mapping.get(name, name) for name in names]
             assert len(set(legend)) == len(legend), "legend labels should be unique"
             opts["legend"] = legend
         else:

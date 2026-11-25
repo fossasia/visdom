@@ -140,3 +140,17 @@ def test_legend_mapping_rejects_non_string_labels(offline_client):
         offline_client.learning_curve(
             {"train": [1.0]}, opts={"legend": {"train": None}}
         )
+
+
+@pytest.mark.parametrize("update", [None, "append", "replace", "remove"])
+def test_legend_mapping_rejects_duplicate_aliases_for_subsets(offline_client, update):
+    with patch.object(offline_client, "_send") as send:
+        with pytest.raises(AssertionError, match="unique"):
+            offline_client.learning_curve(
+                {"val": [0.9]},
+                step=[1],
+                win="losses",
+                opts={"legend": {"train": "Loss", "val": "Loss"}},
+                update=update,
+            )
+    send.assert_not_called()
