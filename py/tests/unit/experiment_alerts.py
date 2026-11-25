@@ -197,8 +197,9 @@ class TestAlertValidation:
         with pytest.raises(ValueError):
             Alert(key=key, condition="nan")
 
-    def test_the_metric_name_is_stripped(self):
-        assert Alert(key="  val_loss  ", condition="nan").key == "val_loss"
+    def test_the_metric_name_is_kept_exactly_as_supplied(self):
+        # A trimmed key would watch a name the series does not have.
+        assert Alert(key="  val_loss  ", condition="nan").key == "  val_loss  "
 
     @pytest.mark.parametrize("for_steps", [0, -1, 1.5, True, "3"])
     def test_for_steps_must_be_a_positive_integer(self, for_steps):
@@ -271,6 +272,37 @@ class TestAlertValidation:
         restored = Alert.from_dict({"key": "loss", "condition": "nan"})
         assert restored.for_steps == 1
         assert restored.fire_count == 0
+
+    @pytest.mark.parametrize("counter", ["streak", "fire_count", "since_best"])
+    @pytest.mark.parametrize("value", ["3", -1, 1.5, True, None, float("nan")])
+    def test_a_counter_has_to_be_a_whole_number_of_observations(self, counter, value):
+        with pytest.raises(ValueError):
+            Alert(key="loss", condition="nan", **{counter: value})
+
+    def test_a_zero_counter_is_legal_where_a_zero_for_steps_is_not(self):
+        assert Alert(key="loss", condition="nan", streak=0).streak == 0
+
+    @pytest.mark.parametrize("field_name", ["best", "last_fired_at", "created_at"])
+    @pytest.mark.parametrize("value", ["2.5", float("inf"), float("nan"), 10**400])
+    def test_a_remembered_number_has_to_be_finite(self, field_name, value):
+        with pytest.raises(ValueError):
+            Alert(key="loss", condition="stalled", **{field_name: value})
+
+    @pytest.mark.parametrize("value", ["42", 1.5, True])
+    def test_the_step_a_rule_fired_at_has_to_be_whole(self, value):
+        with pytest.raises(ValueError):
+            Alert(key="loss", condition="nan", last_fired_step=value)
+
+    def test_a_negative_step_is_the_callers_own_business(self):
+        assert Alert(key="loss", condition="nan", last_fired_step=-5)
+
+    def test_a_corrupted_record_is_refused_at_load(self):
+        # An environment is a JSON file somebody can edit, and the state is
+        # the half of a rule that comes back from it.
+        with pytest.raises(ValueError):
+            Alert.from_dict({"key": "loss", "condition": "nan", "streak": "3"})
+        with pytest.raises(ValueError):
+            Alert.from_dict({"key": "loss", "condition": "nan", "best": "low"})
 
 
 # --------------------------------------------------------------------- fold --

@@ -10,9 +10,10 @@
 
 An :class:`Alert` is a rule attached to one experiment: a metric name, a
 condition, and the bookkeeping that decides when the condition has held for
-long enough to be worth telling someone about. Rules live on the experiment
-record alongside the params and metrics they watch, so they are persisted,
-searched and forked with the environment and survive a server restart.
+long enough to be worth telling someone about. A rule is shaped to live on
+the experiment record alongside the params and metrics it watches, so that
+it will be persisted, searched and forked with the environment and survive a
+server restart once the record carries it.
 
 A condition is a **fixed enum with a numeric operand**, never an expression:
 ``>``, ``<`` and ``==`` compare against a constant, ``nan`` catches an
@@ -145,6 +146,52 @@ def _positive_int(value: Any, field_name: str) -> int:
     return value
 
 
+def _counter(value: Any, field_name: str) -> int:
+    """``value`` as an ``int >= 0``, or raise ``ValueError``.
+
+    A counter starts at zero and only climbs, so zero is legal here where it
+    is not for ``for_steps``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            "{0} must be a whole number of observations, got {1!r}".format(
+                field_name, value
+            )
+        )
+    if value < 0:
+        raise ValueError("{0} cannot be negative, got {1!r}".format(field_name, value))
+    return value
+
+
+def _optional_number(value: Any, field_name: str) -> Optional[float]:
+    """``value`` as a finite float, or ``None``; anything else raises.
+
+    A remembered value and a timestamp are either absent or a number that can
+    be compared with another one.
+    """
+    if value is None:
+        return None
+    if not _is_finite_number(value):
+        raise ValueError(
+            "{0} must be a finite number or absent, got {1!r}".format(field_name, value)
+        )
+    return float(value)
+
+
+def _optional_int(value: Any, field_name: str) -> Optional[int]:
+    """``value`` as an ``int``, or ``None``; anything else raises.
+
+    A step is the caller's own counter, so a negative one is theirs to pick.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            "{0} must be a whole number or absent, got {1!r}".format(field_name, value)
+        )
+    return value
+
+
 def parse_condition(text: Any) -> tuple:
     """Split a written condition into ``(condition, threshold)``.
 
@@ -260,9 +307,10 @@ class Alert:
     since_best: int = 0
 
     def __post_init__(self):
+        # Kept exactly as supplied: a logged key is stored verbatim and every
+        # reader compares keys exactly, so a trimmed one would never match.
         if not isinstance(self.key, str) or not self.key.strip():
             raise ValueError("an alert needs the name of the metric to watch")
-        self.key = self.key.strip()
 
         if self.condition not in VALID_CONDITIONS:
             raise ValueError(
@@ -330,6 +378,19 @@ class Alert:
                     MAX_MESSAGE_LENGTH
                 )
             )
+
+        # The running state arrives from storage rather than from a caller,
+        # and a junk counter would raise out of the request that logged an
+        # observation rather than here.
+        self.created_at = _optional_number(self.created_at, "created_at")
+        if self.created_at is None:
+            self.created_at = time.time()
+        self.streak = _counter(self.streak, "streak")
+        self.fire_count = _counter(self.fire_count, "fire_count")
+        self.since_best = _counter(self.since_best, "since_best")
+        self.last_fired_at = _optional_number(self.last_fired_at, "last_fired_at")
+        self.last_fired_step = _optional_int(self.last_fired_step, "last_fired_step")
+        self.best = _optional_number(self.best, "best")
 
     @property
     def rule_id(self) -> tuple:
