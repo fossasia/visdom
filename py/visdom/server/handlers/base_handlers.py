@@ -37,6 +37,94 @@ WRITE_ENDPOINTS = {
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
 
+# Methods that must not change server state, so they need no origin check.
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+# Sec-Fetch-Site values a browser sends for a request made by the visdom page
+# itself ("same-origin") or typed by the user ("none").
+TRUSTED_FETCH_SITES = {"same-origin", "none"}
+
+
+def is_cross_site_request(request, get_changes_state=False):
+    """True when a browser sent this request from another site's page.
+
+    Non-browser clients send neither header and are not affected.
+    """
+    if request.method in SAFE_METHODS and not get_changes_state:
+        return False
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        # Compares no host names, so it holds behind a reverse proxy too.
+        return fetch_site not in TRUSTED_FETCH_SITES
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return False
+    if origin == "null":
+        return True
+    # Older browsers send only Origin. Compare it with our own origin, taking
+    # scheme, host and port from X-Forwarded-* when a proxy sets them.
+    wanted = _parse_origin(origin)
+    if wanted is None:
+        return True
+    scheme = _first_forwarded(request, "X-Forwarded-Proto") or request.protocol
+    forwarded_port = _first_forwarded(request, "X-Forwarded-Port")
+    ours = set()
+    for host in (request.host, _first_forwarded(request, "X-Forwarded-Host")):
+        own = _parse_origin("{0}://{1}".format(scheme, host), forwarded_port)
+        if host and own is not None:
+            ours.add(own)
+    if wanted in ours:
+        return False
+    if any(wanted[1] == hostname for _, hostname, _ in ours):
+        _warn_unmatched_proxy_origin(origin)
+    return True
+
+
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _parse_origin(origin, port_if_missing=""):
+    """``(scheme, hostname, port)`` of an origin, or None if malformed."""
+    scheme, sep, authority = origin.lower().partition("://")
+    if not sep or scheme not in DEFAULT_PORTS or not authority:
+        return None
+    if any(c in authority for c in "/?#@\\"):
+        return None
+    hostname, colon, port = authority.rpartition(":")
+    if not colon or hostname.endswith(":") or "]" in port:
+        hostname, port = authority, port_if_missing
+    if not hostname:
+        return None
+    try:
+        port = int(port) if port else DEFAULT_PORTS[scheme]
+    except ValueError:
+        return None
+    return scheme, hostname, port
+
+
+_warned_unmatched_proxy_origin = False
+
+
+def _warn_unmatched_proxy_origin(origin):
+    """Say once why a page on this server's own hostname was refused."""
+    global _warned_unmatched_proxy_origin
+    if _warned_unmatched_proxy_origin:
+        return
+    _warned_unmatched_proxy_origin = True
+    logging.warning(
+        "Refused a request from %s: the host name matches this server, but "
+        "the scheme or port the browser used does not reach Visdom. If Visdom "
+        "runs behind a proxy, have it pass them on, e.g. for nginx: "
+        "proxy_set_header X-Forwarded-Proto $scheme; "
+        "proxy_set_header X-Forwarded-Port $server_port;",
+        origin,
+    )
+
+
+def _first_forwarded(request, header):
+    """First value of a proxy header, which may list one entry per hop."""
+    return request.headers.get(header, "").split(",")[0].strip().lower()
+
 
 def build_cloud_context(slug, role):
     """Serialise the console context for the index template, or None when not in a workspace."""
@@ -165,6 +253,10 @@ class BaseWebSocketHandler(
             return None
         return self.get_secure_cookie("user_password")
 
+    def check_origin(self, origin):
+        """Check the socket handshake like the HTTP handlers do."""
+        return not is_cross_site_request(self.request, get_changes_state=True)
+
     def write_message(self, message, binary=False):
         try:
             return super().write_message(message, binary)
@@ -256,6 +348,9 @@ class BaseHandler(
             return False
         return True
 
+    # True on handlers whose GET creates server-side state.
+    get_changes_state = False
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -273,6 +368,10 @@ class BaseHandler(
         handler's state/storage/subs/sources at that workspace's isolated space so
         all subsequent handler logic operates on that workspace's environments.
         """
+        if is_cross_site_request(self.request, self.get_changes_state):
+            self.set_status(403)
+            self.finish({"error": "Cross-site requests are not allowed."})
+            return
         try:
             resolved = await self.resolve_workspace_off_loop()
         except WorkspaceAuthError as exc:
