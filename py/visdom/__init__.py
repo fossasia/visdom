@@ -235,6 +235,33 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
+def _audio_sample_rate(rate, channels):
+    """``rate`` as an int that fits the WAV header of 16-bit audio.
+
+    The header stores the rate and the bytes per second (rate * channels * 2)
+    in 32 bits each. The range is checked before anything turns ``rate`` into
+    a float, so a huge int, NaN and inf are all rejected.
+    """
+    # A 0-d numpy array or a one-element tensor holds a plain number.
+    size = rate.size if isinstance(rate, np.ndarray) else None
+    if size is None and callable(getattr(rate, "numel", None)):
+        size = rate.numel()
+    if size == 1 and callable(getattr(rate, "item", None)):
+        rate = rate.item()
+    limit = 0xFFFFFFFF // (2 * channels)
+    if (
+        isinstance(rate, (bool, np.bool_))
+        or not isinstance(rate, numbers.Real)
+        or not 0 < rate <= limit
+        or rate != int(rate)
+    ):
+        raise ValueError(
+            "sample_frequency should be a positive whole number up to {} for "
+            "{}-channel audio, got {!r}".format(limit, channels, rate)
+        )
+    return int(rate)
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -252,7 +279,7 @@ def loadfile(filename):
         return fileobj.read()
 
 
-def _finite_range(ar):
+def _finite_range(ar, *, as_float=True):
     """Smallest and largest finite value in `ar`, or `None` if it has none.
 
     This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
@@ -260,7 +287,8 @@ def _finite_range(ar):
     element just to read two numbers off it, which on an image-sized array is
     a second full array per call. `fmin`/`fmax` skip NaN the same way and
     reduce in place, so only an infinity -- which they propagate rather than
-    skip -- needs the mask at all.
+    skip -- needs the mask at all. Set `as_float=False` to retain extended
+    floating-point extrema for image normalization.
     """
     if ar.size == 0:
         return None
@@ -272,8 +300,10 @@ def _finite_range(ar):
         finite = ar[np.isfinite(ar)]
         if finite.size == 0:
             return None
-        return float(finite.min()), float(finite.max())
-    return float(ar_min), float(ar_max)
+        ar_min, ar_max = finite.min(), finite.max()
+    if as_float:
+        return float(ar_min), float(ar_max)
+    return ar_min.item(), ar_max.item()
 
 
 def _title2str(opts):
@@ -712,6 +742,39 @@ def _to_numpy(a):
     return a
 
 
+def _plain_scalar(value, what):
+    """Turn a one-element tensor or numpy value into a plain Python number.
+
+    Anything else is returned as it is, except a complex number, which JSON
+    can't carry.
+    """
+    item = getattr(value, "item", None)
+    if callable(item):
+        numel = getattr(value, "numel", None)
+        count = numel() if callable(numel) else getattr(value, "size", 1)
+        if count != 1:
+            raise TypeError(
+                "{} must be a single value, got {} values".format(what, count)
+            )
+        # A masked value is missing; item() would give its hidden fill instead.
+        if np.ma.is_masked(value):
+            return None
+        value = item()
+    if isinstance(value, (complex, np.complexfloating)):
+        raise TypeError("{} must be a real number, got {}".format(what, value))
+    if not isinstance(value, np.floating):
+        return value
+    # np.longdouble.item() stays a numpy scalar, which json can't encode.
+    number = float(value)
+    # A float can't hold it, and inf or 0 would send a different value. The
+    # message uses str(): format() would print the value as that float.
+    if math.isinf(number) and np.isfinite(value):
+        raise ValueError("{} is too large to send: {!s}".format(what, value))
+    if number == 0 and value != 0:
+        raise ValueError("{} is too small to send: {!s}".format(what, value))
+    return number
+
+
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
@@ -743,7 +806,7 @@ def _binary_clf_curve(y_true, y_score, pos_label=1):
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
 
-    distinct_value_indices = np.where(np.diff(y_score))[0]
+    distinct_value_indices = np.where(y_score[1:] != y_score[:-1])[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
 
     tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
@@ -1752,6 +1815,12 @@ class Visdom(object):
             raise TypeError("params must be a dict of {name: value}")
         if tags is not None and not isinstance(tags, dict):
             raise TypeError("tags must be a dict of {name: value}")
+        if params is not None:
+            params = {
+                k: _plain_scalar(v, "param {!r}".format(k)) for k, v in params.items()
+            }
+        if tags is not None:
+            tags = {k: _plain_scalar(v, "tag {!r}".format(k)) for k, v in tags.items()}
         return self._experiment_send(
             {
                 "action": "log",
@@ -1768,10 +1837,15 @@ class Visdom(object):
 
         `metrics` is a dict of `{name: value}` recorded at an optional training
         `step`; the experiment is created automatically if it does not exist yet.
+        Values and `step` may be one-element torch tensors or numpy values.
         Returns the updated experiment as a dict.
         """
         if not isinstance(metrics, dict) or not metrics:
             raise TypeError("metrics must be a non-empty dict of {name: value}")
+        metrics = {
+            k: _plain_scalar(v, "metric {!r}".format(k)) for k, v in metrics.items()
+        }
+        step = _plain_scalar(step, "step")
         return self._experiment_send(
             {"action": "metrics", "metrics": metrics, "step": step}, env
         )
@@ -2083,13 +2157,18 @@ class Visdom(object):
         )
 
     def delete_envs(self, env_list):
-        """This function deletes a list of environments."""
+        """Delete a list of environments.
+
+        Validate all environment ID types before sending any delete request.
+        """
         if not isinstance(env_list, list):
             raise TypeError("env_list must be a list of strings")
-        responses = []
+        env_list = tuple(env_list)
         for env in env_list:
             if not isinstance(env, str):
                 raise TypeError(f"Environment ID must be a string, got {type(env)}")
+        responses = []
+        for env in env_list:
             responses.append(self.delete_env(env))
         return responses
 
@@ -2299,12 +2378,32 @@ class Visdom(object):
 
     def text(self, text, win=None, env=None, opts=None, append=False):
         """
-        This function prints text in a box. It takes as input an `text` string.
+        This function prints text in a box. ``text`` is a string, or a value
+        that can be rendered as one: bytes, bytearray and a byte-typed
+        one-dimensional memoryview are decoded as UTF-8 and everything else
+        goes through ``str()``, so a numpy array or any other repr-able
+        object is shown as its ``str(...)`` form instead of a cryptic
+        ``Object of type ... is not JSON serializable`` from the JSON encoder.
+        A memoryview over anything but bytes (an int64 array, a 2-D view) has
+        no text to decode, so it raises ``TypeError`` rather than printing
+        raw memory.
         No specific `opts` are currently supported.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        if isinstance(text, memoryview) and (
+            text.ndim != 1 or text.format not in ("B", "b", "c")
+        ):
+            raise TypeError(
+                "text() can only decode a one-dimensional byte memoryview; "
+                "got a memoryview with format %r and %d dimension(s)"
+                % (text.format, text.ndim)
+            )
+        if isinstance(text, (bytes, bytearray, memoryview)):
+            text = bytes(text).decode("utf-8", errors="replace")
+        elif not isinstance(text, str):
+            text = str(text)
         data = [{"content": text, "type": "text"}]
 
         if append:
@@ -2540,7 +2639,16 @@ class Visdom(object):
             raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     def _register_embeddings(
-        self, features, labels, points, data_getter, data_type, win, env, opts
+        self,
+        features,
+        labels,
+        points,
+        data_getter,
+        data_type,
+        win,
+        env,
+        opts,
+        label_groups=None,
     ):
         self.win_data[win] = {
             "features": features,
@@ -2551,6 +2659,10 @@ class Visdom(object):
             "env": env,
             "opts": opts,
         }
+
+        if label_groups is None:
+            labels_normalized, _, _ = _normalize_labels(labels)
+            _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2583,10 +2695,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2657,9 +2768,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -2686,7 +2798,15 @@ class Visdom(object):
 
         if opts.get("register_embedding_events", True):
             self._register_embeddings(
-                features, labels, points, data_getter, data_type, win, env, opts
+                features,
+                labels,
+                points,
+                data_getter,
+                data_type,
+                win,
+                env,
+                opts,
+                label_groups=label_groups,
             )
         return win
 
@@ -2714,14 +2834,21 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -2853,14 +2980,21 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -3079,10 +3213,10 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)  # the caller's dict is left alone
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         _title2str(opts)
         _assert_opts(opts)
@@ -3100,6 +3234,11 @@ class Visdom(object):
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
             ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
+            # Checked after the shape, so the channel count is the real one.
+            channels = tensor.shape[1] if tensor.ndim == 2 else 1
+            opts["sample_frequency"] = _audio_sample_rate(
+                opts["sample_frequency"], channels
+            )
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
@@ -4503,6 +4642,9 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+
+        Contours keep Plotly's automatic color domain unless either color limit
+        is supplied. A missing explicit limit then defaults to the data bound.
         """
 
         X = np.asarray(X)
@@ -4513,22 +4655,29 @@ class Visdom(object):
             "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
         )
 
-        opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
-        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
+        opts = {} if opts is None else opts.copy()
+        explicit_bounds = "xmin" in opts or "xmax" in opts
+        if stype == "surface" or explicit_bounds:
+            opts["xmin"] = float(opts["xmin"] if "xmin" in opts else np.nanmin(X))
+            opts["xmax"] = float(opts["xmax"] if "xmax" in opts else np.nanmax(X))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
 
+        lower_bound, upper_bound = (
+            ("zmin", "zmax") if stype == "contour" else ("cmin", "cmax")
+        )
         data = [
             {
                 "z": X.tolist(),
-                "cmin": opts["xmin"],
-                "cmax": opts["xmax"],
                 "type": stype,
                 "colorscale": opts["colormap"],
             }
         ]
+
+        if stype == "surface" or explicit_bounds:
+            data[0][lower_bound] = opts["xmin"]
+            data[0][upper_bound] = opts["xmax"]
 
         return self._send(
             {
@@ -4569,8 +4718,8 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-        - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+        - `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+        - `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
         """
 
         return self._surface(X=X, stype="contour", opts=opts, win=win, env=env)
@@ -5179,10 +5328,21 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
-        G = nx.Graph()
-        G.add_edges_from(edges)
+        input_edges = list(edges)
+        G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
+        G.add_edges_from(input_edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
+        if opts.get("directed", False):
+            link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
+        else:
+            link_data = []
+            seen = set()
+            for edge in input_edges:
+                key = frozenset(edge[:2])
+                if key not in seen:
+                    seen.add(key)
+                    link_data.append(tuple(edge[:2]))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(
