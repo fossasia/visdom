@@ -20,8 +20,11 @@ import hashlib
 import html
 import json
 import logging
+import math
 import os
 import errno
+import threading
+import time
 from collections import OrderedDict
 
 import tornado.escape
@@ -162,6 +165,238 @@ def hash_password_off_loop(password, salt):
     return tornado.ioloop.IOLoop.current().run_in_executor(
         None, hash_password, password, salt
     )
+
+
+class LoginThrottle:
+    """Per-client failed-login accounting with escalating lockouts.
+
+    A wrong password is expensive to refuse -- each attempt costs the
+    server a full PBKDF2 derivation -- so this is what stands between an
+    attacker and unlimited guessing at the one credential a login-enabled
+    server knows. Each attempt is counted against the client's limit when
+    it is admitted (:meth:`admit`), before any derivation is spent on it,
+    so a burst of concurrent requests cannot all pass the limit check
+    while the earliest failure is still in flight; every attempt is then
+    confirmed as a failure (:meth:`record_failure`) or released by a
+    success (:meth:`record_success`) on every exit path. ``max_failures``
+    confirmed in a row arm a lockout of ``base_delay`` seconds that
+    doubles per subsequent lockout, capped at ``max_delay``. A successful
+    login forgets the client entirely, so a typo never accumulates into a
+    lockout for someone who can still type the password.
+
+    ``clock`` is injectable because the waits are real: the default
+    ``time.monotonic`` is right in production and useless in a test, which
+    would rather move time than sleep through it. The lock covers only the
+    dictionary touches, and a failure refused during a standing lockout
+    extends nothing -- that client already costs nothing, and a steady
+    stream of refused requests must not wedge the lock open forever.
+    """
+
+    def __init__(
+        self,
+        max_failures=5,
+        base_delay=30.0,
+        max_delay=900.0,
+        max_entries=10_000,
+        clock=time.monotonic,
+    ):
+        self._max_failures = max_failures
+        self._base_delay = base_delay
+        self._max_delay = max_delay
+        # The exponent the doubling can reach before ``base * 2 ** exp``
+        # arrives at the cap. Past it the factor only grows, and a client
+        # that reoffends often enough walks the exponent up to values no
+        # float holds; bounded here, the delay sequence is identical for
+        # every lockout still distinguishable from the cap itself.
+        self._max_exponent = 0
+        if self._base_delay > 0 and self._max_delay > self._base_delay:
+            self._max_exponent = math.ceil(
+                math.log2(self._max_delay / self._base_delay)
+            )
+        self._clock = clock
+        self._lock = threading.Lock()
+        # The map is bounded here, not merely expired by idleness: new
+        # addresses arriving faster than old ones go quiet would otherwise
+        # grow it without bound, and every row they add is another row for
+        # the idle scan to walk. Admission makes room for an unseen client
+        # by dropping the longest-resident entry, and the scan runs when
+        # the clock crosses a window rather than on every operation --
+        # both in the methods below.
+        self._max_entries = max_entries
+        # The first moment at which the idle scan is worth a full pass.
+        self._prune_at = float("-inf")
+        # key -> attempts reserved, failures confirmed, past lockouts,
+        # locked-until, last-seen
+        self._entries = {}
+
+    def retry_after(self, key):
+        """Seconds ``key`` still has to wait, or ``None`` when it may try."""
+        with self._lock:
+            self._maintain()
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            wait = entry[3] - self._clock()
+            return wait if wait > 0 else None
+
+    def admit(self, key):
+        """Reserve one attempt for ``key``; ``None`` if it may proceed.
+
+        The reservation is counted against the client's limit here,
+        before any derivation is spent on it, which is what keeps a burst
+        of concurrent requests from all passing the limit check while the
+        earliest failure is still in flight: every attempt is visible to
+        the counter the moment it is admitted. ``None`` means admitted,
+        and the caller then owes the key a confirming ``record_failure``
+        or ``record_success``. Any other value is the seconds to wait: the
+        remainder of a standing lockout, or -- when the limit is already
+        spent on attempts not yet answered -- the delay their failures are
+        about to arm, doubled for a client that already has lockouts
+        behind it, as the lockout that is coming will be.
+        """
+        with self._lock:
+            now = self._clock()
+            self._maintain()
+            entry = self._entries.get(key)
+            if entry is None:
+                # Forgetting by idleness alone cannot bound the map while
+                # new addresses keep arriving, so this -- the moment an
+                # unseen client is first counted -- is also the moment the
+                # cap is enforced: the longest-resident entry makes room,
+                # in constant time, no scan. A displaced client is handed
+                # a fresh budget; an attacker needs a network's worth of
+                # peers to profit from that, and a legitimate one meets
+                # no lockout at all.
+                if len(self._entries) >= self._max_entries:
+                    self._entries.pop(next(iter(self._entries)))
+                self._entries[key] = [1, 0, 0, 0.0, now]
+                return None
+            if now < entry[3]:
+                return entry[3] - now
+            if entry[0] + entry[1] >= self._max_failures:
+                # The limit is spent on failures already confirmed and
+                # attempts still in flight alike. Their failures arm the
+                # lockout when the verdicts land; until then this client
+                # waits out the delay those verdicts are about to earn,
+                # which for a client that reoffends is the doubled wait
+                # the next lockout will hold it for.
+                return self._next_lockout_delay(entry)
+            entry[0] += 1
+            entry[4] = now
+            return None
+
+    def record_failure(self, key):
+        """Confirm an admitted attempt as rejected; the seconds it earned.
+
+        The reservation ``admit`` took is released here and the verdict
+        counted on its own, because only confirmed failures arm a
+        lockout: a burst whose attempts were all admitted has spent the
+        client's limit, but the lockout waits for the fifth failure to
+        actually be confirmed. The confirmed count reaching the limit
+        arms a lockout doubling per reoffense and capped at
+        ``max_delay``, and a confirm refused during a standing lockout
+        extends nothing -- that client already costs nothing, and a
+        steady stream of refused requests must not wedge the lock open
+        forever. A client a concurrent success has forgotten is left
+        forgotten: the reservation left with the entry that held it.
+        """
+        with self._lock:
+            now = self._clock()
+            self._maintain()
+            entry = self._entries.get(key)
+            if entry is None:
+                return 0.0
+            entry[0] = max(entry[0] - 1, 0)
+            entry[4] = now
+            if now < entry[3]:
+                return entry[3] - now
+            entry[1] += 1
+            if entry[1] < self._max_failures:
+                return 0.0
+            entry[2] += 1
+            entry[1] = 0
+            exponent = min(entry[2] - 1, self._max_exponent)
+            delay = min(self._base_delay * 2**exponent, self._max_delay)
+            entry[3] = now + delay
+            return delay
+
+    def record_success(self, key):
+        """Forget a client that got in: lockouts are for failures only."""
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def release(self, key):
+        """Give back a reservation ``admit`` took, without judging it.
+
+        Cancellation is not a verdict: a request abandoned mid-derivation
+        never found out whether the credentials were right, so it must not
+        count as a failure -- but the reservation it took must not stay
+        either, or a client that keeps abandoning attempts would spend its
+        whole limit on requests that were never answered. The reservation
+        is returned and nothing else changes; ``asyncio.CancelledError``
+        escapes ``except Exception``, so the handler has to hand it back
+        explicitly.
+        """
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return
+            entry[0] = max(entry[0] - 1, 0)
+            entry[4] = self._clock()
+
+    def _next_lockout_delay(self, entry):
+        """The delay the next lockout for the entry would arm at.
+
+        The caller holds the lock, and the entry carries the lockouts the
+        client has already served. The lockout the next confirmed failure
+        past the limit arms is doubled per past one and capped as every
+        lockout is, so this is also what a refusal during the arming
+        phase advertises: the wait the client is actually about to serve.
+        """
+        exponent = min(entry[2], self._max_exponent)
+        return min(self._base_delay * 2**exponent, self._max_delay)
+
+    def _maintain(self):
+        """Run the idle scan when the clock calls for it, not every caller.
+
+        The caller holds the lock. ``_prune`` walks the whole map, which
+        was affordable while the map held a lab's worth of clients -- but
+        high-cardinality traffic, a botnet or a /64 of IPv6, can present
+        more distinct addresses than a scan per operation affords, every
+        attempt then costing more than the last. Idleness is a property
+        of time, so the scan runs once the clock has crossed
+        ``max_delay`` since the previous one: at most one pass per window
+        whatever the request rate, and a client gone quiet past the
+        window is still forgotten on its very next contact, exactly as
+        before. Between scans the entry cap in ``admit`` is what keeps
+        the map bounded.
+        """
+        now = self._clock()
+        if now < self._prune_at:
+            return
+        self._prune_at = now + self._max_delay
+        self._prune()
+
+    def _prune(self):
+        """Drop entries idle past ``max_delay``, wherever they hide.
+
+        Scheduled by ``_maintain`` and bounded in count by ``admit``; the
+        scan itself is unchanged.
+
+        The caller holds the lock. A client that keeps failing keeps its
+        entry alive, and so does the lockout it earned: idleness is
+        measured from the later of the last attempt and the expiry of the
+        lock it armed, so serving a lockout is not "going quiet". Only an
+        address quiet longer than any lockout it could still be serving
+        is worth forgetting.
+        """
+        now = self._clock()
+        for key in [
+            key
+            for key, entry in self._entries.items()
+            if now - max(entry[4], entry[3]) >= self._max_delay
+        ]:
+            del self._entries[key]
 
 
 # ------- File management helpers ----- #

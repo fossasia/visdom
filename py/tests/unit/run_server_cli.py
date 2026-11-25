@@ -163,6 +163,15 @@ def test_the_switch_flags_are_forwarded(started):
     assert kwargs["use_frontend_client_polling"] is True
 
 
+def test_the_forwarded_client_ip_flag_defaults_off(started):
+    """The forwarded headers are only read when an operator asks for them."""
+    assert started()["use_forwarded_client_ip"] is False
+
+
+def test_the_forwarded_client_ip_flag_is_forwarded(started):
+    assert started("-use_forwarded_client_ip")["use_forwarded_client_ip"] is True
+
+
 def test_the_internal_port_is_off_unless_given(started):
     assert started()["internal_port"] is None
 

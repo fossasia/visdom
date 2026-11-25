@@ -23,6 +23,7 @@ fixture here points that at a temporary directory first, so nothing touches a
 real installation.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -31,12 +32,14 @@ import unittest
 from unittest.mock import patch
 
 import pytest
+from tornado.httputil import HTTPServerRequest
+from tornado.ioloop import IOLoop
 
 from visdom.server import app as app_module
 from visdom.server.app import Application
 from visdom.server.handlers import web_handlers
 from visdom.server.handlers.socket_handlers import SocketWrapper, VisSocketWrapper
-from visdom.utils.server_utils import hash_password
+from visdom.utils.server_utils import LoginThrottle, hash_password
 
 from testutils import socket_double
 from testutils.fakes import SpyStore
@@ -49,6 +52,8 @@ USERNAME = "visdom_user"
 PASSWORD = "correct horse battery staple"
 # What the login page actually posts: sjcl.hash.sha256 of the typed password.
 CLIENT_HASH = hashlib.sha256(PASSWORD.encode("utf-8")).hexdigest()
+# The same shape of wrong: a sha256 of a password that is not the password.
+WRONG_HASH = hashlib.sha256(b"nope").hexdigest()
 COOKIE_SECRET = "test_cookie_secret"
 
 CREDENTIAL = {"username": USERNAME, "password": hash_password(CLIENT_HASH)}
@@ -101,6 +106,19 @@ class TestLoginPage(LoginTestCase):
 
         self.assertEqual(resp.code, 200)
         self.assertIn("Visdom Login", resp.body.decode())
+
+    def test_the_form_explains_a_lockout_instead_of_calling_it_a_bad_password(self):
+        """A 429 is not a wrong password: the form shows the advertised wait.
+
+        The server never checks the credentials once a client is locked
+        out, so telling a user with the right password that it is wrong
+        would send them hunting for a typo that is not there. The page
+        has to branch on the 429 and say what ``Retry-After`` says.
+        """
+        page = self.fetch("/").body.decode()
+
+        self.assertIn("response.status === 429", page)
+        self.assertIn("Retry-After", page)
 
     def test_the_dashboard_is_not_served_to_a_stranger(self):
         self.assertNotIn("visdom-container", self.fetch("/").body.decode())
@@ -202,6 +220,214 @@ class TestLoginCredentials(LoginTestCase):
 
         self.assertNotIn(CLIENT_HASH, stored)
         self.assertEqual(len(stored.split("$")), 2)
+
+
+# -- Brute-force lockout on the login form ------------------------------------
+
+
+class _SteppableClock:
+    """A monotonic clock a test moves by assignment, not by sleeping."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class TestLoginLockouts(LoginTestCase):
+    """Five wrong passwords buy the client a 429, not a sixth derivation."""
+
+    def setUp(self):
+        super().setUp()
+        # The production throttle waits half a minute. The same logic on a
+        # clock the test can advance turns waiting out a lockout into a
+        # single assignment, so the suite stays fast and deterministic.
+        self.clock = _SteppableClock()
+        self._app.server_state.login_throttle = LoginThrottle(clock=self.clock)
+
+    def fail_five_times(self):
+        for _ in range(5):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+    def test_attempts_below_the_threshold_are_answered_normally(self):
+        for _ in range(4):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+    def test_the_fifth_failure_locks_the_client_out(self):
+        self.fail_five_times()
+
+        resp = self.login(password=WRONG_HASH)
+
+        self.assertEqual(resp.code, 429)
+        # The lockout armed at the base delay on a clock frozen at zero,
+        # so the whole 30 seconds is still owed, advertised with the
+        # documented integer rounding.
+        self.assertEqual(resp.headers["Retry-After"], "30")
+        self.assertEqual(resp.headers.get_list("Set-Cookie"), [])
+
+    def test_even_the_right_password_is_refused_while_locked(self):
+        self.fail_five_times()
+
+        # Correct credentials, but the client is locked out, so the server
+        # does not even spend the derivation that would check them: the
+        # refusal lands at admission, before _attempt_login is entered.
+        with patch.object(
+            web_handlers,
+            "hash_password_off_loop",
+            wraps=web_handlers.hash_password_off_loop,
+        ) as derive:
+            self.assertEqual(self.login().code, 429)
+
+        self.assertEqual(derive.call_count, 0)
+
+    def test_the_lockout_expires_and_lets_the_client_back_in(self):
+        self.fail_five_times()
+        self.assertEqual(self.login().code, 429)
+
+        self.clock.now += 30.1
+
+        resp = self.login()
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(
+            any("user_password" in c for c in resp.headers.get_list("Set-Cookie"))
+        )
+
+    def test_a_reoffender_is_told_the_doubled_wait(self):
+        """The header advertises the lockout that is actually coming.
+
+        The second lockout doubles, and ``Retry-After`` has to say so:
+        a client told 30 seconds for a lockout that holds it 60 comes
+        back early to a second refusal it was never warned about.
+        """
+        self.fail_five_times()
+        self.clock.now += 30.1
+        self.fail_five_times()
+
+        resp = self.login(password=WRONG_HASH)
+
+        self.assertEqual(resp.code, 429)
+        self.assertEqual(resp.headers["Retry-After"], "60")
+
+    def test_a_request_cancelled_mid_attempt_releases_its_reservation(self):
+        """An abandoned attempt hands its reservation back, unjudged.
+
+        A request abandoned mid-derivation delivers the cancellation as a
+        ``BaseException``, which the cleanup clause for ordinary failures
+        never catches: the reservation stayed counted against the client's
+        budget with no verdict ever releasing it, so enough abandoned
+        requests refused the client's later logins without a single failure
+        having been confirmed. Cancellation is not a verdict, so the fix is
+        to release the reservation rather than confirm a failure.
+        """
+
+        class DetachedConnection:
+            """Just enough connection for a handler built off a socket.
+
+            Tornado wires a close callback in the constructor; there is no
+            socket to wire here, and none is ever fired.
+            """
+
+            def set_close_callback(self, callback):
+                pass
+
+        request = HTTPServerRequest(method="POST", uri="/", headers={})
+        request.remote_ip = "203.0.113.7"
+        request.connection = DetachedConnection()
+        handler = web_handlers.IndexHandler(
+            self._app, request, server_state=self._app.server_state
+        )
+
+        async def abandoned(self, client):
+            raise asyncio.CancelledError
+
+        with patch.object(web_handlers.IndexHandler, "_attempt_login", abandoned):
+            for _ in range(5):
+                with self.assertRaises(asyncio.CancelledError):
+                    asyncio.run(handler.post(""))
+
+        # Every reservation was handed back: nothing was confirmed, no
+        # lockout is armed, and the client still has its whole budget --
+        # with the leak, the fifth reservation alone would have had
+        # ``admit`` refuse the next attempt with the base delay.
+        self.assertIsNone(
+            self._app.server_state.login_throttle.retry_after("203.0.113.7")
+        )
+        self.assertIsNone(self._app.server_state.login_throttle.admit("203.0.113.7"))
+
+    def test_a_successful_login_forgets_the_failures(self):
+        for _ in range(4):
+            self.login(password=WRONG_HASH)
+
+        # Getting in clears the count, so the next slip starts from zero.
+        self.assertEqual(self.login().code, 200)
+
+        for _ in range(4):
+            self.assertEqual(self.login(password=WRONG_HASH).code, 400)
+
+        self.assertEqual(self.login().code, 200)
+
+    def test_a_spoofed_forwarded_address_does_not_dodge_the_lockout(self):
+        """Without the flag, a forwarded header is never read.
+
+        The default server keys by the transport peer, so a locked-out
+        client cannot buy itself a fresh budget by sending an ``X-Real-IP``
+        the server was never told to trust.
+        """
+
+        def attempt(forwarded_ip):
+            return self.fetch(
+                "/",
+                method="POST",
+                body=json.dumps({"username": USERNAME, "password": WRONG_HASH}),
+                headers={"Content-Type": "application/json", "X-Real-IP": forwarded_ip},
+            )
+
+        for _ in range(5):
+            self.assertEqual(attempt("203.0.113.1").code, 400)
+
+        # The fifth failure locked the transport peer. A different claimed
+        # address is the same peer, so the lockout follows.
+        self.assertEqual(attempt("203.0.113.2").code, 429)
+
+
+class TestLoginLockoutBehindAProxy(LoginTestCase):
+    """``-use_forwarded_client_ip``: a lockout counts one visitor, not the proxy.
+
+    The harness serves the application with ``xheaders`` on, which is exactly
+    what the flag turns on in production. Every request then arrives with the
+    proxy's address as its transport peer, and the forwarded header is what
+    says who actually asked -- so without the flag every visitor would pool
+    into the proxy's single lockout budget, and five failures from one of
+    them would lock the rest out too.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.clock = _SteppableClock()
+        self._app.server_state.login_throttle = LoginThrottle(clock=self.clock)
+
+    def get_httpserver_options(self):
+        return {"xheaders": True}
+
+    def login_as(self, forwarded_ip, password=WRONG_HASH):
+        return self.fetch(
+            "/",
+            method="POST",
+            body=json.dumps({"username": USERNAME, "password": password}),
+            headers={"Content-Type": "application/json", "X-Real-IP": forwarded_ip},
+        )
+
+    def test_one_visitors_lockout_spares_the_others(self):
+        for _ in range(5):
+            self.assertEqual(self.login_as("203.0.113.1").code, 400)
+
+        self.assertEqual(self.login_as("203.0.113.1").code, 429)
+
+        # Same proxy, different visitor: a different bucket entirely, so the
+        # correct password still gets in while the proxy's other user is
+        # locked out.
+        self.assertEqual(self.login_as("203.0.113.2", password=CLIENT_HASH).code, 200)
 
 
 # -- Authorization on the routes ---------------------------------------------

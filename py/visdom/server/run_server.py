@@ -84,6 +84,7 @@ def start_server(
     use_frontend_client_polling=False,
     bind_local=False,
     eager_data_loading=False,
+    use_forwarded_client_ip=False,
     ssl_certfile=None,
     ssl_keyfile=None,
     save_interval=DEFAULT_SAVE_INTERVAL,
@@ -111,6 +112,7 @@ def start_server(
             use_frontend_client_polling=use_frontend_client_polling,
             bind_local=bind_local,
             eager_data_loading=eager_data_loading,
+            use_forwarded_client_ip=use_forwarded_client_ip,
             ssl_ctx=ssl_ctx,
             save_interval=save_interval,
             save_threshold=save_threshold,
@@ -207,6 +209,7 @@ async def _serve(
     use_frontend_client_polling,
     bind_local,
     eager_data_loading,
+    use_forwarded_client_ip,
     ssl_ctx,
     save_interval,
     save_threshold,
@@ -235,8 +238,18 @@ async def _serve(
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
 
+    # ``xheaders`` is what makes ``request.remote_ip`` the address a reverse
+    # proxy forwarded rather than the proxy's own transport address. Off by
+    # default: the headers can be forged by any client that reaches the server
+    # directly, so they are only trusted when the operator states the server
+    # is reachable solely through a proxy that sets them. The login lockout
+    # keys by that address, so without it everyone behind a proxy would pool
+    # into a single lockout budget.
     server = tornado.httpserver.HTTPServer(
-        app, max_buffer_size=1024**3, ssl_options=ssl_ctx
+        app,
+        max_buffer_size=1024**3,
+        ssl_options=ssl_ctx,
+        xheaders=use_forwarded_client_ip,
     )
 
     try:
@@ -403,6 +416,17 @@ def main(print_func=None):
         help="Make server only accessible only from " "localhost.",
     )
     parser.add_argument(
+        "-use_forwarded_client_ip",
+        default=False,
+        action="store_true",
+        help="Trust the client address a reverse proxy forwards "
+        "(X-Forwarded-For / X-Real-IP), so per-client limits such as the "
+        "login lockout count each visitor separately instead of pooling "
+        "everyone behind the proxy. Only enable this when the server is "
+        "reachable only through the proxy, as any other client could "
+        "otherwise forge the headers.",
+    )
+    parser.add_argument(
         "-eager_data_loading",
         default=False,
         action="store_true",
@@ -536,6 +560,7 @@ def main(print_func=None):
         use_frontend_client_polling=FLAGS.use_frontend_client_polling,
         bind_local=FLAGS.bind_local,
         eager_data_loading=FLAGS.eager_data_loading,
+        use_forwarded_client_ip=FLAGS.use_forwarded_client_ip,
         ssl_certfile=FLAGS.ssl_certfile,
         ssl_keyfile=FLAGS.ssl_keyfile,
         save_interval=FLAGS.save_interval,
