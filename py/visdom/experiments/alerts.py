@@ -10,10 +10,9 @@
 
 An :class:`Alert` is a rule attached to one experiment: a metric name, a
 condition, and the bookkeeping that decides when the condition has held for
-long enough to be worth telling someone about. A rule is shaped to live on
-the experiment record alongside the params and metrics it watches, so that
-it will be persisted, searched and forked with the environment and survive a
-server restart once the record carries it.
+long enough to be worth telling someone about. Rules live on the experiment
+record alongside the params and metrics they watch, so they are persisted,
+searched and forked with the environment and survive a server restart.
 
 A condition is a **fixed enum with a numeric operand**, never an expression:
 ``>``, ``<`` and ``==`` compare against a constant, ``nan`` catches an
@@ -34,9 +33,10 @@ beside the append rather than behind a re-read of the environment.
 A rule fires on the observation that *completes* its streak and not again
 until the streak breaks, so a metric that stays over its threshold for an
 hour is one notification rather than one per observation. An observation
-that is not a finite number does not break a streak: a diverging run is
-precisely the one that logs them, and re-arming there would spend a second
-notification on the run that already sent one.
+that is not a finite number does not break a streak -- an integer too wide
+to become a float among them, which is the same thing spelled as an ``int``:
+a diverging run is precisely the one that logs them, and re-arming there
+would spend a second notification on the run that already sent one.
 """
 
 from __future__ import annotations
@@ -74,6 +74,19 @@ DEFAULT_GOAL = GOAL_MIN
 MAX_ALERTS_PER_ENV = 20
 MAX_MESSAGE_LENGTH = 200
 
+# The fields that are the fold's running state rather than the rule its
+# author wrote. They are stored with the rule so that a restart finds the
+# streak it left off at, and they are what :meth:`Alert.rearmed` -- and so
+# every replacement of a rule -- starts over from.
+STATE_FIELDS = (
+    "streak",
+    "fire_count",
+    "last_fired_at",
+    "last_fired_step",
+    "best",
+    "since_best",
+)
+
 # ``==`` on two floats is exact, which is the right answer for the integral
 # and interned values a threshold is actually written against (``== 0``) and
 # the wrong one for everything else. Documented rather than fudged with a
@@ -84,6 +97,24 @@ MAX_MESSAGE_LENGTH = 200
 # observation it is compared against. ``float()`` is lossy past 2**53, so
 # ``== 9007199254740993`` would otherwise be stored, reloaded and compared as
 # 9007199254740992: a rule watching the integer next to the one written.
+
+
+def _overflows_float(value: Any) -> bool:
+    """Whether ``value`` is an integer too wide to become a float.
+
+    JSON puts no bound on integer length, so an observation can hold one, and
+    ``float()`` raises ``OverflowError`` on it rather than answering. An
+    integer that wide is also what a diverging accumulator looks like when it
+    is logged as an ``int`` rather than as a ``float``, which is why
+    :func:`_is_diverged` counts it as one.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    try:
+        float(value)
+    except OverflowError:
+        return True
+    return False
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -131,10 +162,18 @@ def _is_diverged(value: Any) -> bool:
     float would never fire for any client that went over the wire. The store's
     own ``_is_absent`` treats the two spellings as one for the same reason.
 
+    An integer too wide to become a float counts as one too. It is a number
+    no threshold can be compared against, and the reason it belongs here
+    rather than among the values of the wrong kind is the streak: a rule that
+    fired on a run which is now overflowing must not be re-armed by the
+    overflow, whichever of the two ways the client spelled it.
+
     A metric logged as a string is not covered: that is a value of the wrong
     kind rather than arithmetic that went wrong, and it is not absent either.
     """
     if value is None:
+        return True
+    if _overflows_float(value):
         return True
     if isinstance(value, bool) or not isinstance(value, float):
         return False
@@ -445,6 +484,28 @@ class Alert:
         """
         return (self.key, self.condition)
 
+    def rearmed(self) -> "Alert":
+        """A copy of this rule with the fold's running state back at its start.
+
+        What a replacement is built from. Re-stating a rule is how its author
+        changes it, and the rule they get back has to be judged by the
+        observations it sees rather than by the ones the rule it replaced saw:
+        a streak only fires as it is completed, so a replacement that
+        inherited a streak which had already fired would stay silent for the
+        whole run that follows. The rule handed in may even be one the caller
+        read off the record, state and all.
+
+        Loading a rule from storage and forking an environment keep the state
+        they find, and go through :meth:`from_dict` rather than through here.
+        """
+        return Alert.from_dict(
+            {
+                name: value
+                for name, value in self.to_dict().items()
+                if name not in STATE_FIELDS
+            }
+        )
+
     def to_dict(self) -> dict:
         return {
             "key": self.key,
@@ -629,6 +690,30 @@ def evaluate(experiment, observations, step: Optional[int] = None) -> list:
     return fired
 
 
+def _written(number: Any) -> str:
+    """``number`` as it goes into a notification, without rounding it.
+
+    An integer is written out in full: it is already exact, and a threshold
+    the grammar and the record went to the trouble of keeping exact would
+    otherwise be rounded by the one thing that ever shows it to its author --
+    ``"{0:.12g}"`` writes ``9007199254740993`` as ``'9.00719925474e+15'``,
+    and writes the threshold beside it the same way, so the message would
+    name one number twice and read as though the rule had fired on its own
+    threshold.
+
+    A float is written with ``repr``, the shortest text that reads back as
+    the same float, rather than to a fixed number of significant digits.
+    Twelve is enough for a rule on ``> 1.0000001`` and not for one on
+    ``> 1.000000000000001``, which is the argument against picking a number
+    at all: whatever it is, some pair of values either side of a threshold
+    rounds to one number and the notification says the metric equals the
+    threshold it just crossed.
+    """
+    if isinstance(number, bool) or not isinstance(number, (int, float)):
+        return str(number)
+    return repr(number)
+
+
 def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     """The notification text for a fired rule.
 
@@ -638,10 +723,10 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     observation that fired it and the environment it fired in, because a toast
     arrives with none of that context around it.
 
-    Numbers are written to twelve significant digits rather than the six
-    ``:g`` defaults to, which is what keeps the crossing visible: a rule on
-    ``> 1.0000001`` that fired on ``1.00000011`` would otherwise report that
-    "loss is 1, > 1".
+    Numbers are written by :func:`_written`, which rounds nothing: a rule on
+    ``> 1.0000001`` that fired on ``1.00000011`` has to say so rather than
+    report that "loss is 1, > 1", and a threshold written as an integer has
+    to come back as the integer it was written as.
     """
     alert = event.alert
     where = "" if not env_id else "{0}: ".format(env_id)
@@ -653,11 +738,18 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     if alert.condition == CONDITION_NAN:
         # ``None`` is what a NaN or an infinity looks like after the JSON on
         # the wire has been through it, and "is None" is not what happened.
-        arrived = "not a finite number" if event.value is None else str(event.value)
+        # An integer too wide to become a float is worded the same way: its
+        # four hundred digits are not what its reader needs, and the rule
+        # caught it for being a number nothing can compare against.
+        arrived = (
+            "not a finite number"
+            if event.value is None or _overflows_float(event.value)
+            else _written(event.value)
+        )
         return "{0}{1} is {2}{3}".format(where, alert.key, arrived, at)
 
     if alert.condition == CONDITION_STALLED:
-        best = "" if event.best is None else " (best {0:.12g})".format(event.best)
+        best = "" if event.best is None else " (best {0})".format(_written(event.best))
         return "{0}{1} has not improved in {2} observations{3}{4}".format(
             where, alert.key, alert.patience, best, at
         )
@@ -665,12 +757,12 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     held = (
         "" if alert.for_steps == 1 else " for {0} observations".format(alert.for_steps)
     )
-    return "{0}{1} is {2:.12g}, {3} {4:.12g}{5}{6}".format(
+    return "{0}{1} is {2}, {3} {4}{5}{6}".format(
         where,
         alert.key,
-        event.value,
+        _written(event.value),
         alert.condition,
-        alert.threshold,
+        _written(alert.threshold),
         held,
         at,
     )

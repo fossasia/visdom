@@ -43,7 +43,7 @@ from visdom.experiments.alerts import (
     observe,
     parse_condition,
 )
-from visdom.experiments.models import Experiment, STATUS_FINISHED
+from visdom.experiments.models import Experiment, Metric, STATUS_FINISHED
 
 pytestmark = pytest.mark.unit
 
@@ -382,10 +382,22 @@ class TestThresholdConditions:
     def test_an_integer_too_wide_for_a_float_is_refused_rather_than_raising(self):
         # JSON puts no bound on integer length, so an observation can hold
         # one. float() and math.isfinite() both raise OverflowError on it,
-        # which would come out of the request that logged the metric.
+        # which would come out of the request that logged the metric. No
+        # threshold can be compared against it, and the stall watch neither
+        # improves on it nor counts it; what catches it is 'nan', because an
+        # integer that wide is a diverging accumulator logged as an int.
         assert feed(build_alert("loss", "> 2.0"), [10**400]) == []
-        assert feed(build_alert("loss", "nan"), [10**400]) == []
+        assert feed(build_alert("loss", "nan"), [10**400]) == [0]
         assert feed(build_alert("loss", "stalled", patience=1), [10**400, 1]) == []
+
+    def test_an_overflowing_integer_does_not_re_arm_a_rule_that_fired(self):
+        # The same rule as the diverged-observation case below, and the same
+        # reason: the run that has gone over its threshold is the one that
+        # starts overflowing, and re-arming on the overflow would spend a
+        # second notification on it.
+        alert = build_alert("loss", "> 2.0")
+        assert feed(alert, [2.5, 10**400, 2.5]) == [0]
+        assert (alert.streak, alert.fire_count) == (2, 1)
 
     def test_a_non_numeric_observation_breaks_a_streak(self):
         alert = build_alert("loss", "> 2.0", for_steps=2)
@@ -544,7 +556,7 @@ class TestDescribe:
         alert = build_alert("val_loss", "> 2.0", for_steps=3)
         message = describe(AlertEvent(alert, 2.41, 120), env_id="run-7")
         assert message == (
-            "run-7: val_loss is 2.41, > 2 for 3 observations at step 120"
+            "run-7: val_loss is 2.41, > 2.0 for 3 observations at step 120"
         )
 
     def test_a_stall_message_names_the_best_seen(self):
@@ -574,6 +586,29 @@ class TestDescribe:
             "loss is 1.00000011, > 1.0000001"
         )
 
+    def test_no_number_of_digits_is_enough_so_none_is_fixed(self):
+        # Twelve significant digits are enough for the rule above and not for
+        # this one, which is the argument against picking a number at all: a
+        # float is written as the shortest text that reads back as itself.
+        alert = build_alert("loss", "> 1.000000000000001")
+        assert describe(AlertEvent(alert, 1.000000000000002)) == (
+            "loss is 1.000000000000002, > 1.000000000000001"
+        )
+
+    def test_an_integer_threshold_is_written_as_the_integer_it_is(self):
+        # The grammar and the record keep this threshold exact; a message
+        # that rendered it as 9.00719925474e+15 would be the only place the
+        # rule's author ever saw it, rounded.
+        alert = build_alert("count", "== 9007199254740993")
+        assert describe(AlertEvent(alert, 9007199254740993)) == (
+            "count is 9007199254740993, == 9007199254740993"
+        )
+
+    def test_an_overflowing_integer_is_named_rather_than_spelled_out(self):
+        # Four hundred digits in a toast say less than the sentence does.
+        alert = build_alert("loss", "nan")
+        assert describe(AlertEvent(alert, 10**400)) == "loss is not a finite number"
+
     def test_a_nan_message_says_what_arrived(self):
         alert = build_alert("loss", "nan")
         assert describe(AlertEvent(alert, float("nan"), 12), env_id="run-7") == (
@@ -599,7 +634,7 @@ class TestDescribe:
 
     def test_the_step_is_left_out_when_there_was_none(self):
         alert = build_alert("loss", "> 2.0")
-        assert describe(AlertEvent(alert, 2.5)) == "loss is 2.5, > 2"
+        assert describe(AlertEvent(alert, 2.5)) == "loss is 2.5, > 2.0"
 
 
 # ------------------------------------------------------------------ records --
@@ -624,6 +659,39 @@ class TestExperimentRules:
         assert len(experiment.alerts) == 1
         assert experiment.alerts[0].threshold == 9.0
         assert experiment.alerts[0].streak == 0
+
+    def test_a_rule_read_back_and_set_again_is_rearmed_too(self):
+        # Editing a rule means reading it, changing it and setting it again,
+        # so the rule handed in is routinely one that has been folding all
+        # run. Its state cannot be assumed to be clean just because the
+        # docstring says a replacement starts clean.
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        stored = experiment.get_alerts("loss")[0]
+        feed(stored, [2.5, 2.5])
+        assert (stored.streak, stored.fire_count) == (2, 1)
+
+        stored.threshold = 1.0
+        replacement = experiment.set_alert(stored)
+        assert replacement.threshold == 1.0
+        assert (replacement.streak, replacement.fire_count) == (0, 0)
+        assert (replacement.best, replacement.since_best) == (None, 0)
+        assert experiment.get_alerts("loss") == [replacement]
+
+    def test_a_replacement_can_fire_where_the_rule_it_replaced_already_had(self):
+        # The consequence of carrying a streak over, and the reason this is
+        # not only tidiness: a rule fires as its streak is completed and not
+        # again until it breaks, so a replacement that inherited a streak
+        # which had already fired would stay silent through a run that went
+        # on matching it -- the one run its author wanted to hear about.
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        evaluate(experiment, [("loss", 2.5)], step=1)
+        assert len(evaluate(experiment, [("loss", 2.5)], step=2)) == 1
+
+        experiment.set_alert(experiment.get_alerts("loss")[0])
+        assert evaluate(experiment, [("loss", 2.5)], step=3) == []
+        assert [e.step for e in evaluate(experiment, [("loss", 2.5)], step=4)] == [4]
 
     def test_the_number_of_rules_is_bounded(self):
         experiment = Experiment(env_id="run-7")
@@ -653,6 +721,24 @@ class TestExperimentRules:
         experiment.set_alert(build_alert("loss", "stalled"))
         assert experiment.clear_alerts("loss", ">") == 1
         assert [a.rule_id for a in experiment.alerts] == [("loss", "stalled")]
+
+    def test_a_rule_can_be_cleared_by_the_condition_it_was_written_with(self):
+        # '> 2.0' is the spelling its author has in hand; the stored rule's
+        # condition is '>'. Comparing the two as text clears nothing and
+        # reports that it cleared nothing, which is a rule you can set and
+        # cannot remove.
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0"))
+        experiment.set_alert(build_alert("loss", "stalled"))
+        assert experiment.clear_alerts("loss", "> 2.0") == 1
+        assert [a.rule_id for a in experiment.alerts] == [("loss", "stalled")]
+
+    def test_clearing_by_something_that_is_not_a_condition_is_refused(self):
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0"))
+        with pytest.raises(ValueError):
+            experiment.clear_alerts("loss", ">= 2.0")
+        assert len(experiment.alerts) == 1
 
     def test_clearing_nothing_removes_nothing(self):
         experiment = Experiment(env_id="run-7")
@@ -710,14 +796,32 @@ class TestStoreEvaluation:
         assert stored["streak"] == 1
         assert stored["fire_count"] == 0
 
-    def test_a_caller_that_asks_nothing_pays_for_no_fold(self):
+    def test_the_rules_are_folded_even_when_nobody_collects_the_events(self):
+        # The state belongs to the record, not to the caller. A path that
+        # logs observations without asking what they set off would otherwise
+        # leave the streak counting a series the run never had, and the next
+        # caller that does ask would be answered from it.
+        env = {"jsons": {}, "reload": {}}
+        store, _ = live_store(env)
+        store.set_alert("run-7", build_alert("loss", "> 2.0", for_steps=2))
+
+        store.log_metrics("run-7", {"loss": 2.5})
+        assert env["experiment"]["alerts"][0]["streak"] == 1
+
+        fired = []
+        store.log_metrics("run-7", {"loss": 2.5}, fired=fired)
+        assert [event.alert.key for event in fired] == ["loss"]
+
+    def test_one_observation_is_folded_the_same_way(self):
         env = {"jsons": {}, "reload": {}}
         store, _ = live_store(env)
         store.set_alert("run-7", build_alert("loss", "> 2.0"))
 
-        store.log_metrics("run-7", {"loss": 2.5})
+        fired = []
+        store.log_metric("run-7", "loss", 2.5, fired=fired)
 
-        assert env["experiment"]["alerts"][0]["streak"] == 0
+        assert [event.value for event in fired] == [2.5]
+        assert env["experiment"]["alerts"][0]["fire_count"] == 1
 
     def test_a_rule_can_be_set_before_the_run_logs_anything(self):
         env = {"jsons": {}, "reload": {}}
@@ -768,10 +872,20 @@ class TestStoreEvaluation:
         store, _ = live_store({"jsons": {}, "reload": {}})
         assert store.get_alerts("run-7") == []
 
-    def test_a_long_history_costs_the_fold_nothing(self):
+    def test_a_long_history_costs_the_fold_nothing(self, monkeypatch):
         # The fold reads the rule, never the series. A record with ten
         # thousand observations behind it is the same work as one on its
         # first step -- which is what lets this run on the event loop.
+        #
+        # Asserting the event alone would not catch a fold that scanned the
+        # history first: it would arrive at the same answer, only Theta(m)
+        # later. So the one thing a scan cannot avoid is taken away instead.
+        # Reading a stored observation back out of a LazyMetricList builds a
+        # Metric from its dict, and iterating the series does it once per
+        # observation, so a from_dict that raises turns a history scan from a
+        # regression nobody measures into a failed test. Nothing else on this
+        # path builds one: the append constructs a Metric directly, and the
+        # write hands the stored dicts back untouched.
         env = {"jsons": {}, "reload": {}}
         store, _ = live_store(env)
         store.set_alert("run-7", build_alert("loss", "> 2.0"))
@@ -781,8 +895,14 @@ class TestStoreEvaluation:
             for index in range(10000)
         )
 
+        def unread(_data):
+            raise AssertionError("the fold read an observation out of the series")
+
+        monkeypatch.setattr(Metric, "from_dict", staticmethod(unread))
+
         fired = []
         store.log_metrics("run-7", {"loss": 2.5}, fired=fired)
 
         assert len(fired) == 1
         assert math.isclose(fired[0].value, 2.5)
+        assert len(env["experiment"]["metrics"]) == 10011

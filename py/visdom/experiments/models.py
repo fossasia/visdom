@@ -27,7 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from visdom.experiments.alerts import Alert, MAX_ALERTS_PER_ENV
+from visdom.experiments.alerts import Alert, condition_name, MAX_ALERTS_PER_ENV
 
 STATUS_RUNNING = "running"
 STATUS_FINISHED = "finished"
@@ -418,15 +418,21 @@ class Experiment:
         """Attach ``alert``, replacing any rule with the same identity.
 
         A repeat of the same metric and condition replaces the rule rather
-        than adding a second one, and the replacement starts from a clean
-        state: re-stating a rule is how a caller changes its threshold, and
-        carrying the old streak over would judge the new rule by observations
-        the old one saw.
+        than adding a second one, and the replacement goes in
+        :meth:`~visdom.experiments.alerts.Alert.rearmed`: re-stating a rule is
+        how a caller changes its threshold, and carrying the old running state
+        over would judge the new rule by observations the old one saw. The
+        rule handed in is not necessarily a fresh one -- reading a rule with
+        :meth:`get_alerts`, changing its threshold and setting it again is the
+        obvious way to edit one -- so the state is cleared here rather than
+        trusted to be clear already. The rearmed rule is what is returned, so
+        a caller that goes on to read the rule reads the one that was stored.
         """
         for i, existing in enumerate(self.alerts):
             if existing.rule_id == alert.rule_id:
-                self.alerts[i] = alert
-                return alert
+                replacement = alert.rearmed()
+                self.alerts[i] = replacement
+                return replacement
         if len(self.alerts) >= MAX_ALERTS_PER_ENV:
             raise ValueError(
                 "an environment is limited to {0} alert rules".format(
@@ -448,12 +454,20 @@ class Experiment:
         Without a ``condition`` every rule watching that metric goes, which is
         what a caller who set one rule means and what a caller who set three
         means too. With one, only that rule goes.
+
+        A ``condition`` is read with
+        :func:`~visdom.experiments.alerts.condition_name`, so the rule can be
+        named either way round: ``">"`` names it, and so does the ``"> 2.0"``
+        the caller wrote when they set it -- which is the spelling they have
+        in hand, and which would otherwise match no stored rule at all and
+        clear nothing while reporting success. A condition that is not one is
+        a ``ValueError`` here rather than a silent nothing-removed.
         """
+        wanted = None if condition is None else condition_name(condition)
         kept = [
             alert
             for alert in self.alerts
-            if alert.key != key
-            or (condition is not None and alert.condition != condition)
+            if alert.key != key or (wanted is not None and alert.condition != wanted)
         ]
         removed = len(self.alerts) - len(kept)
         self.alerts = kept

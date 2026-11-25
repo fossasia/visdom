@@ -301,9 +301,12 @@ class ExperimentStore:
             experiment.set_tag(key, value)
         return self._write(env_id, env, experiment)
 
-    def log_metric(self, env_id, key, value, step=None):
-        """Append a metric to ``env_id``'s experiment, creating it if needed."""
-        return self.log_metrics(env_id, ((key, value),), step=step)
+    def log_metric(self, env_id, key, value, step=None, fired=None):
+        """Append a metric to ``env_id``'s experiment, creating it if needed.
+
+        ``fired`` is handed to :meth:`log_metrics` and means the same there.
+        """
+        return self.log_metrics(env_id, ((key, value),), step=step, fired=fired)
 
     def log_metrics(self, env_id, observations, step=None, fired=None):
         """Append several observations in one read-append-write, creating as needed.
@@ -335,9 +338,15 @@ class ExperimentStore:
         reasons: a rule's running state is part of the record, so it has to be
         updated before the record is serialised or the state is lost on the
         next read; and the fold reads nothing but the rules themselves, so the
-        one write this call already makes carries it for free. A caller that
-        passes no list asks no questions and pays for none -- an experiment
-        with no rules skips the fold outright.
+        one write this call already makes carries it for free.
+
+        The fold happens whether or not a list was passed. It is the record's
+        rules being brought up to date with the record's own observations
+        rather than a service to this caller: a streak that skipped whatever
+        was logged through a path asking no questions would be counting a
+        series the run never had, and would fire late or not at all.
+        ``fired`` only says where the notifications go, and an experiment with
+        no rules skips the fold outright either way.
         """
         items = list(
             observations.items() if hasattr(observations, "items") else observations
@@ -351,8 +360,9 @@ class ExperimentStore:
             experiment = Experiment(env_id=env_id, name=env_id)
         for key, value in items:
             experiment.add_metric(key, value, step)
+        events = alert_rules.evaluate(experiment, items, step)
         if fired is not None:
-            fired.extend(alert_rules.evaluate(experiment, items, step))
+            fired.extend(events)
         return self._write(env_id, env, experiment)
 
     def update_tags(self, env_id, tags, append=False, env_data=None):
