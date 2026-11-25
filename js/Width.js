@@ -18,73 +18,68 @@
 
 /* eslint-disable react/no-find-dom-node, react/display-name */
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import './Width.css';
+
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 var Width = (ComposedComponent) => (props) => {
-  const { onWidthChange } = props;
+  const { onWidthChange, layout } = props;
 
   // state varibles
   // --------------
   const [width, setWidth] = useState(1280);
   const [cols, setCols] = useState(100);
-  const [timerActive, setTimerActive] = useState(false);
   const containerRef = useRef();
 
-  // private events
-  // --------------
-
-  // when resizing, set timer to trigger onWindowResizeStop
-  // (retriggers setTimer setup)
-  const onWindowResize = () => {
-    setTimerActive(false);
-    setTimerActive(true);
-  };
-
-  // when resizing finished, save dimensions & trigger onWidthChange
-  const onWindowResizeStop = () => {
-    // reenable timer activation
-    setTimerActive(false);
-
-    // get new dimensions
-    const node = containerRef.current;
-    if (node) {
-      setCols((node.offsetWidth / width) * cols);
-      setWidth(node.offsetWidth);
-    }
-  };
-
-  // effects
-  // -------
-
-  // when setting timerActive activates timer
-  // note: this activates actual timer after rendering to ensure only one
-  //       timer is running at a time
-  useEffect(() => {
-    if (!timerActive) return;
-    let resizeTimer = setTimeout(onWindowResizeStop, 200);
-    return function cleanup() {
-      clearTimeout(resizeTimer);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    let resizeFrame = null;
+    let restoreTransitions;
+    let measuredWidth;
+    const applyWidth = (nextWidth) => {
+      measuredWidth = nextWidth;
+      setCols((nextWidth / width) * cols);
+      setWidth(nextWidth);
     };
-  }, [timerActive]);
+    const onWindowResize = () => {
+      if (resizeFrame !== null) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null;
+        const nextWidth = container.offsetWidth;
+        if (nextWidth === measuredWidth) return;
+        container.classList.add('visdom-window-resizing');
+        clearTimeout(restoreTransitions);
+        applyWidth(nextWidth);
+        restoreTransitions = setTimeout(() => {
+          container.classList.remove('visdom-window-resizing');
+        }, 150);
+      });
+    };
 
-  // actual onWidthChange occurs only, when the state variables changed
-  useEffect(() => {
+    // Measure before the first paint so incoming panes use the actual width.
+    applyWidth(container.offsetWidth);
+    window.addEventListener('resize', onWindowResize);
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      clearTimeout(restoreTransitions);
+      container.classList.remove('visdom-window-resizing');
+    };
+  }, []);
+
+  useLayoutEffect(() => {
     onWidthChange(width, cols);
   }, [width]);
 
-  // ensure that resizing callbacks are only called when mounted
-  useEffect(() => {
-    window.addEventListener('resize', onWindowResize);
-    return function cleanup() {
-      window.removeEventListener('resize', onWindowResize);
-    };
-  }, []);
-
-  // measure initial dimensions before the first paint, so panes arriving
-  // right after page load are not packed against the 1280px default
-  useLayoutEffect(() => {
-    onWindowResizeStop();
-  }, []);
+  const fittedLayout = useMemo(
+    () =>
+      layout.map((item) => {
+        const w = Math.min(item.w, cols);
+        const x = Math.max(0, Math.min(item.x, cols - w));
+        return w === item.w && x === item.x ? item : { ...item, w, x };
+      }),
+    [layout, cols]
+  );
 
   // rendering
   // ---------
@@ -136,6 +131,7 @@ var Width = (ComposedComponent) => (props) => {
     <div ref={containerRef} style={{ width: '100%' }}>
       <ComposedComponent
         {...restProps}
+        layout={fittedLayout}
         width={width}
         gridConfig={gridConfig}
         dragConfig={dragConfig}

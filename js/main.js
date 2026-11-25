@@ -363,7 +363,10 @@ const App = () => {
       let paneLayout;
       if (stored) {
         paneLayout = stored;
-        _bin.current.content.push(paneLayout);
+        _bin.current.content.push({
+          width: Math.min(paneLayout.w, windowSize.current.cols),
+          height: paneLayout.h,
+        });
       } else {
         let w = PANE_SIZE[newPane.type][0],
           h = PANE_SIZE[newPane.type][1];
@@ -374,7 +377,7 @@ const App = () => {
         if (newPane.content && newPane.content.caption) h += 1;
 
         _bin.current.content.push({
-          width: w,
+          width: Math.min(w, windowSize.current.cols),
           height: h,
         });
 
@@ -710,6 +713,20 @@ const App = () => {
     if (latestRef.current.focusedPaneID != null) setFocusedPaneID(null);
   };
 
+  // A grid interaction returns displayed widths for every pane, including
+  // panes temporarily narrowed to fit the viewport.
+  const commitGridLayout = (layout, resizedID) => {
+    const widths = new Map(storeData.layout.map((item) => [item.i, item.w]));
+    updateLayout(
+      layout.map((item) => {
+        const w = widths.get(item.i);
+        return item.i !== resizedID && w > windowSize.current.cols
+          ? { ...item, w, width: w }
+          : item;
+      })
+    );
+  };
+
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
     // update layout according to user interaction
     setSelection((prev) => ({
@@ -717,7 +734,7 @@ const App = () => {
       layoutID: DEFAULT_LAYOUT,
     }));
     focusPane(layoutItem.i);
-    updateLayout(layout);
+    commitGridLayout(layout, layoutItem.i);
     sendPaneLayoutUpdate(latestRef.current.selection.envIDs[0], layoutItem);
   };
 
@@ -751,7 +768,7 @@ const App = () => {
       ...prev,
       layoutID: DEFAULT_LAYOUT,
     }));
-    updateLayout(layout);
+    commitGridLayout(layout);
   };
 
   const applySavedLayout = (layout, layoutID, layoutMap) => {
@@ -777,7 +794,7 @@ const App = () => {
   const createBin = (layout, cols) => {
     let contents = layout.map((paneLayout) => {
       return {
-        width: paneLayout.w,
+        width: Math.min(paneLayout.w, cols),
         height: paneLayout.h,
       };
     });
@@ -804,27 +821,31 @@ const App = () => {
     setStoreData((prev) => {
       let layoutMap = envLayoutList.get(layoutID);
       let sorted = sortLayout(prev.layout);
-      let old_sorted = sorted.slice();
       let newPanes = Object.assign({}, prev.panes);
+      if (nextFilterString || layoutID !== DEFAULT_LAYOUT) {
+        const matchingPanes = new Set(
+          sorted
+            .filter(({ i }) => newPanes[i].title.match(filter))
+            .map(({ i }) => i)
+        );
 
-      // Sort out things that were filtered away
-      sorted = sorted.sort(function (a, b) {
-        let diff =
-          (newPanes[a.i].title.match(filter) != null) -
-          (newPanes[b.i].title.match(filter) != null);
-        if (diff != 0) {
-          return -diff;
-        } else if (layoutID !== DEFAULT_LAYOUT) {
-          let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
-          let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
-          let diff = bVal - aVal;
+        // Sort out things that were filtered away
+        sorted = sorted.sort(function (a, b) {
+          let diff = matchingPanes.has(a.i) - matchingPanes.has(b.i);
           if (diff != 0) {
-            // At least one of the two was in the layout map.
-            return diff;
+            return -diff;
+          } else if (layoutID !== DEFAULT_LAYOUT) {
+            let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
+            let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
+            let diff = bVal - aVal;
+            if (diff != 0) {
+              // At least one of the two was in the layout map.
+              return diff;
+            }
           }
-        }
-        return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
-      });
+          return 0; // Stable sort preserves row and column order for ties.
+        });
+      }
 
       // The bin packer indexes its dimensions by pane order, so initialize it
       // only after the final filtered/saved-view order has been determined.

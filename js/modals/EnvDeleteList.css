@@ -7,51 +7,15 @@
  *
  */
 
-.env-select {
-  position: relative;
-  margin: 8px 0 12px;
-}
-
-.env-select-trigger {
+.env-delete-list {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 34px;
-  text-align: left;
-  white-space: normal;
-}
-
-.env-select-value {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
+  flex-direction: column;
+  flex: 1;
   min-width: 0;
-}
-
-.env-select-placeholder {
-  color: #777;
-}
-
-.env-select-chip {
-  display: inline-block;
-  max-width: 220px;
   overflow: hidden;
-  padding: 1px 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background-color: #f0f0f0;
-  border: 1px solid #dedede;
-  border-radius: 10px;
-}
-
-.env-select-menu {
-  right: 0;
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
+  background: var(--vis-bg-surface);
+  border: 1px solid var(--vis-border);
+  border-radius: 8px;
 }
 
 .env-select-search {
@@ -60,7 +24,8 @@
 }
 
 .env-select-list {
-  max-height: 208px;
+  flex: 1;
+  max-height: min(350px, 45vh);
   overflow-y: auto;
 }
 
@@ -69,7 +34,7 @@
   gap: 8px;
   align-items: center;
   margin: 0;
-  padding: 5px 12px;
+  padding: 8px 12px;
   font-weight: normal;
   cursor: pointer;
 }
@@ -123,14 +88,19 @@
 
 .env-select-footer {
   display: flex;
+  margin-top: auto;
   gap: 12px;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
   font-size: 12px;
   color: #6b6b6b;
   background-color: #f5f5f5;
   border-top: 1px solid #dedede;
+}
+
+.env-select-footer [role='status'] {
+  margin-right: auto;
 }
 
 .env-select-clear {
