@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import os
+import re
 import sys
 from unittest.mock import patch
 
@@ -294,24 +295,58 @@ def test_image_points_a_channels_last_array_to_transpose(offline_client, shape):
         offline_client.image(np.zeros(shape, dtype=np.uint8))
     message = str(error.value)
     assert message.startswith("Shape {} looks like HxWxC".format(shape))
-    assert "img.transpose(2, 0, 1)" in message
+    assert "use np.transpose(img, (2, 0, 1))" in message
     assert "number of image channels" not in message
 
 
-def test_image_points_a_channels_last_list_to_a_fix_it_can_run(offline_client):
-    """A nested list has no transpose, so the hint names np.transpose too."""
+def _follow_hint(draw, pattern, **names):
+    """Call ``draw`` on a channels-last input, then run the fix its error gives."""
+    (value,) = names.values()
     with pytest.raises(ValueError) as error:
-        offline_client.image(np.zeros((32, 40, 3)).tolist())
-    assert "Shape (32, 40, 3) looks like HxWxC" in str(error.value)
-    assert "np.transpose(img, (2, 0, 1)) (plain list)" in str(error.value)
+        draw(value)
+    code = re.search(pattern, str(error.value)).group(0)
+    return eval(code, {"np": np, **names})
 
 
-def test_image_suggested_fixes_render(capture_send):
+_NP_FIX = r"np\.transpose\(\w+, \([\d, ]+\)\)"
+_TORCH_FIX = r"\w+\.permute\([\d, ]+\)"
+
+
+@pytest.mark.parametrize(
+    "convert", [np.asarray, np.ndarray.tolist], ids=["array", "nested_list"]
+)
+def test_image_hint_runs_on_an_array_and_a_nested_list(
+    offline_client, capture_send, convert
+):
+    """A nested list has no transpose, so the fix can't be a method call."""
     img = np.random.RandomState(0).rand(32, 40, 3)
-    for fixed in (img.transpose(2, 0, 1), np.transpose(img.tolist(), (2, 0, 1))):
-        sent = capture_send(lambda v, fixed=fixed: v.image(fixed))
-        assert sent["payload"]["data"][0]["type"] == "image"
-        assert sent["payload"]["opts"]["width"] == 40
+    fixed = _follow_hint(offline_client.image, _NP_FIX, img=convert(img))
+    shown = decode(capture_send(lambda v: v.image(fixed)))[1]
+    np.testing.assert_array_equal(shown, np.uint8(img * 255.0))
+
+
+@pytest.mark.parametrize(
+    "convert",
+    [np.asarray, list, np.ndarray.tolist],
+    ids=["array", "list", "nested_list"],
+)
+def test_images_hint_runs_on_an_array_and_a_list(offline_client, capture_send, convert):
+    batch = np.random.RandomState(0).rand(2, 8, 9, 3)
+    fixed = _follow_hint(offline_client.images, _NP_FIX, batch=convert(batch))
+    shown = decode(capture_send(lambda v: v.images(fixed, padding=0)))[1]
+    np.testing.assert_array_equal(shown, np.uint8(np.hstack(batch) * 255.0))
+
+
+def test_hints_run_on_torch_tensors(offline_client, capture_send):
+    """permute keeps working where numpy can't read the tensor, as with grad."""
+    torch = pytest.importorskip("torch")
+    img = torch.rand(8, 9, 3, requires_grad=True)
+    fixed = _follow_hint(offline_client.image, _TORCH_FIX, img=img)
+    assert decode(capture_send(lambda v: v.image(fixed)))[1].shape == (8, 9, 3)
+    batch = torch.rand(2, 8, 9, 3, requires_grad=True)
+    fixed = _follow_hint(offline_client.images, _TORCH_FIX, batch=batch)
+    shown = decode(capture_send(lambda v: v.images(fixed, padding=0)))[1]
+    assert shown.shape == (8, 18, 3)
 
 
 @pytest.mark.parametrize(
@@ -354,25 +389,13 @@ def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client, 
     ids=["array", "list", "smallest"],
 )
 def test_images_points_a_channels_last_batch_to_transpose(offline_client, batch):
-    """The hint covers both an array and a list, since a list has no transpose."""
+    """One hint for both an array and a list, since a list has no transpose."""
     with pytest.raises(ValueError) as error:
         offline_client.images(batch)
     message = str(error.value)
     assert message.startswith("Shape {} looks like NxHxWxC".format(np.shape(batch)))
     assert "number of image channels" not in message
-    assert "batch.transpose(0, 3, 1, 2)" in message
-    assert "[img.transpose(2, 0, 1) for img in images]" in message
-
-
-def test_images_suggested_fixes_render(capture_send):
-    batch = np.zeros((2, 8, 8, 3))
-    images = list(batch)
-    for fixed in (
-        batch.transpose(0, 3, 1, 2),
-        [img.transpose(2, 0, 1) for img in images],
-    ):
-        sent = capture_send(lambda v, fixed=fixed: v.images(fixed))
-        assert sent["payload"]["data"][0]["type"] == "image"
+    assert "use np.transpose(batch, (0, 3, 1, 2))" in message
 
 
 @pytest.mark.parametrize(
