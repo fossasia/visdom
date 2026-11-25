@@ -2065,9 +2065,9 @@ class Visdom(object):
         try:
             return self._experiment_query(msg, "experiments/suggest")
         except ServerError as e:
-            # the stub's 501 reply is the documented return value
-            reply = _json_object(e.body)
-            if e.status == 501 and reply is not None:
+            # the stub's 501 reply is the documented return value; any other isn't
+            reply = _json_object(e.body) or {}
+            if e.status == 501 and reply.get("status") == "not_implemented":
                 return reply
             raise
 

@@ -1111,6 +1111,49 @@ def test_suggest_experiment_still_returns_the_stub(offline_client, raise_excepti
     assert offline_client.suggest_experiment() == json.loads(SUGGEST_STUB)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"error": "method not supported"}',
+        '{"status": "error"}',
+        '{"status": null}',
+        '{"status": ["not_implemented"]}',
+        '{"detail": "not_implemented"}',
+        "{}",
+        "[]",
+        '"not_implemented"',
+        "<html>not_implemented</html>",
+        "",
+    ],
+    ids=[
+        "no_status",
+        "other_status",
+        "null_status",
+        "list_status",
+        "in_detail_only",
+        "empty_object",
+        "list",
+        "string",
+        "html",
+        "empty",
+    ],
+)
+def test_suggest_experiment_raises_for_a_501_that_is_not_the_stub(offline_client, body):
+    """A gateway's own 501 is not a suggestion reply."""
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (501, "Not Implemented", body))
+    with pytest.raises(visdom.ServerError) as caught:
+        offline_client.suggest_experiment()
+    assert caught.value.status == 501 and caught.value.body == body
+
+
+def test_suggest_experiment_raises_for_the_stub_body_on_another_status(offline_client):
+    offline_client.raise_exceptions = True
+    _answering(offline_client, (500, "Internal Server Error", SUGGEST_STUB))
+    with pytest.raises(visdom.ServerError, match="500"):
+        offline_client.suggest_experiment()
+
+
 def test_suggest_experiment_raises_for_other_errors(offline_client):
     offline_client.raise_exceptions = True
     _answering(offline_client, (400, "params must be an object", "<html>"))
