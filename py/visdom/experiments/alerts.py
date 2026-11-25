@@ -193,6 +193,19 @@ def _written_number(operand: str) -> Union[int, float]:
     try:
         return int(operand)
     except ValueError:
+        digits = operand.strip()
+        digits = digits[1:] if digits[:1] in "+-" else digits
+        if digits.isdigit():
+            # ``int()`` refuses a run of digits for exactly one reason: it is
+            # longer than CPython's integer string conversion limit. Falling
+            # through to ``float()`` would parse it anyway -- that limit is
+            # ``int()``'s alone -- and round it, which is the one thing this
+            # function exists to prevent. A padded threshold is refused where
+            # it is written instead of silently becoming its neighbour.
+            raise ValueError(
+                "{0!r} is written as an integer but is too long for one to "
+                "be read exactly".format(operand)
+            )
         return float(operand)
 
 

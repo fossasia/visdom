@@ -19,6 +19,7 @@ The third thing, the fold that decides whether an observation fires a rule,
 is tested beside the code that does it.
 """
 
+import builtins
 import json
 
 import pytest
@@ -78,6 +79,19 @@ class TestParseCondition:
         with pytest.raises(ValueError):
             parse_condition(text)
 
+    def test_a_condition_is_never_evaluated(self, monkeypatch):
+        # The refusal above is necessary but not sufficient: a grammar that
+        # ran the text through eval() and then refused the result would pass
+        # it too. This fails instead, because the probe records being called
+        # and the condition is written as a call to it.
+        called = []
+        monkeypatch.setattr(
+            builtins, "_visdom_alert_probe", called.append, raising=False
+        )
+        with pytest.raises(ValueError):
+            parse_condition("> _visdom_alert_probe(1)")
+        assert called == []
+
     @pytest.mark.parametrize("text", [">= 2.0", "<= 2.0", "!= 2.0"])
     def test_a_rejected_operator_is_named_in_the_message(self, text):
         # '>= 2.0' matches the '>' of a real condition first, which without
@@ -109,6 +123,16 @@ class TestParseCondition:
     @pytest.mark.parametrize("text", ["> 2.0", "< 0.5", "> -1e-3", "== 2."])
     def test_a_decimal_operand_is_still_read_as_a_float(self, text):
         assert isinstance(parse_condition(text)[1], float)
+
+    def test_a_digit_padded_integer_is_refused_rather_than_rounded(self):
+        # int() refuses a run of digits longer than CPython's conversion
+        # limit, and float() does not -- so leading zeros alone used to walk
+        # an exact integer operand back into the rounding the test above
+        # exists to prevent. 4300 is the limit; this is one digit over it.
+        padded = "0" * 4300 + "9007199254740993"
+        assert float(padded) != 9007199254740993
+        with pytest.raises(ValueError):
+            parse_condition("== " + padded)
 
     def test_an_integer_no_observation_could_reach_is_refused(self):
         # An integer operand is not bounded by float's range the way a
@@ -237,6 +261,13 @@ class TestAlertValidation:
         assert restored.threshold == 9007199254740993
         assert isinstance(restored.threshold, int)
         assert restored.to_dict() == alert.to_dict()
+
+    def test_a_digit_padded_threshold_never_reaches_a_saved_rule(self):
+        # The same operand through the written form a caller sends: refused
+        # at build time, so no rounded threshold is ever stored to be read
+        # back exactly on the next load.
+        with pytest.raises(ValueError):
+            build_alert("count", "== " + "0" * 4300 + "9007199254740993")
 
     def test_a_remembered_best_is_not_rounded_at_load(self):
         # 'best' is an observation the record kept, and the stall watch
