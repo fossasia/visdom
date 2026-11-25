@@ -426,6 +426,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 - [`vis.restore_run`](#visrestore_run): replay a tracked run's plots from its recorded `.json`/`.events.jsonl` files
 - [`vis.show`](#visshow): embed the dashboard in a Jupyter or VS Code notebook cell
+- [`%visdom`](#visdom-notebook-magic): notebook magic that embeds a dashboard in the output cell
 
 ### Experiments
 Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
@@ -1706,6 +1707,40 @@ inside the frame, and a workspace-scoped client (`api_key=`/`workspace=`) gets
 the server's default view, because a browser frame cannot send the
 `X-Visdom-Workspace` header that selects a workspace — `show()` warns when that
 is the case.
+
+The environment has to exist on the server before the frame can show it, and
+plotting into it is what creates it: the dashboard answers `404` for an
+environment it has never seen, and that `404` is what the frame shows. The
+`%visdom` magic below registers the environment for you.
+
+#### %visdom (notebook magic)
+
+`vis.show` embeds a dashboard you already have a client for. The `%visdom`
+magic is for the other order: it embeds the dashboard first, and builds the
+client that names the environment the frame opens.
+
+```
+%load_ext visdom.notebook
+%visdom --env run-7
+```
+
+Flags:
+- `--port`: server port. Default `8097`. The port can be part of `--server` instead; giving it in both places is an error unless the two agree, rather than one of them being ignored.
+- `--server`: server url, with or without the port — `localhost`, `localhost:8097`, `https://gpu-box.example.com:8097`. Default `http://localhost`. A scheme other than `http`/`https`, and anything after the host, are refused: a dashboard mounted under a proxy path is a different address, and embedding the server root instead would frame whatever else answers there.
+- `--env`: environment to open in the frame. Default `main`. The magic registers it on the server, so the frame is the dashboard rather than the `404` an unknown environment answers with. A server started with `-readonly` refuses that registration, as it refuses every write, so name an environment that already exists there or create it before the server goes read-only.
+- `--height`, `--width`: iframe size, as in `vis.show` — a number is pixels (whole or not: `600`, `600.5`), anything else is CSS.
+
+Re-running the cell embeds the same dashboard and reuses the same client rather
+than building a second one: every `Visdom` starts a session reaper that loops
+for the life of the process and holds its client while it does, so a client per
+cell execution is a thread per cell execution that never goes away. If the
+server was not answering when you first ran the cell, the environment never got
+registered — re-running it registers the environment then, rather than reusing
+the client as it is and framing the `404` for the rest of the session.
+
+IPython is not a visdom dependency: the magic is registered against the shell
+IPython hands `%load_ext`, and nothing in `visdom` imports IPython. For
+convenience `pip install visdom[notebook]` installs it alongside visdom.
 
 ### Experiments
 

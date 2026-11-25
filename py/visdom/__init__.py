@@ -200,6 +200,11 @@ def _refusal_reason(body):
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+# requests' (connect, read) for a POST. The read half is unbounded because a
+# send can carry a video the server is still writing out; a caller that
+# cannot wait that long sets its own.
+POST_TIMEOUT = (20, None)
+
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
 
 
@@ -1040,8 +1045,9 @@ def _without_userinfo(url):
     """``url`` with any ``user:password@`` dropped from its host.
 
     ``show()`` puts the server URL in markup a notebook saves and people
-    share, and ``__repr__`` prints it. A password typed into ``server=`` has
-    no business in either.
+    share, ``__repr__`` prints it, and the connection diagnostics name it in
+    a warning the same notebook saves. A password typed into ``server=`` has
+    no business in any of them.
     """
     parsed = urlparse(url)
     if "@" not in parsed.netloc:
@@ -1134,6 +1140,10 @@ class _NotebookEmbed:
 
 
 class Visdom(object):
+    # A class attribute rather than a constructor argument: the constructor
+    # POSTs before it returns, so there is no instance to set it on yet.
+    post_timeout = POST_TIMEOUT
+
     def __init__(
         self,
         server="http://localhost",
@@ -1188,6 +1198,13 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
+        # Whether this client's environment exists on the server. A caller
+        # that deep-links to it rather than plotting into it -- the notebook
+        # embed does -- has a 404 to show otherwise.
+        self._env_registered = False
+        # The status of the last POST, or None when it never reached a
+        # response. Read by _register_env, right after its own send.
+        self._last_post_status = None
         self.env = (
             env.replace("/", "_")
             .replace("\\", "_")
@@ -1257,20 +1274,16 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        result = self._send({"eid": env}, endpoint="env/" + env)
-        if result is False:
+        if not self._register_env(env):
+            # Without the userinfo: a notebook saves this message into the
+            # .ipynb, which is no place for a password typed into server=.
+            unreachable = "Could not connect to server at {}:{}.".format(
+                _without_userinfo(self.server), self.port
+            )
             if self.raise_exceptions:
-                raise ConnectionError(
-                    "Could not connect to server at {}:{}.".format(
-                        self.server, self.port
-                    )
-                )
+                raise ConnectionError(unreachable)
             else:
-                logger.warning(
-                    "Could not connect to server at {}:{}.".format(
-                        self.server, self.port
-                    )
-                )
+                logger.warning(unreachable)
         # when talking to a server, get a backchannel
         if use_incoming_socket:
             self.setup_socket()
@@ -1619,6 +1632,24 @@ class Visdom(object):
             seen.popitem(last=False)
         logger.warning(message)
 
+    def _register_env(self, env):
+        """Create ``env`` on the server. ``True`` when the server took it.
+
+        A method rather than a line in ``__init__`` so that a caller holding a
+        client built while the server was down -- whose frame would show the
+        ``404`` -- can ask again instead of carrying the failure for the life
+        of the process.
+
+        An answer is not an agreement: a server that is up but cannot take the
+        env yet answers with an error status and a body, and ``_send`` hands
+        a body back like any other, so the status has to agree too.
+        """
+        self._last_post_status = None
+        result = self._send({"eid": env}, endpoint="env/" + env)
+        status = self._last_post_status
+        self._env_registered = result is not False and (status is None or status < 400)
+        return self._env_registered
+
     def _handle_post(self, url, data=None):
         """
         This function has the responsibility of sending the request to the
@@ -1630,7 +1661,8 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data, timeout=(20, None))
+            r = self.session.post(url, data=data, timeout=self.post_timeout)
+            self._last_post_status = r.status_code
             self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
@@ -1646,7 +1678,8 @@ class Visdom(object):
                 except Exception:
                     pass
                 self._session = None
-            r = self.session.post(url, data=data, timeout=(20, None))
+            r = self.session.post(url, data=data, timeout=self.post_timeout)
+            self._last_post_status = r.status_code
             self._note_refusal(r.status_code, r.text)
             return r.text
 
@@ -1707,7 +1740,7 @@ class Visdom(object):
                 "If using a self-signed certificate, pass ssl_verify=False. "
                 "If using mkcert, run: "
                 "export REQUESTS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem".format(
-                    self.server, self.port
+                    _without_userinfo(self.server), self.port
                 )
             )
             if self.raise_exceptions:
