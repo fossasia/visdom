@@ -15,6 +15,7 @@ from visdom import server
 import os
 import os.path
 import requests
+import socket
 import ssl
 import traceback
 import threading
@@ -53,6 +54,45 @@ import sys
 
 if sys.version_info < (3, 12):
     raise RuntimeError("Visdom requires Python 3.12 or newer.")
+
+
+_KEYED_WEBSOCKET_SETUP_TIMEOUT = 20
+
+
+class _KeyedWebSocket(websocket.WebSocket):
+    def connect(self, url, **options):
+        # websocket-client's timeout applies to each read during the upgrade.
+        # Interrupt the transport if the whole handshake takes too long.
+        finished = threading.Event()
+        expired = threading.Event()
+
+        def interrupt_handshake():
+            expired.set()
+            while not finished.is_set():
+                transport = self.sock
+                if transport is not None:
+                    try:
+                        transport.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    return
+                # DNS, proxy, or TLS setup may still own the transport.
+                if finished.wait(0.05):
+                    return
+
+        timer = threading.Timer(_KEYED_WEBSOCKET_SETUP_TIMEOUT, interrupt_handshake)
+        timer.start()
+        try:
+            super().connect(url, **options)
+        finally:
+            finished.set()
+            timer.cancel()
+            timer.join()
+            if expired.is_set():
+                self.shutdown()
+                raise websocket.WebSocketTimeoutException(
+                    "WebSocket handshake timed out"
+                )
 
 
 def _normalize_tsne(Y):
@@ -1532,13 +1572,43 @@ class Visdom(object):
             if self.use_socket:
                 time.sleep(3)
 
+    @property
+    def use_socket(self):
+        return self._use_socket
+
+    @use_socket.setter
+    def use_socket(self, enabled):
+        self._use_socket = enabled
+        ws = getattr(self, "_keyed_websocket", None)
+        if not enabled and ws is not None:
+            # Wake recv() even while bytes are still arriving for a frame.
+            try:
+                ws.abort()
+            except OSError:
+                # The transport can close before shutdown reaches the socket.
+                pass
+            except AttributeError:
+                # Older websocket-client versions can race with recv() clearing
+                # the transport after abort() checks whether it is connected.
+                if ws.sock is not None:
+                    raise
+
     def _run_keyed_websocket(
         self, sock_addr, header, connect_kwargs, on_message, on_error, on_close
     ):
         ws = None
         try:
+            read_timeout = websocket.getdefaulttimeout()
+            setup_timeout = _KEYED_WEBSOCKET_SETUP_TIMEOUT
+            if read_timeout is not None:
+                setup_timeout = min(setup_timeout, read_timeout)
             ws = websocket.create_connection(
-                sock_addr, header=header, redirect_limit=0, **connect_kwargs
+                sock_addr,
+                header=header,
+                redirect_limit=0,
+                class_=_KeyedWebSocket,
+                timeout=setup_timeout,
+                **connect_kwargs,
             )
             if ws.getstatus() != 101:
                 location = (ws.getheaders() or {}).get("location")
@@ -1546,9 +1616,12 @@ class Visdom(object):
                     "Refused to follow the socket to {}, which would hand it "
                     "the API key".format(location)
                 )
+            # Restore the caller's read timeout after the handshake.
+            ws.settimeout(read_timeout)
+            self._keyed_websocket = ws
             while self.use_socket:
                 message = ws.recv()
-                if not message:
+                if not self.use_socket or not message:
                     break
                 on_message(ws, message)
         except websocket.WebSocketConnectionClosedException:
@@ -1556,11 +1629,18 @@ class Visdom(object):
         except Exception as error:
             if ws is None:
                 ws = websocket.WebSocket()
-            on_error(ws, error)
+            if self.use_socket:
+                on_error(ws, error)
         finally:
-            if ws is not None:
-                ws.close()
-            on_close(ws)
+            self._keyed_websocket = None
+            try:
+                if ws is not None:
+                    if self.use_socket:
+                        ws.close()
+                    else:
+                        ws.shutdown()
+            finally:
+                on_close(ws)
 
     def setup_polling(self):
         self.setup_socket(polling=True)

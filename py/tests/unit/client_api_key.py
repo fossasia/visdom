@@ -12,11 +12,13 @@ import logging
 import socket
 import threading
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import requests
+import websocket
 
-from visdom import Visdom
+from visdom import Visdom, _KeyedWebSocket
 from visdom.async_client import _AsyncTransport
 
 pytestmark = pytest.mark.unit
@@ -293,3 +295,169 @@ def test_a_socket_with_a_key_waits_before_it_reconnects(monkeypatch):
 
     assert len(attempts) == 2
     assert waits == [3, 3]
+
+
+@pytest.mark.parametrize(
+    ("read_timeout", "setup_timeout"), [(None, 20), (0, 0), (3, 3), (45, 20)]
+)
+def test_keyed_socket_stop_aborts_read_and_cleans_up(
+    monkeypatch, read_timeout, setup_timeout
+):
+    monkeypatch.setattr("visdom.websocket.getdefaulttimeout", lambda: read_timeout)
+    client = _socket_client(1)
+    ws = Mock()
+    ws.getstatus.return_value = 101
+
+    def stop_during_read():
+        client.use_socket = False
+        raise OSError("read interrupted by shutdown")
+
+    ws.recv.side_effect = stop_during_read
+    connect = Mock(return_value=ws)
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+    options = {"sslopt": {"cert_reqs": 0}, "http_proxy_host": "proxy"}
+    header = {"X-API-KEY": "visdom_live_abc"}
+
+    client._run_keyed_websocket(
+        "wss://visdom.example/vis_socket",
+        header,
+        options,
+        on_message,
+        on_error,
+        on_close,
+    )
+
+    connect.assert_called_once_with(
+        "wss://visdom.example/vis_socket",
+        header=header,
+        redirect_limit=0,
+        class_=_KeyedWebSocket,
+        timeout=setup_timeout,
+        **options,
+    )
+    ws.settimeout.assert_called_once_with(read_timeout)
+    on_message.assert_not_called()
+    on_error.assert_not_called()
+    ws.abort.assert_called_once_with()
+    ws.shutdown.assert_called_once_with()
+    on_close.assert_called_once_with(ws)
+    assert client._keyed_websocket is None
+
+
+@pytest.mark.parametrize("transport_closed", [True, False])
+def test_disabling_keyed_socket_handles_transport_cleared_during_abort(
+    transport_closed,
+):
+    client = _socket_client(1)
+    ws = Mock()
+    client._keyed_websocket = ws
+    error = AttributeError("shutdown")
+
+    def abort():
+        if transport_closed:
+            ws.sock = None
+        raise error
+
+    ws.abort.side_effect = abort
+
+    if transport_closed:
+        client.use_socket = False
+    else:
+        with pytest.raises(AttributeError) as raised:
+            client.use_socket = False
+        assert raised.value is error
+
+    assert client.use_socket is False
+    ws.abort.assert_called_once_with()
+
+
+def test_disabling_keyed_socket_tolerates_oserror_from_abort():
+    client = _socket_client(1)
+    ws = Mock()
+    ws.abort.side_effect = OSError("socket already closed")
+    client._keyed_websocket = ws
+
+    client.use_socket = False
+
+    assert client.use_socket is False
+    ws.abort.assert_called_once_with()
+
+
+def test_keyed_socket_connection_timeout_reports_error_and_closes(monkeypatch):
+    client = _socket_client(1)
+    error = websocket.WebSocketTimeoutException("handshake timed out")
+    connect = Mock(side_effect=error)
+    ws = Mock()
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    monkeypatch.setattr("visdom.websocket.WebSocket", Mock(return_value=ws))
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+
+    client._run_keyed_websocket(
+        "ws://visdom.example/vis_socket",
+        {},
+        {},
+        on_message,
+        on_error,
+        on_close,
+    )
+
+    assert connect.call_args.kwargs["timeout"] == 20
+    on_message.assert_not_called()
+    on_error.assert_called_once_with(ws, error)
+    ws.close.assert_called_once_with()
+    on_close.assert_called_once_with(ws)
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_keyed_socket_stop_during_setup_skips_read(monkeypatch, cleanup_fails):
+    client = _socket_client(1)
+    ws = Mock()
+    ws.getstatus.return_value = 101
+    if cleanup_fails:
+        ws.shutdown.side_effect = OSError("shutdown failed")
+
+    def connect(*args, **kwargs):
+        client.use_socket = False
+        return ws
+
+    monkeypatch.setattr("visdom.websocket.create_connection", connect)
+    on_message, on_error, on_close = Mock(), Mock(), Mock()
+
+    def run():
+        client._run_keyed_websocket(
+            "ws://visdom.example/vis_socket", {}, {}, on_message, on_error, on_close
+        )
+
+    if cleanup_fails:
+        with pytest.raises(OSError, match="shutdown failed"):
+            run()
+    else:
+        run()
+
+    ws.recv.assert_not_called()
+    ws.shutdown.assert_called_once_with()
+    on_message.assert_not_called()
+    on_error.assert_not_called()
+    on_close.assert_called_once_with(ws)
+    assert client._keyed_websocket is None
+
+
+def test_keyed_handshake_deadline_interrupts_transport(monkeypatch):
+    transport = Mock()
+    interrupted = threading.Event()
+    transport.shutdown.side_effect = lambda how: interrupted.set()
+    ws = _KeyedWebSocket()
+
+    def pending_upgrade(self, url, **options):
+        self.sock = transport
+        assert interrupted.wait(5)
+
+    monkeypatch.setattr("visdom._KEYED_WEBSOCKET_SETUP_TIMEOUT", 0.02)
+    monkeypatch.setattr(websocket.WebSocket, "connect", pending_upgrade)
+    with pytest.raises(
+        websocket.WebSocketTimeoutException, match="handshake timed out"
+    ):
+        ws.connect("ws://visdom.example/vis_socket")
+    transport.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    assert ws.sock is None
