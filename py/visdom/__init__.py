@@ -3361,7 +3361,8 @@ class Visdom(object):
         `opts.legend` can map metric names to display labels. Reuse this mapping
         on updates to keep labels attached to their metrics when the order changes
         or only a subset is updated. Missing keys use the metric name. List/tuple
-        legends remain positional and updates require exactly one label per metric.
+        legends are positional at creation. Updates use metric names and warn
+        if the supplied labels differ from the current metric names.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3425,13 +3426,18 @@ class Visdom(object):
                     names
                 ), "legend should have at least as many entries as metrics"
             else:
-                assert len(legend) == len(
-                    names
-                ), "positional legends require one entry per metric on updates"
+                if list(legend) != names:
+                    warnings.warn(
+                        "Positional legends do not select traces on learning_curve updates. "
+                        "Use a metric-name mapping for custom labels.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+                legend = names
 
         if update is not None:
             result = None
-            # Use the same trace names for creation and named updates.
+            # A keyed legend keeps custom trace names stable across updates.
             for name, values in zip(legend, series):
                 metric_opts = None
                 if update != "remove":

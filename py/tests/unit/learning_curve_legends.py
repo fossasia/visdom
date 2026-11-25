@@ -10,64 +10,37 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("update", ["append", "replace", "remove"])
+@pytest.mark.parametrize("legend_type", [list, tuple])
 @pytest.mark.parametrize(
-    "legend",
-    [["Training loss", "Validation loss"], ("Training loss", "Validation loss")],
+    "metrics, labels",
+    [
+        ({"val": [0.9]}, ["train", "val"]),
+        ({"val": [0.9], "train": [0.8]}, ["train", "val"]),
+        ({"train": [0.8], "val": [0.9]}, ["train", 1]),
+    ],
 )
-def test_custom_legends_target_existing_learning_curve_traces(
-    offline_client, update, legend
+def test_positional_updates_warn_and_use_metric_names(
+    offline_client, update, legend_type, metrics, labels
 ):
-    opts = {"legend": legend}
+    opts = {"legend": legend_type(labels)}
     with (
         patch.object(offline_client, "_send", return_value="losses") as send,
         patch.object(offline_client, "win_exists", return_value=True),
+        pytest.warns(UserWarning, match="metric-name mapping"),
     ):
         offline_client.learning_curve(
-            {"train": [1.0], "val": [1.2]}, step=[0], win="losses", opts=opts
-        )
-        created = send.call_args.args[0]["data"]
-        send.reset_mock()
-        offline_client.learning_curve(
-            {"train": [0.8], "val": [0.9]},
-            step=[1],
-            win="losses",
-            opts=opts,
-            update=update,
+            metrics, step=[1], win="losses", opts=opts, update=update
         )
 
     messages = [call.args[0] for call in send.call_args_list]
-    assert [message["name"] for message in messages] == [
-        trace["name"] for trace in created
-    ]
-    assert all(message["win"] == "losses" for message in messages)
-    assert opts == {"legend": legend}
+    assert [message["name"] for message in messages] == list(metrics)
+    assert opts == {"legend": legend_type(labels)}
     if update == "remove":
         assert all(message["delete"] and message["data"] == [] for message in messages)
     else:
-        assert [message["data"][0]["name"] for message in messages] == list(legend)
-        assert [message["data"][0]["y"] for message in messages] == [[0.8], [0.9]]
-        assert all(message["append"] == (update == "append") for message in messages)
-
-
-@pytest.mark.parametrize("update", ["append", "replace", "remove"])
-@pytest.mark.parametrize("legend_type", [list, tuple])
-def test_positional_learning_curve_updates_reject_a_full_legend_for_a_subset(
-    offline_client, update, legend_type
-):
-    legend = legend_type(["Training loss", "Validation loss"])
-    with (
-        patch.object(offline_client, "_send", return_value="losses") as send,
-        patch.object(offline_client, "win_exists", return_value=True),
-    ):
-        with pytest.raises(AssertionError, match="one entry per metric"):
-            offline_client.learning_curve(
-                {"val": 0.9},
-                step=[1],
-                win="losses",
-                opts={"legend": legend},
-                update=update,
-            )
-    send.assert_not_called()
+        assert [message["data"][0]["y"] for message in messages] == list(
+            metrics.values()
+        )
 
 
 def test_learning_curve_positional_legend_can_have_trailing_labels_at_creation(
