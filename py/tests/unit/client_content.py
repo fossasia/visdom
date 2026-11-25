@@ -519,6 +519,30 @@ def test_update_window_opts_routes_env(capture_send):
     assert sent["payload"]["eid"] == "e1"
 
 
+@pytest.mark.parametrize(
+    "opts,expected",
+    [
+        ({}, {}),
+        ({"title": "Loss"}, {"title": {"text": "Loss"}}),
+        ({"xlabel": "epoch"}, {"xaxis": {"title": {"text": "epoch"}}}),
+        ({"marginleft": 5}, {"margin": {"l": 5}}),
+        ({"showlegend": False}, {"showlegend": False}),
+        ({"legend": ["train", "val"]}, {"showlegend": True}),
+        (
+            {"tight_layout": True, "marginleft": 5},
+            {"margin": {"l": 5, "r": 0, "t": 30, "b": 0}},
+        ),
+        (
+            {"layoutopts": {"plotly": {"showlegend": True, "margin": {"r": 7}}}},
+            {"showlegend": True, "margin": {"r": 7}},
+        ),
+    ],
+)
+def test_update_window_opts_only_sends_requested_layout(capture_send, opts, expected):
+    sent = capture_send(lambda v: v.update_window_opts("w1", opts))
+    assert sent["payload"]["layout"] == expected
+
+
 # ------------------------------------------------------------ embeddings ----
 
 FEATURES = np.array([[0.0, 1.0], [1.0, 0.0], [0.5, 0.5]])

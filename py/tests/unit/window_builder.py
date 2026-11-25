@@ -251,6 +251,40 @@ def test_new_layout_keys_are_added(plot_pane):
     assert plot_pane["content"]["layout"]["xaxis"] == {"type": "log"}
 
 
+def test_options_only_layout_update_preserves_nested_fields(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout.update(
+        xaxis={"range": [0, 5], "title": {"text": "old", "font": {"size": 18}}},
+        margin={"l": 5, "r": 10, "t": 15, "b": 20},
+    )
+    update_window(
+        plot_pane,
+        {"layout": {"xaxis": {"title": {"text": "epoch"}}, "margin": {"l": 7}}},
+    )
+    assert layout["xaxis"] == {
+        "range": [0, 5],
+        "title": {"text": "epoch", "font": {"size": 18}},
+    }
+    assert layout["margin"] == {"l": 7, "r": 10, "t": 15, "b": 20}
+
+
+def test_options_only_layout_update_replaces_range_array(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout["xaxis"] = {"range": [0, 5], "title": {"text": "epoch"}}
+    update_window(plot_pane, {"layout": {"xaxis": {"range": [2, 8]}}})
+    assert layout["xaxis"] == {"range": [2, 8], "title": {"text": "epoch"}}
+
+
+def test_content_update_keeps_layout_replacement_semantics(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout["xaxis"] = {"range": [0, 5]}
+    update_window(
+        plot_pane,
+        {"data": [plot_data()], "layout": {"xaxis": {"title": {"text": "new"}}}},
+    )
+    assert layout["xaxis"] == {"title": {"text": "new"}}
+
+
 @pytest.mark.parametrize("args", [{"layout": {"title": None}}, {}])
 def test_layout_is_left_alone(plot_pane, args):
     update_window(plot_pane, args)

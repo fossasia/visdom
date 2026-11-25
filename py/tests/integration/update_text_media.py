@@ -221,6 +221,48 @@ class OptsOnlyUpdateTestCase(VisdomHTTPTestCase):
         self.assertEqual(self.get_win_data(win)["title"], title)
 
 
+class TestPlotLayoutOptions(VisdomHTTPTestCase):
+    def test_axis_label_update_keeps_range_and_title_font(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={
+                "showlegend": True,
+                "xaxis": {
+                    "range": [0, 5],
+                    "title": {"text": "step", "font": {"size": 18}},
+                },
+                "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+            },
+        )
+        response = self.update(
+            win, None, layout={"xaxis": {"title": {"text": "epoch"}}}
+        )
+        assert response.code == 200, response.body
+        layout = self.get_win_data(win)["content"]["layout"]
+        assert layout == {
+            "showlegend": True,
+            "xaxis": {
+                "range": [0, 5],
+                "title": {"text": "epoch", "font": {"size": 18}},
+            },
+            "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+        }
+
+    def test_margin_update_keeps_other_sides(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"margin": {"l": 5, "r": 10, "t": 15, "b": 20}},
+        )
+        response = self.update(win, None, layout={"margin": {"l": 7}})
+        assert response.code == 200, response.body
+        assert self.get_win_data(win)["content"]["layout"]["margin"] == {
+            "l": 7,
+            "r": 10,
+            "t": 15,
+            "b": 20,
+        }
+
+
 class TestOptsOnlyUpdate(
     ImageHistoryTestCase, EmbeddingsTestCase, OptsOnlyUpdateTestCase
 ):

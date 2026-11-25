@@ -401,7 +401,7 @@ def _axisformat3d(xyz, opts):
         }
 
 
-def _opts2layout(opts, is3d=False):
+def _opts2layout(opts, is3d=False, *, partial=False):
     tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", opts.get("legend") is not None),
@@ -413,6 +413,24 @@ def _opts2layout(opts, is3d=False):
             "b": opts.get("marginbottom", 0 if (is3d or tight) else 60),
         },
     }
+
+    if partial:
+        # Creation defaults must not overwrite options omitted from an update.
+        if "legend" not in opts and "showlegend" not in opts:
+            del layout["showlegend"]
+        if "tight_layout" not in opts:
+            layout["margin"] = {
+                side: opts[option]
+                for side, option in (
+                    ("l", "marginleft"),
+                    ("r", "marginright"),
+                    ("t", "margintop"),
+                    ("b", "marginbottom"),
+                )
+                if option in opts
+            }
+            if not layout["margin"]:
+                del layout["margin"]
 
     if is3d:
         layout["scene"] = {
@@ -3391,12 +3409,12 @@ class Visdom(object):
     def update_window_opts(self, win, opts, env=None):
         """
         This function allows pushing new options to an existing plot window
-        without updating the content
+        without updating the content. Options not supplied are preserved.
         """
         data_to_send = {
             "win": win,
             "eid": env,
-            "layout": _opts2layout(opts),
+            "layout": _opts2layout(opts, partial=True),
             "opts": opts,
         }
         return self._send(data_to_send, endpoint="update")
