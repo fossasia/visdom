@@ -191,11 +191,9 @@ def _refusal_reason(body):
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
-# requests' (connect, read) pair for a POST. The read half is unbounded
-# because a send can carry a video the server is still writing out when the
-# connection goes quiet, and no caller wants that cut off at an arbitrary
-# number of seconds. A caller that cannot afford an unbounded wait -- a
-# notebook cell, which has nothing to interrupt it -- sets its own.
+# requests' (connect, read) for a POST. The read half is unbounded because a
+# send can carry a video the server is still writing out; a caller that
+# cannot wait that long sets its own.
 POST_TIMEOUT = (20, None)
 
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
@@ -1064,10 +1062,8 @@ class _NotebookEmbed:
 
 
 class Visdom(object):
-    # requests' (connect, read) for every POST this client makes. A class
-    # attribute rather than a constructor argument because the constructor
-    # POSTs before it returns, so a caller that needs a different one has to
-    # be able to set it before there is an instance to set it on.
+    # A class attribute rather than a constructor argument: the constructor
+    # POSTs before it returns, so there is no instance to set it on yet.
     post_timeout = POST_TIMEOUT
 
     def __init__(
@@ -1126,13 +1122,10 @@ class Visdom(object):
         self.ipv6 = ipv6
         # Whether this client's environment exists on the server. A caller
         # that deep-links to it rather than plotting into it -- the notebook
-        # embed does -- has a 404 to show otherwise, and nothing but this to
-        # tell it apart from a dashboard that is simply empty.
+        # embed does -- has a 404 to show otherwise.
         self._env_registered = False
-        # The status of the last POST this client sent, or None when the
-        # send never reached a response -- a subclass with its own
-        # _handle_post, or a connection that failed. Only _register_env
-        # reads it, and only immediately after its own send.
+        # The status of the last POST, or None when it never reached a
+        # response. Read by _register_env, right after its own send.
         self._last_post_status = None
         self.env = (
             env.replace("/", "_")
@@ -1204,9 +1197,8 @@ class Visdom(object):
 
         # Setup for online interactions
         if not self._register_env(env):
-            # Without the userinfo: this names the server in a message that is
-            # printed, logged, and -- in a notebook -- saved into the .ipynb,
-            # none of which is a place for a password typed into server=.
+            # Without the userinfo: a notebook saves this message into the
+            # .ipynb, which is no place for a password typed into server=.
             unreachable = "Could not connect to server at {}:{}.".format(
                 _without_userinfo(self.server), self.port
             )
@@ -1565,19 +1557,14 @@ class Visdom(object):
     def _register_env(self, env):
         """Create ``env`` on the server. ``True`` when the server took it.
 
-        The constructor does this so that a client always names an
-        environment the dashboard knows. It is a method rather than a line in
-        ``__init__`` because a client that was built while the server was down
-        holds an environment that was never created, and the caller that
-        notices -- the notebook magic, whose frame would show the ``404`` --
-        has to be able to ask again rather than carry the failure for the life
+        A method rather than a line in ``__init__`` so that a caller holding a
+        client built while the server was down -- whose frame would show the
+        ``404`` -- can ask again instead of carrying the failure for the life
         of the process.
 
-        An answer is not an agreement: a server that is up but cannot take
-        the environment yet -- starting, overloaded, read only -- answers the
-        POST with an error status and a body, which ``_send`` hands back like
-        any other body. Taking that for a registration is the failure this
-        method exists to avoid, so the status has to say so too.
+        An answer is not an agreement: a server that is up but cannot take the
+        env yet answers with an error status and a body, and ``_send`` hands
+        a body back like any other, so the status has to agree too.
         """
         self._last_post_status = None
         result = self._send({"eid": env}, endpoint="env/" + env)

@@ -13,10 +13,8 @@
 
 Embeds a visdom dashboard in the output cell.
 
-IPython is never imported here: ``load_ipython_extension`` is handed the shell
-to register against, and the magic returns the same ``_repr_html_`` object
-``Visdom.show`` does. ``visdom/__init__.py`` does not import this module, so
-the import cost of ``import visdom`` is unchanged.
+IPython is never imported here, and ``visdom/__init__.py`` does not import
+this module, so ``import visdom`` costs what it always did.
 """
 
 import argparse
@@ -30,24 +28,21 @@ DEFAULT_SERVER = "http://localhost"
 DEFAULT_ENV = "main"
 DEFAULT_HEIGHT = 600
 DEFAULT_WIDTH = "100%"
-# run_server's own port validator sits behind a tornado import, which %load_ext
-# should not pay for.
+# Not run_server's validator: that one sits behind a tornado import.
 MAX_PORT = 65535
 # requests' (connect, read) for this client's POSTs, in seconds.
 CONNECT_TIMEOUT = 20
 READ_TIMEOUT = 20
 
-# Clients this kernel built, as (server, port, env) -> client. Reused
-# because a Visdom's session reaper lives as long as the process and holds its
-# client, so a client per cell execution is a thread per cell execution.
+# (server, port, env) -> client, reused because a Visdom's session reaper
+# lives as long as the process and holds its client.
 _clients = {}
 
 
 class _Parser(argparse.ArgumentParser):
     """Reports a bad flag to the caller instead of ending the kernel.
 
-    ``argparse`` answers an unparseable command line with ``SystemExit``, which
-    in a notebook reads as a crashed cell rather than a typo.
+    argparse's own answer is ``SystemExit``, which reads as a crashed cell.
     """
 
     def error(self, message):
@@ -60,9 +55,8 @@ class _Parser(argparse.ArgumentParser):
 def _port(value):
     """A port from the command line.
 
-    ``ArgumentTypeError`` rather than ``ValueError`` because argparse keeps
-    the message of the former and replaces the latter with "invalid _port
-    value", which names this function instead of saying what was wrong.
+    ``ArgumentTypeError`` because argparse replaces a ``ValueError`` with
+    "invalid _port value", which names this function rather than the problem.
     """
     try:
         port = int(value)
@@ -80,9 +74,8 @@ def _port(value):
 def _as_number(text):
     """The number ``text`` spells, or ``None`` when it spells something else.
 
-    ``int`` first so that a whole number stays whole: ``show()`` formats an
-    integer as ``600px`` and a float as ``600.0px``, and the second is a
-    length the browser honours but nobody typed.
+    ``int`` first so a whole number stays whole: ``show()`` renders a float
+    as ``600.0px``, a length nobody typed.
     """
     try:
         return int(text)
@@ -97,17 +90,12 @@ def _as_number(text):
 def _dimension(value):
     """An iframe dimension from the command line: a number is pixels, else CSS.
 
-    Any number, not only a whole one -- ``--height 600.5`` is 600.5 pixels,
-    exactly as ``show(height=600.5)`` is. Read as CSS instead it reaches the
-    browser as ``height:600.5``, a length with no unit, which the browser
-    drops: the dimension is then ignored rather than refused, and the frame
-    is whatever size it would have been without the flag.
+    Any number, not only a whole one: read as CSS, ``600.5`` reaches the
+    browser as a length with no unit and is dropped rather than refused.
 
-    Checked by ``show()``'s own ``_embed_size`` rather than by a rule of its
-    own, so the command line cannot accept a dimension the embed then refuses.
-    It is checked here, at parse time, because registering the environment
-    happens between the two: a dimension rejected by the embed would otherwise
-    have created an environment on the server on its way to the error.
+    Checked here, at parse time, by ``show()``'s own ``_embed_size``: the
+    environment is registered between parsing and the embed, so a dimension
+    only the embed refuses would create one on its way to the error.
     """
     text = value.strip()
     number = _as_number(text)
@@ -122,22 +110,17 @@ def _dimension(value):
 def _normalize_server(server):
     """A server url as ``Visdom`` keeps it, and the port the url named.
 
-    Returns ``(url, port)``, where ``port`` is ``None`` unless the url
-    carried one. The client builds every request as ``server:port/...``, so a
-    port left in the url is a second port: ``--server localhost:8097`` on the
-    default port asked for ``http://localhost:8097:8097/env/main``, which no
-    server answers at and no browser can load.
+    Returns ``(url, port)``, ``port`` being ``None`` unless the url carried
+    one: the client builds every request as ``server:port/...``, so a port
+    left in the url asks for ``http://localhost:8097:8097/env/main``.
 
-    ``http://`` is filled in for a bare host, but only for a bare host: an
-    explicit scheme has to be one a browser frame and the client can both
-    speak. Re-parsing any other scheme as a host reads ``htps://box`` as the
-    host ``htps:`` and drops the rest of the line, so a typo in the scheme
-    became an address nothing is listening on.
+    ``http://`` is filled in for a bare host only. Re-parsing any other
+    scheme as a host reads ``htps://box`` as the host ``htps:``, turning a
+    typo into an address nothing listens on.
 
-    Anything after the host is refused rather than dropped. A dashboard
-    mounted under a proxy path is at a different address, not at the same one
-    with a decoration, and quietly embedding the server root instead would
-    frame whatever else is answering there.
+    Anything after the host is refused rather than dropped: a dashboard under
+    a proxy path is a different address, and framing the server root instead
+    would show whatever else answers there.
     """
     text = server.strip()
     if "://" in text:
@@ -154,8 +137,8 @@ def _normalize_server(server):
     try:
         port = parsed.port
     except ValueError:
-        # urlparse only reads the port when asked, and answers both a port
-        # that is not a number and one out of range with a ValueError.
+        # urlparse reads the port only when asked, and raises for both a
+        # non-numeric one and one out of range.
         raise ValueError(
             "%visdom: --server does not name a usable port: {0!r}".format(server)
         ) from None
@@ -175,8 +158,7 @@ def _normalize_server(server):
 
     netloc = parsed.netloc
     if port is not None or netloc.endswith(":"):
-        # rsplit, so an IPv6 host keeps the colons inside its brackets and
-        # 'user:password@host' keeps the one in its userinfo.
+        # rsplit: an IPv6 host and a 'user:password@host' keep their colons.
         netloc = netloc.rsplit(":", 1)[0]
     return urlunparse((parsed.scheme, netloc, "", "", "", "")), port
 
@@ -184,9 +166,8 @@ def _normalize_server(server):
 def _resolve_port(in_url, flag):
     """The port to talk to, from the one in ``--server`` and the one in ``--port``.
 
-    Either spelling is fine and ``localhost:8097`` is the more natural one to
-    paste, but a line that gives both has said two things, and picking one of
-    them is how ``--port 9000`` ends up silently ignored.
+    Either spelling is fine, but a line that gives both has said two things,
+    and picking one is how ``--port 9000`` ends up silently ignored.
     """
     if in_url is None:
         return DEFAULT_PORT if flag is None else flag
@@ -207,8 +188,8 @@ def _build_parser():
     parser.add_argument(
         "-h", "--help", action="store_true", help="print this message and stop"
     )
-    # No default: the port can also be part of --server, and 'the user did
-    # not say' is what tells the two apart from a disagreement between them.
+    # No default: 'the user did not say' is what tells a port given only in
+    # --server apart from the two of them disagreeing.
     parser.add_argument(
         "--port",
         type=_port,
@@ -238,12 +219,9 @@ def _build_parser():
 class _NotebookClient(Visdom):
     """A client whose POSTs cannot hold the cell that ran them open forever.
 
-    ``Visdom`` leaves the read half of its POST timeout unbounded, because a
-    send can carry a video the server is still writing out when the
-    connection goes quiet. Registering an environment is not that, and a cell
-    has nothing to interrupt it: a server that accepts the connection and
-    then says nothing would keep the kernel on this line for as long as it
-    stayed up.
+    ``Visdom`` leaves the read half unbounded so a send can carry a video the
+    server is still writing out. Registering an env is not that, and a cell
+    has nothing to interrupt it.
     """
 
     post_timeout = (CONNECT_TIMEOUT, READ_TIMEOUT)
@@ -252,22 +230,14 @@ class _NotebookClient(Visdom):
 def _client_for(server, port, env):
     """The client for this address and environment, built once per kernel.
 
-    Constructing it registers the environment, so the deep link the frame
-    loads names an environment the dashboard knows rather than one it has
-    never seen. No incoming socket: this client only names the env.
+    Constructing it registers the environment, so the frame deep-links to one
+    the dashboard knows. No incoming socket: this client only names the env.
 
-    It is cached because a ``Visdom`` starts a session reaper that loops for
-    the life of the process and holds the client while it does. Building a new
-    one per cell execution would leave a thread and a client behind on every
-    run, and a notebook runs the same cell all day.
-
-    A client is cached even when that registration did not land, since the
-    thread it holds is there either way -- but the registration is then tried
-    again on the next run. The cache is here to save a thread, not to make
-    the first run's failure permanent: a ``%visdom`` typed before the server
-    was up would otherwise frame a ``404`` for the rest of the session, and
-    re-running the cell, the one thing anybody would try, would change
-    nothing.
+    Cached to save the session reaper thread each ``Visdom`` starts, which a
+    notebook re-running the same cell all day would otherwise leak. A client
+    whose registration did not land is cached too -- the thread is there
+    either way -- but is asked to register again, so a ``%visdom`` typed
+    before the server was up does not frame a ``404`` for the session.
     """
     key = (server, port, env)
     client = _clients.get(key)
@@ -293,9 +263,8 @@ def visdom_magic(line=""):
     parser = _build_parser()
     args = parser.parse_args(shlex.split(line))
     if args.help:
-        # Printed rather than returned: a cell displays a returned string
-        # through its repr, which puts the usage in quotes with its line
-        # breaks spelled '\n'.
+        # Printed, not returned: a cell shows a returned string through its
+        # repr, line breaks spelled '\n'.
         print(parser.format_help(), end="")
         return None
 
@@ -312,9 +281,8 @@ def load_ipython_extension(ipython):
 def unload_ipython_extension(ipython):
     """Unregister ``%visdom``. IPython calls this for ``%unload_ext``.
 
-    Only this extension's own entry: if a user or another extension has taken
-    the name over since ``%load_ext``, unloading this extension is not a
-    licence to remove what they registered.
+    Only this extension's own entry: whoever took the name over since
+    ``%load_ext`` keeps it.
     """
     manager = getattr(ipython, "magics_manager", None)
     if manager is None:
