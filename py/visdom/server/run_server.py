@@ -316,8 +316,8 @@ async def _serve(
         try:
             from tornado import autoreload
 
-            if app.shutdown_storage in autoreload._reload_hooks:
-                autoreload._reload_hooks.remove(app.shutdown_storage)
+            if app.save_before_reload in autoreload._reload_hooks:
+                autoreload._reload_hooks.remove(app.save_before_reload)
         except Exception:
             pass
 

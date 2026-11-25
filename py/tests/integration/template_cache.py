@@ -47,7 +47,7 @@ def test_application_explicit_debug_flag(tmp_path):
     app_prod = Application(env_path=str(tmp_path), debug=False)
     assert app_prod.settings.get("debug") is False
     assert app_prod.settings.get("compiled_template_cache", True) is True
-    assert app_prod.shutdown_storage not in autoreload._reload_hooks
+    assert app_prod.save_before_reload not in autoreload._reload_hooks
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -56,10 +56,10 @@ def test_application_explicit_debug_flag(tmp_path):
         app_dbg = Application(env_path=str(tmp_path), debug=True)
         assert app_dbg.settings.get("debug") is True
         assert app_dbg.settings.get("compiled_template_cache", True) is False
-        assert app_dbg.shutdown_storage in autoreload._reload_hooks
+        assert app_dbg.save_before_reload in autoreload._reload_hooks
     finally:
-        if app_dbg and app_dbg.shutdown_storage in autoreload._reload_hooks:
-            autoreload._reload_hooks.remove(app_dbg.shutdown_storage)
+        if app_dbg and app_dbg.save_before_reload in autoreload._reload_hooks:
+            autoreload._reload_hooks.remove(app_dbg.save_before_reload)
         loop.close()
         asyncio.set_event_loop(None)
 
@@ -73,7 +73,7 @@ def test_autoreload_hook_saves_dirty_environments(tmp_path):
     app = None
     try:
         app = Application(env_path=str(tmp_path), debug=True)
-        assert app.shutdown_storage in autoreload._reload_hooks
+        assert app.save_before_reload in autoreload._reload_hooks
 
         # Stage dirty state in an environment
         env_name = "test_autoreload_env"
@@ -85,7 +85,7 @@ def test_autoreload_hook_saves_dirty_environments(tmp_path):
 
         # Simulate Tornado triggering reload hooks before execv
         for hook in list(autoreload._reload_hooks):
-            if hook == app.shutdown_storage:
+            if hook == app.save_before_reload:
                 hook()
 
         # Verify dirty environment was flushed to disk and dirty_envs cleared
@@ -93,8 +93,38 @@ def test_autoreload_hook_saves_dirty_environments(tmp_path):
         assert saved_file.exists()
         assert env_name not in app.server_state.dirty_envs
     finally:
-        if app and app.shutdown_storage in autoreload._reload_hooks:
-            autoreload._reload_hooks.remove(app.shutdown_storage)
+        if app and app.save_before_reload in autoreload._reload_hooks:
+            autoreload._reload_hooks.remove(app.save_before_reload)
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+def test_autoreload_hook_failure_preserves_serving_state(tmp_path, monkeypatch):
+    """Failed save during reload propagates error without stopping storage."""
+    from tornado import autoreload
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    app = None
+    try:
+        app = Application(env_path=str(tmp_path), debug=True)
+
+        def failing_save_all(state):
+            raise OSError("Simulated disk full")
+
+        monkeypatch.setattr(
+            app.server_state.storage, "save_all", failing_save_all
+        )
+
+        # Triggering reload hook raises and resets _reload_attempted
+        with pytest.raises(OSError, match="Simulated disk full"):
+            app.save_before_reload()
+
+        assert autoreload._reload_attempted is False
+        assert app.server_state._storage_shut_down is False
+    finally:
+        if app and app.save_before_reload in autoreload._reload_hooks:
+            autoreload._reload_hooks.remove(app.save_before_reload)
         loop.close()
         asyncio.set_event_loop(None)
 
@@ -106,6 +136,6 @@ def test_application_explicit_autoreload_false(tmp_path):
     app = Application(env_path=str(tmp_path), debug=True, autoreload=False)
     assert app.settings.get("debug") is True
     assert app.settings.get("autoreload") is False
-    assert app.shutdown_storage not in autoreload._reload_hooks
+    assert app.save_before_reload not in autoreload._reload_hooks
 
 

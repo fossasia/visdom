@@ -330,8 +330,8 @@ class Application(tornado.web.Application):
                 import tornado.autoreload
 
                 hooks = tornado.autoreload._reload_hooks
-                if self.shutdown_storage not in hooks:
-                    tornado.autoreload.add_reload_hook(self.shutdown_storage)
+                if self.save_before_reload not in hooks:
+                    tornado.autoreload.add_reload_hook(self.save_before_reload)
             except Exception:
                 pass
 
@@ -681,6 +681,35 @@ class Application(tornado.web.Application):
         if closed:
             logging.info("workspace %s withdrawn, closed %d socket(s)", slug, closed)
         return closed
+
+    def save_before_reload(self):
+        """Persist unsaved environments before Tornado autoreloads.
+
+        Unlike ``shutdown_storage``, this does not stop autosave or shut down
+        the storage executor. If a save raises, the exception propagates to
+        abort Tornado's reload (preventing ``os.execv`` and data loss) while
+        leaving the storage executor and autosave active so normal serving and
+        subsequent retries can continue.
+        """
+        try:
+            if self.server_state.env_path is not None:
+                self.server_state.storage.save_all(self.server_state.state)
+            self.server_state.dirty_envs.clear()
+            self.server_state.saving_envs.clear()
+
+            for _wid, space in self.workspace_env_manager.workspace_spaces():
+                if space.env_path is not None:
+                    space.storage.save_all(space.state)
+                space.dirty_envs.clear()
+                space.saving_envs.clear()
+        except Exception:
+            try:
+                import tornado.autoreload
+
+                tornado.autoreload._reload_attempted = False
+            except Exception:
+                pass
+            raise
 
     def stop_autosave(self):
         """Compatibility wrapper for stopping the ServerState autosave."""
