@@ -7,6 +7,8 @@
 
 import datetime
 import functools
+import hashlib
+import json
 import warnings
 
 try:
@@ -63,6 +65,22 @@ class VisdomXGBLogger(TrainingCallback):
             callbacks=[callback],
         )
 
+    Points are plotted at the model's own boosting round, so training on
+    from xgb_model= doesn't start again at round 0. Which window a run uses
+    depends on the model it starts from:
+
+    - the model the curve ended with, or a saved copy of it: the curve is
+      continued in its window
+    - any other xgb_model=, even one with as many rounds: new windows, and
+      the earlier run's are left alone
+    - no xgb_model=: a manually reused callback replaces its curve, and
+      autolog() opens new windows
+    - inside a search or cross-validation, the fits share one window and the
+      latest replaces the one before, as above
+
+    A run that logs no evals plots nothing and changes no window. Continuing
+    the model it trained still continues the curve.
+
     Not thread-safe: active/_depth/_wins have no locking, so concurrent
     fits in the same process can race.
     """
@@ -83,9 +101,9 @@ class VisdomXGBLogger(TrainingCallback):
         self._run_start = None  # rounds the model had when this run began
         self._run_pending = False  # a run began but hasn't logged a round yet
         self._silent_end = None  # rounds after an unevaluated continuation
-        self._start_trees = None  # last round's trees of the model a run began from
-        self._curve_trees = None  # ... of the model where the curve ends
-        self._silent_trees = None  # ... where an unevaluated continuation ended
+        self._start_id = None  # which model a run began from
+        self._curve_id = None  # ... the curve ends with
+        self._silent_id = None  # ... an unevaluated continuation ended with
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -277,49 +295,55 @@ class VisdomXGBLogger(TrainingCallback):
 
     @staticmethod
     def _rounds(model):
-        """Rounds already in ``model``, or None if it can't say (xgboost < 1.4)."""
-        rounds = getattr(model, "num_boosted_rounds", None)
-        return rounds() if callable(rounds) else None
+        """Rounds already in ``model``, or None if it can't say."""
+        try:
+            return model.num_boosted_rounds()
+        except Exception:  # xgboost < 1.4, or a model it can't configure
+            return None
 
     @staticmethod
-    def _last_trees(model, rounds):
-        """The last round's trees as text: the same for a model and its reload."""
-        if not rounds:
-            return None
+    def _model_id(model):
+        """A digest of what ``model`` predicts with, or None if it can't be read.
+
+        The same for a model and its reload, whatever params it is trained on
+        with. All its trees count, and base_score: models that are unrelated
+        can share their last trees, or every tree.
+        """
         try:
-            return tuple(model[rounds - 1 : rounds].get_dump())
+            learner = json.loads(bytes(model.save_raw(raw_format="json")))["learner"]
+            params = learner["learner_model_param"]
+            parts = [learner["gradient_booster"], params["base_score"]]
+            return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
         except Exception:
-            try:  # gblinear can't be sliced; its whole dump is one small entry
-                return tuple(model.get_dump())
-            except Exception:
-                return None
+            return None
 
     def before_training(self, model):
         # Decided on the first logged round, so a run without evals changes nothing.
         self._run_start = start = self._rounds(model)
-        self._start_trees = None
-        # Only a model ending where the curve does can continue it, so dump only then.
-        if start in (self._next_round, self._silent_end):
-            self._start_trees = self._last_trees(model, start)
+        self._start_id = None
+        # Only a model ending where the curve does can continue it.
+        if start and start in (self._next_round, self._silent_end):
+            self._start_id = self._model_id(model)
         self._run_pending = True
         return model
 
     def _continues(self, start):
-        # The round count alone would let an unrelated checkpoint of the same
-        # size append to this curve, so its last trees have to match too.
-        if not start or self._start_trees is None:
+        # An unrelated model can have as many rounds, so it has to be the same one.
+        if not start or self._start_id is None:
             return False
-        return (start, self._start_trees) in (
-            (self._next_round, self._curve_trees),
-            (self._silent_end, self._silent_trees),
+        return (start, self._start_id) in (
+            (self._next_round, self._curve_id),
+            (self._silent_end, self._silent_id),
         )
 
     def _start_run(self):
         start, self._run_pending = self._run_start, False
         continues = self._continues(start)
-        self._silent_end = self._silent_trees = None
+        self._silent_end = self._silent_id = None
         self._fresh = not continues
-        if self._new_windows and not continues:
+        # Another model's run, or one that can't say, must not overwrite the curve.
+        resumes = start != 0 and self._depth == 0
+        if not continues and (self._new_windows or resumes):
             self._wins = {}
         self._new_windows = False
 
@@ -330,7 +354,7 @@ class VisdomXGBLogger(TrainingCallback):
             self._start_run()
         # xgboost restarts epoch at 0 on xgb_model=, so read the round from the model.
         rounds = self._rounds(model)
-        step = rounds - 1 if rounds is not None else epoch
+        step = (self._run_start or 0) + epoch if rounds is None else rounds - 1
         fresh = self._fresh if self._fresh is not None else step == 0
         try:
             for data_name, metrics in evals_log.items():
@@ -387,9 +411,10 @@ class VisdomXGBLogger(TrainingCallback):
             self._run_pending = False
             if self._continues(self._run_start):
                 self._silent_end = rounds
-                self._silent_trees = self._last_trees(model, rounds)
+                self._silent_id = self._model_id(model)
         else:
-            self._curve_trees = self._last_trees(model, rounds)
+            self._curve_id = self._model_id(model)
+        self._run_start = None
         try:
             best_iteration = model.best_iteration
             best_score = model.best_score
