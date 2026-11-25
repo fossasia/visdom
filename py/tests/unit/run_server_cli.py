@@ -148,6 +148,7 @@ def test_the_switch_flags_default_to_off(started):
     assert kwargs["eager_data_loading"] is False
     assert kwargs["use_frontend_client_polling"] is False
     assert kwargs["user_credential"] is None
+    assert kwargs["debug"] is False
 
 
 def test_the_switch_flags_are_forwarded(started):
@@ -156,11 +157,13 @@ def test_the_switch_flags_are_forwarded(started):
         "-bind_local",
         "-eager_data_loading",
         "-use_frontend_client_polling",
+        "-debug",
     )
     assert kwargs["readonly"] is True
     assert kwargs["bind_local"] is True
     assert kwargs["eager_data_loading"] is True
     assert kwargs["use_frontend_client_polling"] is True
+    assert kwargs["debug"] is True
 
 
 def test_the_internal_port_is_off_unless_given(started):

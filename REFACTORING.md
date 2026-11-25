@@ -623,7 +623,6 @@ pretty-printer the save path and the non-append `/update` still use.
 | 7c | Memoize the topbar and the modals | `EnvControls`, `ViewControls`, `FilterControls`, `ConnectionIndicator`, `EnvModal` and `ViewModal` are none of them memoized, so every pane update rebuilds all six. After #2056 and #2066 they and react-grid-layout's `GridItem` re-wrap are what is left of per-update element creation. Not taken because caching rendered pane elements was tried first and measured as a **wash** on a production bundle — 1.29x on a dev build, 1.00x on `webpack.prod.js` — so this family of changes needs a prod-build measurement before any of it is worth committing |
 | 7d | Make `stringify` cheaper, or stop using it where the output is not read by a human | It is 2.5x `json.dumps` because it pretty-prints. The save path's output is read by a human occasionally; the non-append `/update` path's is not read by anyone |
 | 7e | The polling transport's second escape pass | Polling escapes the message a second time, which is a wire-protocol difference between the two transports rather than a saving. Changing it needs `js/` and a rebuilt bundle, and Phase 6 is where the two transports get reconciled |
-| 7f | Drop `"compiled_template_cache": False` from the app settings | It is set explicitly at `py/visdom/server/app.py:108`, so Tornado recompiles the templates on every page render rather than caching them as it would by default. Removing one line would stop that, but it is the page-render path rather than the data path, and neither #1805 nor #695 points at it — so it wants its own measurement and its own PR rather than a free ride on this phase |
 
 ### Follow-ups delivered
 
@@ -631,6 +630,7 @@ pretty-printer the save path and the non-append `/update` still use.
 |---|------|-------------------|
 | 4f | Per-env write locks instead of one global storage worker | Gated on "only worth it once a profile shows the single worker is the bottleneck". The profile exists now and it does not: what the save path spent was the `copy.deepcopy` ahead of it, on the loop, which #2042 cut by 10x. The worker is not the queue. Still not worth doing, now for a measured reason rather than an assumed one |
 | 4h | Native async plotting bodies in `AsyncVisdom` | Same gate — "only worth doing if the bridge's thread pool shows up in a profile". It does not. What was actually expensive in a plotting body was per-point Python in the payload builders (#2022) and the import cost paid once (#1970), and both were fixed without forking a single method. The bar for forking 40+ plotting methods is now higher than before, not lower |
+| 7f | Drop `"compiled_template_cache": False` from the app settings | Removed from `tornado_settings` in `py/visdom/server/app.py` and added explicit `-debug` CLI flag and `debug` argument to `Application`. In production mode (`debug=False`), Tornado enables compiled template caching by default rather than recompiling templates on every request; debug mode disables template caching and enables live reload. |
 
 ---
 

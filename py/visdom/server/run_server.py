@@ -91,6 +91,7 @@ def start_server(
     internal_port=None,
     internal_ssl_certfile=None,
     internal_ssl_keyfile=None,
+    debug=False,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
@@ -116,6 +117,7 @@ def start_server(
             save_threshold=save_threshold,
             internal_port=internal_port,
             internal_ssl_ctx=internal_ssl_ctx,
+            debug=debug,
         )
     )
 
@@ -212,6 +214,7 @@ async def _serve(
     save_threshold,
     internal_port=None,
     internal_ssl_ctx=None,
+    debug=False,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -231,6 +234,7 @@ async def _serve(
         eager_data_loading=eager_data_loading,
         save_interval=save_interval,
         save_threshold=save_threshold,
+        debug=debug,
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
@@ -309,6 +313,13 @@ async def _serve(
         # in memory until the process ends, and add one more callback per
         # ``serve`` call in a process that serves more than once (the tests do).
         atexit.unregister(app.shutdown_storage)
+        try:
+            from tornado import autoreload
+
+            if app.save_before_reload in autoreload._reload_hooks:
+                autoreload._reload_hooks.remove(app.save_before_reload)
+        except Exception:
+            pass
 
 
 def main(print_func=None):
@@ -441,6 +452,12 @@ def main(print_func=None):
         help="Path to SSL private key file (.pem or .key) to enable HTTPS. "
         "Must be used together with -ssl_certfile.",
     )
+    parser.add_argument(
+        "-debug",
+        default=False,
+        action="store_true",
+        help="run the server in debug mode (enables live reload and disables template caching)",
+    )
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -543,6 +560,7 @@ def main(print_func=None):
         internal_port=FLAGS.internal_port,
         internal_ssl_certfile=FLAGS.internal_ssl_certfile,
         internal_ssl_keyfile=FLAGS.internal_ssl_keyfile,
+        debug=FLAGS.debug,
     )
 
 
