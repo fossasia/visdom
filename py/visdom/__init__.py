@@ -865,7 +865,9 @@ def _label_vector(y_true):
     """Return labels as a typed 1-D array, refusing missing or mixed values.
 
     Checked value by value first: numpy would turn ``["yes", nan]`` into
-    ``["yes", "nan"]`` and ``[0, "1"]`` into ``["0", "1"]``.
+    ``["yes", "nan"]`` and ``[0, "1"]`` into ``["0", "1"]``. Labels that a
+    typed array would merge, such as ``2**63 - 1`` and ``2**63`` as floats,
+    are kept as objects.
     """
     if isinstance(y_true, (list, tuple)):
         y_true = np.array(y_true, dtype=object)
@@ -875,12 +877,21 @@ def _label_vector(y_true):
     values = y_true.tolist()
     if any(isinstance(value, (list, tuple)) for value in values):
         raise ValueError("y_true and y_prob should have 1 dim")
-    text = [isinstance(value, (str, bytes)) for value in values]
-    if any(text) and not all(text) or any(_is_missing(v) for v in values):
+    kinds = {
+        str if isinstance(value, str) else bytes if isinstance(value, bytes) else None
+        for value in values
+    }
+    if len(kinds) > 1 or any(_is_missing(v) for v in values):
         raise ValueError(
             "y_true should hold only numbers or only strings, with no " "missing values"
         )
-    return np.array(values)
+    values = [_plain_label(value) for value in values]
+    if any(isinstance(v, float) and not math.isfinite(v) for v in values):
+        raise ValueError("y_true should only contain finite values")
+    typed = np.array(values)
+    if typed.dtype.kind in "biufUS" and typed.tolist() != values:
+        typed = np.array(values, dtype=object)
+    return typed
 
 
 def _could_be_label(labels, pos_label):
@@ -888,7 +899,9 @@ def _could_be_label(labels, pos_label):
     if _is_missing(pos_label):
         return False
     kind = labels.dtype.kind
-    if kind in "biuf":
+    if kind == "O" and isinstance(labels[0], (str, bytes)):
+        return isinstance(pos_label, str if isinstance(labels[0], str) else bytes)
+    if kind in "biuf" or kind == "O" and isinstance(labels[0], numbers.Real):
         return isinstance(pos_label, numbers.Integral) or (
             isinstance(pos_label, numbers.Real) and math.isfinite(pos_label)
         )
@@ -899,12 +912,28 @@ def _could_be_label(labels, pos_label):
     return True
 
 
-def _equal_to(values, label):
-    """``values == label``, where an int too wide for the dtype matches nothing."""
-    try:
-        return values == label
-    except OverflowError:
-        return np.zeros(values.shape, dtype=bool)
+def _plain_label(value):
+    """A numpy number as a Python one, which compares exactly with any other."""
+    return value.item() if isinstance(value, (np.number, np.bool_)) else value
+
+
+def _same_label(a, b):
+    return bool(_plain_label(a) == _plain_label(b))
+
+
+def _equal_to(values, labels, label):
+    """``values == label``, given the distinct ``labels`` in ``values``.
+
+    Only those are compared with it, since numpy would cast the values first:
+    an int array against a float compares ``2**53`` and ``2**53 + 1`` as equal.
+    """
+    if values.dtype == object:
+        return np.array([_same_label(value, label) for value in values])
+    mask = np.zeros(values.shape, dtype=bool)
+    for value in labels:
+        if _same_label(value, label):
+            mask |= values == value
+    return mask
 
 
 def _calibration_pos_label(labels, pos_label):
@@ -933,7 +962,7 @@ def _calibration_pos_label(labels, pos_label):
                 pos_label, labels.tolist()
             )
         )
-    if len(labels) == 2 and not np.any(_equal_to(labels, pos_label)):
+    if len(labels) == 2 and not any(_same_label(v, pos_label) for v in labels):
         raise ValueError(
             "pos_label={!r} is not one of the labels {}".format(
                 pos_label, labels.tolist()
@@ -990,7 +1019,7 @@ def _compute_calibration_curve(
     else:
         raise ValueError("strategy should be 'uniform' or 'quantile'")
 
-    positive = _equal_to(y_true, pos_label).astype(float)
+    positive = _equal_to(y_true, labels, pos_label).astype(float)
     if not positive.any():
         warnings.warn(
             "y_true has no samples of pos_label={!r}, so every bin's fraction "

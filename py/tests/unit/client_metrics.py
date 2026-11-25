@@ -1223,6 +1223,78 @@ def test_calibration_curve_takes_pandas_columns():
             _compute_calibration_curve(y_true, [0.1, 0.4], pos_label="yes")
 
 
+_WIDE = 2**63
+_EXACT = 2**53  # floats skip ints above this one
+
+
+@pytest.mark.parametrize("positive", [0, 1], ids=["first", "second"])
+@pytest.mark.parametrize(
+    "labels",
+    [
+        [_WIDE - 1, _WIDE],
+        (_WIDE - 1, _WIDE),
+        np.array([_WIDE - 1, _WIDE], dtype=object),
+        [np.int64(_WIDE - 1), np.uint64(_WIDE)],
+        [-1, _WIDE],
+        [_WIDE, _WIDE + 1],
+        [_EXACT + 1, float(_EXACT)],
+        ["a", "a\0"],
+        [b"a", b"a\0"],
+        [0, 2**70],
+        [0, 10**400],
+    ],
+    ids=[
+        "int64_and_uint64",
+        "tuple",
+        "object_array",
+        "numpy_scalars",
+        "negative_and_uint64",
+        "uint64",
+        "int_and_float",
+        "strings",
+        "bytes",
+        "wide",
+        "wider_than_float",
+    ],
+)
+def test_calibration_curve_keeps_labels_numpy_would_merge(labels, positive):
+    """[2**63 - 1, 2**63] becomes one float64 value, so both were positive."""
+    prob_true, _, _, _ = _compute_calibration_curve(
+        labels, [0.1, 0.9], n_bins=2, pos_label=labels[positive]
+    )
+    assert prob_true.tolist() == ([1.0, 0.0] if positive == 0 else [0.0, 1.0])
+
+
+@pytest.mark.parametrize("pos_label", [float(_EXACT), np.float64(_EXACT), _EXACT])
+def test_calibration_curve_compares_pos_label_without_casting(pos_label):
+    labels = np.array([_EXACT, _EXACT + 1])
+    prob_true, _, _, _ = _compute_calibration_curve(
+        labels, [0.1, 0.9], n_bins=2, pos_label=pos_label
+    )
+    assert prob_true.tolist() == [1.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    "labels, pos_label, message",
+    [
+        ([_WIDE - 1, _WIDE], float(_WIDE) * 2, "is not one of the labels"),
+        ([_WIDE - 1, _WIDE], "x", "can't be a label"),
+        (["a", "a\0"], b"a", "can't be a label"),
+        ([_WIDE - 1, _WIDE], None, "pos_label is not specified"),
+        ([_WIDE - 1, _WIDE, _WIDE + 1], _WIDE, "binary labels only"),
+        ([_WIDE - 1, float("inf")], _WIDE - 1, "only contain finite"),
+        (["a", b"a"], "a", "only numbers or only strings"),
+    ],
+    ids=["absent", "text", "bytes", "default", "three", "infinite", "str_and_bytes"],
+)
+def test_calibration_curve_still_checks_labels_kept_as_objects(
+    labels, pos_label, message
+):
+    probs = np.linspace(0.1, 0.9, len(labels))
+    with pytest.raises(ValueError, match=message):
+        _compute_calibration_curve(labels, probs, pos_label=pos_label)
+
+
 def test_calibration_curve_takes_string_labels_with_pos_label(capture_send):
     sent = capture_send(
         lambda v: v.calibration_curve(
