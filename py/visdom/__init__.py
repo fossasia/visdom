@@ -775,6 +775,138 @@ def _plain_scalar(value, what):
     return number
 
 
+def _floats_to_bytes(img, normalize=False):
+    """A float image as uint8, by the rules ``image()`` documents."""
+    finite_range = _finite_range(img, as_float=False)
+    if finite_range is not None:
+        img_min, img_max = finite_range
+    else:
+        img_min, img_max = 0.0, 0.0
+    if normalize:
+        if img_max > img_min:
+            with np.errstate(over="ignore"):
+                span = img_max - img_min
+            if span > np.finfo(img.dtype).max.item():
+                scale = max(abs(img_min), abs(img_max))
+                img = img / scale
+                img_min, img_max = img_min / scale, img_max / scale
+                span = img_max - img_min
+            img = (img - img_min) / span * 255.0
+        else:
+            img = np.zeros_like(img)
+    elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+        img = img * 255.0
+    elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+        img = (img + 1.0) / 2.0 * 255.0
+    img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+    return np.uint8(np.clip(img, 0, 255))
+
+
+def _pil_to_chw(img):
+    """The pixels of a PIL image, as a CxHxW (or HxW) array."""
+    if img.mode in ("I", "F") or img.mode.startswith("I;"):
+        # 32-bit int, float and 16-bit modes, in native byte order
+        arr = np.asarray(img)
+        return arr.astype(arr.dtype.newbyteorder("="), copy=False)
+    if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
+        # Read alpha from the mode, not band names: LAB has an "A" colour band.
+        alpha = (
+            img.mode in ("RGBA", "LA", "PA", "RGBa", "La")
+            or "transparency" in img.info
+            or (img.mode == "P" and getattr(img.palette, "mode", "") == "RGBA")
+        )
+        if img.mode == "La":
+            img = img.convert("LA")  # Pillow can't convert La to RGBA directly
+        img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
+    arr = np.asarray(img)
+    return arr if arr.ndim == 2 else arr.transpose(2, 0, 1)
+
+
+def _pil_integers_to_float(arr, normalize=False):
+    """The pixels of 16 or 32-bit integer PIL images, as floats in [0, 1].
+
+    16-bit pixels have a white point of 65535. 32-bit ones have none, so they
+    are read as bytes if they fit and scaled to fill [0, 1] if they don't.
+    ``normalize`` leaves the values alone, for the min-max scaling to use.
+    """
+    img = arr.astype(np.float64)
+    if normalize or img.size == 0:
+        return img
+    if arr.dtype == np.uint16:
+        return img / 65535.0
+    lo, hi = img.min(), img.max()
+    if lo == hi or (lo >= 0 and hi <= 255):
+        return np.clip(img / 255.0, 0.0, 1.0)
+    return (img - lo) / (hi - lo)
+
+
+def _pil_pixels(img, normalize=False):
+    """A PIL image as the uint8 or float array that ``image()`` draws."""
+    arr = _pil_to_chw(img)
+    if arr.dtype == np.uint8 or np.issubdtype(arr.dtype, np.floating):
+        return arr
+    return _pil_integers_to_float(arr, normalize)
+
+
+def _pixels_to_bytes(arr, normalize=False):
+    """One image, or a batch that shares a scale, as uint8."""
+    if arr.dtype == np.uint8 and not normalize:
+        return arr
+    if not np.issubdtype(arr.dtype, np.floating):
+        arr = _pil_integers_to_float(arr, normalize)
+    return _floats_to_bytes(arr, normalize)
+
+
+def _pil_list_to_bytes(items, normalize=False):
+    """A list with PIL images in it, as a BxCxHxW uint8 batch.
+
+    Images of one dtype and channel count share a scale, as in a 4D tensor.
+    Others have no common scale, so each is converted on its own.
+    """
+    tiles = []
+    for x in items:
+        if isinstance(x, Image.Image):
+            tiles.append(_pil_to_chw(x))
+            continue
+        tile = np.asarray(_to_numpy(x))
+        # As image_heatmap() reads an array: by value, if it isn't uint8.
+        if not np.issubdtype(tile.dtype, np.floating) and tile.dtype != np.uint8:
+            tile = tile.astype(np.float64)
+        tiles.append(tile)
+    if any(t.ndim not in (2, 3) for t in tiles):
+        raise ValueError("images() needs each image in a list to be HxW or CxHxW")
+    tiles = [t[None] if t.ndim == 2 else t for t in tiles]
+    sizes = sorted({t.shape[1:] for t in tiles})
+    if len(sizes) > 1:
+        raise ValueError(
+            "images() needs images of one size, got {}".format(
+                " and ".join("{}x{}".format(*size) for size in sizes)
+            )
+        )
+    channels = {t.shape[0] for t in tiles}
+    if not channels <= {1, 3, 4}:
+        raise ValueError(
+            "Unsupported number of image channels: {}. Only 1 (grayscale), 3 "
+            "(RGB), or 4 (RGBA) channels are supported.".format(
+                min(channels - {1, 3, 4})
+            )
+        )
+    if len(channels) == 1 and len({t.dtype for t in tiles}) == 1:
+        return _pixels_to_bytes(np.stack(tiles), normalize)
+    # image() leaves uint8 as it is, whether or not it's asked to normalize.
+    tiles = [_pixels_to_bytes(t, normalize and t.dtype != np.uint8) for t in tiles]
+    return np.stack([_match_channels(t, max(channels)) for t in tiles])
+
+
+def _match_channels(tile, channels):
+    """Pad a byte tile to ``channels``: gray to RGB, then an opaque alpha."""
+    if tile.shape[0] == 1 and channels > 1:
+        tile = np.repeat(tile, 3, axis=0)
+    if tile.shape[0] == 3 and channels == 4:
+        tile = np.concatenate([tile, np.full_like(tile[:1], 255)])
+    return tile
+
+
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
@@ -2814,7 +2946,11 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        or `HxW` tensor `img` that contains the image, or a PIL image. A 16-bit PIL
+        image is shown at its full scale (65535 is white), and a 32-bit integer one
+        (mode `I`) is scaled to fit if it has values outside [0, 255].
+
+        The array values can be uint8 in
         [0, 255] or float. Float arrays are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
@@ -2833,30 +2969,11 @@ class Visdom(object):
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        normalize = opts.get("normalize", False)
+        if isinstance(img, Image.Image):
+            img = _pil_pixels(img, normalize)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img, as_float=False)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    with np.errstate(over="ignore"):
-                        span = img_max - img_min
-                    if span > np.finfo(img.dtype).max.item():
-                        scale = max(abs(img_min), abs(img_max))
-                        img = img / scale
-                        img_min, img_max = img_min / scale, img_max / scale
-                        span = img_max - img_min
-                    img = (img - img_min) / span * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+            img = _floats_to_bytes(img, normalize)
 
         # extract dimensions and process formats
         if img.ndim == 2:
@@ -2955,8 +3072,9 @@ class Visdom(object):
         """
         Overlay a heatmap on an image.
 
-        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
-        `image()`). `heatmap` is an `HxW` float array. Values are expected in
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float) or a PIL image, by
+        the same rules as `image()`.
+        `heatmap` is an `HxW` float array. Values are expected in
         [0, 1] but any finite range is accepted — values outside [0, 1] are
         rescaled via min-max normalization before blending. NaN maps to 0;
         infinite values are clamped to the [0, 1] boundary. The two are
@@ -2976,33 +3094,14 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        normalize = opts.get("normalize", False)
+        if isinstance(img, Image.Image):
+            img = _pil_pixels(img, normalize)
         img = np.asarray(img)
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img, as_float=False)
-            if finite_range is not None:
-                img_min, img_max = finite_range
-            else:
-                img_min, img_max = 0.0, 0.0
-            if opts.get("normalize", False):
-                if img_max > img_min:
-                    with np.errstate(over="ignore"):
-                        span = img_max - img_min
-                    if span > np.finfo(img.dtype).max.item():
-                        scale = max(abs(img_min), abs(img_max))
-                        img = img / scale
-                        img_min, img_max = img_min / scale, img_max / scale
-                        span = img_max - img_min
-                    img = (img - img_min) / span * 255.0
-                else:
-                    img = np.zeros_like(img)
-            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-                img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-                img = (img + 1.0) / 2.0 * 255.0
-            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-            img = np.uint8(np.clip(img, 0, 255))
+            img = _floats_to_bytes(img, normalize)
 
         if img.ndim == 2:
             H, W = img.shape
@@ -3122,18 +3221,33 @@ class Visdom(object):
             endpoint="update",
         )
 
-    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
         or a list of images all of the same size,
         makes a grid of images of size (B / nrow, nrow).
 
+        The images in a list may be PIL images. If a list with PIL images mixes
+        dtypes or channel counts, each image is converted on its own, as
+        `image()` would show it; otherwise they share one scale.
 
         This is a modified from `make_grid()`
         https://github.com/pytorch/vision/blob/master/torchvision/utils.py
         """
+        if isinstance(tensor, Image.Image):
+            return self.image(tensor, win, env, opts)
+        # Before pytorch_wrap, which would turn the whole list into one array.
+        as_bytes = isinstance(tensor, list) and any(
+            isinstance(img, Image.Image) for img in tensor
+        )
+        if as_bytes:
+            normalize = opts is not None and opts.get("normalize", False)
+            tensor = _pil_list_to_bytes(tensor, normalize)
+        return self._image_grid(tensor, nrow, padding, win, env, opts, as_bytes)
 
+    @pytorch_wrap
+    def _image_grid(self, tensor, nrow, padding, win, env, opts, as_bytes):
+        """Draw a batch as a grid. ``as_bytes`` sends its uint8 values as they are."""
         # If list of images, convert to a 4D tensor
         if isinstance(tensor, list):
             tensor = np.stack(tensor, 0)
@@ -3176,7 +3290,9 @@ class Visdom(object):
         # width.
         normalize = opts is not None and opts.get("normalize", False)
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
+        if as_bytes or (
+            tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize
+        ):
             grid = np.ones(grid_shape, dtype=np.uint8)
         else:
             grid = np.ones(grid_shape)

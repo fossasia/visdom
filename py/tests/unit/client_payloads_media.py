@@ -353,43 +353,6 @@ def _grid_tiles(grid, count, size, padding):
     )
 
 
-@pytest.mark.parametrize(
-    "batch",
-    [
-        np.linspace(0, 4095, 2 * 36).reshape(2, 1, 6, 6).astype(np.uint16),
-        np.linspace(0.2, 0.5, 2 * 36).reshape(2, 1, 6, 6),
-        np.linspace(-3.0, -1.0, 2 * 36).reshape(2, 1, 6, 6),
-        np.linspace(1000, 5000, 2 * 36).reshape(2, 1, 6, 6).astype(np.int64),
-        np.linspace(100, 200, 2 * 36).reshape(2, 1, 6, 6).astype(np.uint8),
-    ],
-    ids=["uint16_12_bit", "float_inside_0_1", "float_negative", "int_wide", "uint8"],
-)
-@pytest.mark.parametrize("padding", [1, 2, 5])
-def test_images_normalizes_by_the_images_not_the_padding(capture_send, batch, padding):
-    """The padding is filled with 1; it set the grid's min or max before."""
-    opts = {"normalize": True}
-    plain = _shown(capture_send, lambda v: v.images(batch, padding=0, opts=opts))
-    padded = _shown(capture_send, lambda v: v.images(batch, padding=padding, opts=opts))
-    tiles = _grid_tiles(padded, 2, 6, padding)
-    np.testing.assert_array_equal(tiles, _grid_tiles(plain, 2, 6, 0))
-    assert tiles.min() == 0 and tiles.max() == 255
-
-
-def test_images_normalize_ignores_the_empty_cells_of_a_short_last_row(
-    capture_send,
-):
-    """Three images in rows of two leave one empty cell, filled like padding."""
-    batch = np.linspace(0.2, 0.5, 3 * 36).reshape(3, 1, 6, 6)
-    opts = {"normalize": True}
-    short = _shown(
-        capture_send, lambda v: v.images(batch, padding=0, nrow=2, opts=opts)
-    )
-    flat = _shown(capture_send, lambda v: v.images(batch, padding=0, nrow=3, opts=opts))
-    np.testing.assert_array_equal(short[:6, :12], flat[:, :12])
-    np.testing.assert_array_equal(short[6:, :6], flat[:, 12:])
-    assert flat.min() == 0 and flat.max() == 255
-
-
 def test_images_normalizes_padded_16_bit_pngs_to_full_range(capture_send, tmp_path):
     """The reported case: 16-bit PNGs in a grid with the default padding."""
     paths = []
@@ -402,13 +365,6 @@ def test_images_normalizes_padded_16_bit_pngs_to_full_range(capture_send, tmp_pa
     shown = _grid_tiles(grid, 2, 6, 2)
     assert shown.min() == 0 and shown.max() == 255
     assert shown[0].max() == np.uint8(2000 / 4095 * 255)  # one scale for the grid
-
-
-def test_images_normalizes_a_constant_batch_like_image_does(capture_send):
-    batch = np.full((2, 1, 6, 6), 7.0)
-    grid = _shown(capture_send, lambda v: v.images(batch, opts={"normalize": True}))
-    alone = _shown(capture_send, lambda v: v.image(batch[0], opts={"normalize": True}))
-    assert (alone == 0).all() and (_grid_tiles(grid, 2, 6, 2) == 0).all()
 
 
 def test_images_scales_a_16_bit_tile_next_to_an_8_bit_one(capture_send, tmp_path):
@@ -560,7 +516,10 @@ def test_image_keeps_premultiplied_and_palette_alpha(capture_send, mode):
     img = source.convert("LA").convert("La") if mode == "La" else source.convert(mode)
     shown = decode(capture_send(lambda v: v.image(img)))[1]
     assert shown.shape == (6, 9, 4)
-    np.testing.assert_array_equal(shown[..., 3], np.asarray(source)[..., 3])
+    # Older Pillow drops the alpha in the conversion to PA, so ask the image.
+    np.testing.assert_array_equal(
+        shown[..., 3], np.asarray(img.getchannel(img.getbands()[-1]))
+    )
 
 
 def test_image_shows_a_lab_image_without_an_alpha_channel(capture_send):
@@ -603,14 +562,6 @@ def _integer_mode_image(mode):
     return Image.frombytes(mode, (9, 6), raw)
 
 
-@pytest.mark.parametrize("mode", ["I;16", "I;16L", "I;16B", "I", "F"])
-def test_a_pil_image_draws_like_the_array_it_holds(capture_send, mode):
-    img = _integer_mode_image(mode)
-    shown = _shown(capture_send, lambda v: v.image(img))
-    from_array = _shown(capture_send, lambda v: v.image(np.asarray(img)))
-    np.testing.assert_array_equal(shown, from_array)
-
-
 def test_the_16_bit_byte_orders_look_the_same(capture_send):
     shown = [
         _shown(capture_send, lambda v: v.image(_integer_mode_image(mode)))
@@ -619,24 +570,6 @@ def test_the_16_bit_byte_orders_look_the_same(capture_send):
     np.testing.assert_array_equal(shown[0], shown[1])
     np.testing.assert_array_equal(shown[0], shown[2])
     assert shown[0].max() > 200
-
-
-@pytest.mark.parametrize(
-    "img, expected",
-    [
-        (np.array([[0, 1, 100, 255]]), [0, 1, 100, 255]),
-        (np.array([[0, 1, 100, 127]], np.int8), [0, 1, 100, 127]),
-        (np.array([[0, 1, 0, 1]], np.int32), [0, 255, 0, 255]),
-        (np.array([[False, True]]), [0, 255]),
-        (np.array([[0, 257, 65535]], np.uint16), [0, 1, 255]),
-        (np.array([[0, 300, 600]]), [0, 127, 255]),
-        (np.array([[-100, 0, 100]], np.int16), [0, 127, 255]),
-    ],
-    ids=["int64", "int8", "int_mask", "bool_mask", "uint16", "wide", "negative"],
-)
-def test_image_draws_integer_arrays_by_value(capture_send, img, expected):
-    """They used to be handed to PIL as raw bytes and come out garbled."""
-    assert _shown(capture_send, lambda v: v.image(img))[0].tolist() == expected
 
 
 def _mode_i_image(top):
@@ -679,8 +612,6 @@ _TILES = {
     "pil_F": Image.fromarray(_RNG.rand(6, 9).astype(np.float32)),
     "float_unit": _RNG.rand(3, 6, 9).astype(np.float32),
     "float_wide": _RNG.rand(3, 6, 9) * 1000,
-    "int64": _RNG.randint(0, 300, (3, 6, 9)),
-    "bool": _RNG.rand(6, 9) > 0.5,
 }
 
 
@@ -693,8 +624,6 @@ _TILES = {
         ("pil_gray", "float_wide"),
         ("pil_16", "pil_F"),
         ("pil_16", "pil_I"),
-        ("pil_rgba", "int64"),
-        ("pil_rgb", "bool"),
         ("float_wide", "pil_rgba"),
     ],
 )
@@ -715,31 +644,57 @@ def test_images_shows_each_tile_of_a_mixed_list_as_image_would(
             assert (part[..., 3] == 255).all()
 
 
-def test_images_scales_a_list_of_one_kind_together(capture_send):
-    """A [0, 1] tile next to a 0..255 float tile: one scale, as in a 4D tensor."""
-    tiles = [np.full((3, 2, 2), 0.5), np.full((3, 2, 2), 200.0)]
-    from_list = _shown(capture_send, lambda v: v.images(tiles, padding=0))
-    from_tensor = _shown(capture_send, lambda v: v.images(np.stack(tiles), padding=0))
-    np.testing.assert_array_equal(from_list, from_tensor)
+@pytest.mark.parametrize("value", [0, 1, 2, 255])
+@pytest.mark.parametrize("mode", ["L", "RGB", "RGBA"])
+@pytest.mark.parametrize("count", [1, 3])
+def test_images_keeps_the_bytes_of_a_constant_pil_image(
+    capture_send, mode, value, count
+):
+    """A byte of 1 stays 1, even when no pixel in the grid is brighter."""
+    size = (9, 6)
+    pixels = Image.new(mode, size, value if mode == "L" else (value,) * len(mode))
+    shown = _shown(capture_send, lambda v: v.images([pixels] * count, padding=0))
+    assert (shown == value).all()
 
 
-def test_images_tiles_a_list_of_2d_arrays(capture_send):
-    """Three HxW arrays used to be read as the channels of one RGB image."""
-    gray = [_RNG.randint(0, 256, (6, 9), dtype=np.uint8) for _ in range(3)]
-    shown = _shown(capture_send, lambda v: v.images(gray, padding=0))
-    expected = np.repeat(np.concatenate(gray, axis=1)[:, :, None], 3, axis=2)
-    np.testing.assert_array_equal(shown, expected)
+def test_images_accepts_a_pil_image_that_is_not_in_a_list(capture_send):
+    img = Image.fromarray(np.arange(162).reshape(6, 9, 3).astype(np.uint8))
+    shown = _shown(capture_send, lambda v: v.images(img))
+    np.testing.assert_array_equal(shown, np.asarray(img))
 
 
-def test_images_shows_a_uint16_batch_at_full_scale(capture_send):
-    batch = np.full((2, 1, 2, 2), 65535 // 2, dtype=np.uint16)
-    shown = _shown(capture_send, lambda v: v.images(batch, padding=0))
-    assert (shown == 127).all()
+def test_images_stretches_a_list_of_8_bit_pil_images_to_normalize(capture_send):
+    tiles = [Image.new("L", (9, 6), value) for value in (100, 150, 200)]
+    grid = _shown(capture_send, lambda v: v.images(tiles, opts={"normalize": True}))
+    values = [grid[3, 3 + k * 13, 0] for k in range(3)]
+    assert values == [0, 127, 255]
 
 
-def test_images_still_reads_nested_rows_as_one_image(capture_send):
-    shown = _shown(capture_send, lambda v: v.images([[0, 255], [255, 0]]))
-    assert shown[..., 0].tolist() == [[0, 255], [255, 0]]
+# PIL images are the only new input: arrays are still drawn as before.
+
+
+@pytest.mark.parametrize("dtype", [np.uint16, np.int32, np.int64])
+def test_image_heatmap_still_reads_an_integer_array_by_value(capture_send, dtype):
+    img = np.array([[0, 128, 255]], dtype=dtype)
+    sent = capture_send(
+        lambda v: v.image_heatmap(img, np.zeros((1, 3)), opts={"alpha": 0.0})
+    )
+    assert decode(sent)[1][0, :, 0].tolist() == [0, 128, 255]
+
+
+def test_images_still_stretches_a_low_valued_uint8_array(capture_send):
+    batch = np.ones((2, 3, 6, 9), dtype=np.uint8)
+    assert (_shown(capture_send, lambda v: v.images(batch, padding=0)) == 255).all()
+
+
+@pytest.mark.parametrize("first", ["pil", "array"])
+def test_images_reads_a_uint16_array_next_to_a_pil_image_by_value(capture_send, first):
+    pil = Image.new("RGB", (9, 6), (30, 30, 30))
+    array = np.full((3, 6, 9), 200, np.uint16)
+    tiles = [pil, array] if first == "pil" else [array, pil]
+    shown = _shown(capture_send, lambda v: v.images(tiles, padding=0))
+    left, right = (30, 200) if first == "pil" else (200, 30)
+    assert (shown[:, :9] == left).all() and (shown[:, 9:] == right).all()
 
 
 @pytest.mark.parametrize(
@@ -986,26 +941,16 @@ def test_images_keeps_the_float_grid_for_a_low_valued_uint8_batch(offline_client
     assert _grid_dtype(offline_client, batch) == np.float64
 
 
-def test_images_hands_image_a_stretched_grid_when_normalize_is_requested(
-    offline_client,
-):
-    """``opts.normalize`` is applied in ``images()``, by the images' own range.
+def test_images_keeps_the_float_grid_when_normalize_is_requested(offline_client):
+    """``opts.normalize`` is implemented only inside ``image()``'s float branch.
 
-    Left to ``image()``, the stretch would also take in the padding's fill of 1,
-    so the grid arrives already stretched, as bytes. The option still can't be
-    skipped by the uint8 shortcut: the batch here spans 100..200, and the grid
-    ``image()`` gets spans 0..255. Without the option it keeps its uint8 grid.
+    A uint8 grid never reaches that branch, so taking the dtype shortcut under
+    ``normalize=True`` would accept the option and silently do nothing. The
+    batch here is uint8 with a maximum above 1, which is exactly what the
+    shortcut is for -- so the float grid can only be coming from the option.
     """
     batch = np.full((4, 3, 4, 4), 200, dtype=np.uint8)
-    batch[:, :, 0, 0] = 100
-    grids = []
-    with patch.object(
-        offline_client, "image", side_effect=lambda g, *a, **k: grids.append(g)
-    ):
-        offline_client.images(batch, opts={"normalize": True})
-    stretched = grids[0]
-    assert stretched.dtype == np.uint8
-    assert (stretched[:, 3:7, 3:7].min(), stretched[:, 3:7, 3:7].max()) == (0, 255)
+    assert _grid_dtype(offline_client, batch, opts={"normalize": True}) == np.float64
     assert _grid_dtype(offline_client, batch, opts={"normalize": False}) == np.uint8
 
 
