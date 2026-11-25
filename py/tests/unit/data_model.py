@@ -586,9 +586,9 @@ def test_lazy_env_setitem_materialises_first(store):
 
 
 def test_lazy_env_raises_value_error_for_a_malformed_env(store, env_path):
-    """A file that is not a valid env becomes a ValueError naming the id."""
+    """A file that parses but is not an env becomes a ValueError naming the id."""
     with open(os.path.join(env_path, "broken.json"), "w") as fn:
-        fn.write("{not valid json")
+        fn.write(json.dumps({"windows": {}}))
 
     lazy = LazyEnvData(store, "broken")
     with pytest.raises(ValueError, match="broken"):
@@ -1246,3 +1246,106 @@ def test_a_forked_store_starts_cold(store):
     assert fork.env_path == store.env_path
     assert fork._meta_cache == {}
     assert fork.load_experiment("run") == _experiment_env()["experiment"]
+
+
+# -- An env file that does not parse ------------------------------------------
+
+
+def _write_corrupt_env(store, env_path, eid="run"):
+    """Save a real env, then cut its file short the way a full disk would."""
+    store.save_env(eid, _env())
+    path = os.path.join(env_path, eid + ".json")
+    with open(path, "rb") as fn:
+        damaged = fn.read()[:-10]
+    with open(path, "wb") as fn:
+        fn.write(damaged)
+    return path, damaged
+
+
+def test_a_corrupt_env_file_is_set_aside_and_the_env_starts_empty(store, env_path):
+    """The file is renamed with its bytes untouched, and the env loads empty."""
+    path, damaged = _write_corrupt_env(store, env_path)
+
+    assert store.load_env("run") == {"jsons": {}, "reload": {}}
+
+    assert not os.path.exists(path)
+    (moved,) = [n for n in os.listdir(env_path) if n.startswith("run.json.corrupt-")]
+    with open(os.path.join(env_path, moved), "rb") as fn:
+        assert fn.read() == damaged
+    # The set-aside copy is not mistaken for an env.
+    assert "run" not in store.list_envs()
+
+
+@needs_file_permissions
+def test_a_file_that_cannot_be_opened_is_not_moved(store, env_path):
+    """Only a file that was read and found damaged is set aside."""
+    store.save_env("run", _env())
+    path = os.path.join(env_path, "run.json")
+    os.chmod(path, 0)
+    try:
+        assert store.load_env("run") == {}
+    finally:
+        os.chmod(path, 0o644)
+    assert os.listdir(env_path) == ["run.json"]
+
+
+def test_a_corrupt_file_that_cannot_be_moved_is_left_alone(
+    store, env_path, monkeypatch
+):
+    """If the rename fails the env is not started empty over the old file."""
+    path, damaged = _write_corrupt_env(store, env_path)
+
+    def refuse(src, dst):
+        raise PermissionError(errno.EACCES, "read-only", src)
+
+    monkeypatch.setattr(json_store_module.os, "rename", refuse)
+
+    assert store.load_env("run") == {}
+    with open(path, "rb") as fn:
+        assert fn.read() == damaged
+
+
+def test_json_nested_too_deep_to_decode_counts_as_corrupt(store, env_path):
+    """The decoder gives up with RecursionError, not ValueError, on such a file."""
+    path = os.path.join(env_path, "run.json")
+    with open(path, "w") as fn:
+        fn.write("[" * 100000 + "]" * 100000)
+
+    assert store.load_env("run") == {"jsons": {}, "reload": {}}
+    assert not os.path.exists(path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="long-name limits differ on Windows")
+def test_a_corrupt_file_with_a_long_name_is_set_aside_under_a_short_one(
+    store, env_path
+):
+    """A name with no room left for the suffix still gets set aside."""
+    eid = "x" * 240
+    path, damaged = _write_corrupt_env(store, env_path, eid)
+
+    assert store.load_env(eid) == {"jsons": {}, "reload": {}}
+
+    assert not os.path.exists(path)
+    (moved,) = [n for n in os.listdir(env_path) if ".corrupt-" in n]
+    assert moved.startswith("env-")
+    with open(os.path.join(env_path, moved), "rb") as fn:
+        assert fn.read() == damaged
+
+
+def test_a_file_saved_after_it_was_read_is_not_moved(store, env_path, monkeypatch):
+    """A save between reading a damaged file and moving it wins."""
+    path, _ = _write_corrupt_env(store, env_path)
+    real_read = json_store_module.read_json_file
+    calls = []
+
+    def read_then_save(*args, **kwargs):
+        result = real_read(*args, **kwargs)
+        if not calls:
+            store.save_env("run", _env("saved_meanwhile"))
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(json_store_module, "read_json_file", read_then_save)
+
+    assert list(store.load_env("run")["jsons"]) == ["saved_meanwhile"]
+    assert os.listdir(env_path) == ["run.json"]

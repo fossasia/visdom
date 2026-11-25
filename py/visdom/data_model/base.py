@@ -15,8 +15,12 @@ from abc import ABC, abstractmethod
 #: failure. Compared by identity, never by equality.
 UNREADABLE_JSON = object()
 
+#: Returned by :func:`read_json_file`, when asked for, if a file opened but did
+#: not parse.
+CORRUPT_JSON = object()
 
-def read_json_file(path, default=UNREADABLE_JSON):
+
+def read_json_file(path, default=UNREADABLE_JSON, corrupt=None):
     """Parse the JSON document at ``path``, or return ``default``.
 
     The single read point for a file-backed :class:`DataStore`: the encoding
@@ -26,11 +30,16 @@ def read_json_file(path, default=UNREADABLE_JSON):
     :data:`UNREADABLE_JSON` unless the caller has a value of its own that
     cannot be confused with a successful parse. ``UnicodeDecodeError`` needs
     no separate clause; it is a :class:`ValueError`.
+
+    ``corrupt``, if given, is returned instead when the file opened but did
+    not parse.
     """
     try:
         with open(path, "r", encoding="utf-8") as fn:
             return json.load(fn)
-    except (OSError, ValueError):
+    except (ValueError, RecursionError):
+        return default if corrupt is None else corrupt
+    except OSError:
         return default
 
 
