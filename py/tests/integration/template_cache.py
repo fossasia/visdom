@@ -65,7 +65,7 @@ def test_application_explicit_debug_flag(tmp_path):
 
 
 def test_autoreload_hook_saves_dirty_environments(tmp_path):
-    """Autoreload hook persists unsaved environment state before reload."""
+    """Autoreload hook persists unsaved state via the storage executor."""
     from tornado import autoreload
 
     loop = asyncio.new_event_loop()

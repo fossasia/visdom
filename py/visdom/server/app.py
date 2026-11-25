@@ -28,6 +28,7 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     delete_env_off_loop,
     purge_env,
+    snapshot_state,
 )
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
@@ -690,16 +691,38 @@ class Application(tornado.web.Application):
         abort Tornado's reload (preventing ``os.execv`` and data loss) while
         leaving the storage executor and autosave active so normal serving and
         subsequent retries can continue.
+
+        Saves are submitted to the shared storage executor
+        (``ThreadPoolExecutor(max_workers=1)``) and awaited synchronously via
+        ``Future.result()``. Submitting through the same single-worker pool
+        that autosave uses serializes each write behind any in-flight autosave,
+        so the reload writer and an ongoing autosave writer never share the same
+        ``.tmp`` file at once.
         """
+        executor = self.server_state.storage_executor
+        futures = []
         try:
             if self.server_state.env_path is not None:
-                self.server_state.storage.save_all(self.server_state.state)
-            self.server_state.dirty_envs.clear()
-            self.server_state.saving_envs.clear()
+                snap = snapshot_state(self.server_state.state)
+                futures.append(
+                    executor.submit(
+                        self.server_state.storage.save_all, snap
+                    )
+                )
 
             for _wid, space in self.workspace_env_manager.workspace_spaces():
                 if space.env_path is not None:
-                    space.storage.save_all(space.state)
+                    space_snap = snapshot_state(space.state)
+                    futures.append(
+                        executor.submit(space.storage.save_all, space_snap)
+                    )
+
+            for fut in futures:
+                fut.result()
+
+            self.server_state.dirty_envs.clear()
+            self.server_state.saving_envs.clear()
+            for _wid, space in self.workspace_env_manager.workspace_spaces():
                 space.dirty_envs.clear()
                 space.saving_envs.clear()
         except Exception:
