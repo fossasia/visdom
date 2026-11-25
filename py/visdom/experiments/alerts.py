@@ -559,6 +559,11 @@ def _matches(alert: Alert, value: Any) -> bool:
         alert.since_best += 1
         return alert.since_best >= alert.patience
 
+    # Two ints, two floats or one of each: Python compares the pair exactly,
+    # which is the whole reason neither the threshold nor the observation was
+    # rounded into a float on the way here. Rounding either one would have an
+    # observation of 9007199254740993 equal to a threshold of
+    # 9007199254740992 and not over it.
     if alert.condition == CONDITION_GT:
         return number > alert.threshold
     if alert.condition == CONDITION_LT:
@@ -629,6 +634,24 @@ def evaluate(experiment, observations, step: Optional[int] = None) -> list:
     return fired
 
 
+def _written(number: Any) -> str:
+    """``number`` as it goes into a notification, without rounding it.
+
+    An integer is written out in full. ``"{0:.12g}"`` turns
+    ``9007199254740993`` into ``'9.00719925474e+15'`` -- which is also what
+    the threshold beside it would be written as, so a message about a value
+    crossing a threshold would name the same number twice and read as though
+    the rule had fired on its own threshold. The fold judges those two apart;
+    the text has to as well.
+
+    A float keeps twelve significant digits rather than the six ``:g``
+    defaults to, for the same reason one decimal place further in.
+    """
+    if isinstance(number, int) and not isinstance(number, bool):
+        return str(number)
+    return "{0:.12g}".format(number)
+
+
 def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     """The notification text for a fired rule.
 
@@ -638,10 +661,9 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     observation that fired it and the environment it fired in, because a toast
     arrives with none of that context around it.
 
-    Numbers are written to twelve significant digits rather than the six
-    ``:g`` defaults to, which is what keeps the crossing visible: a rule on
-    ``> 1.0000001`` that fired on ``1.00000011`` would otherwise report that
-    "loss is 1, > 1".
+    Numbers are written by :func:`_written`, which is what keeps the
+    crossing visible: a rule on ``> 1.0000001`` that fired on ``1.00000011``
+    would otherwise report that "loss is 1, > 1".
     """
     alert = event.alert
     where = "" if not env_id else "{0}: ".format(env_id)
@@ -657,7 +679,7 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
         return "{0}{1} is {2}{3}".format(where, alert.key, arrived, at)
 
     if alert.condition == CONDITION_STALLED:
-        best = "" if event.best is None else " (best {0:.12g})".format(event.best)
+        best = "" if event.best is None else " (best {0})".format(_written(event.best))
         return "{0}{1} has not improved in {2} observations{3}{4}".format(
             where, alert.key, alert.patience, best, at
         )
@@ -665,12 +687,12 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
     held = (
         "" if alert.for_steps == 1 else " for {0} observations".format(alert.for_steps)
     )
-    return "{0}{1} is {2:.12g}, {3} {4:.12g}{5}{6}".format(
+    return "{0}{1} is {2}, {3} {4}{5}{6}".format(
         where,
         alert.key,
-        event.value,
+        _written(event.value),
         alert.condition,
-        alert.threshold,
+        _written(alert.threshold),
         held,
         at,
     )

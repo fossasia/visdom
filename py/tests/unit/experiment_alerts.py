@@ -337,6 +337,32 @@ class TestThresholdConditions:
         assert feed(build_alert("loss", "nan"), [10**400]) == []
         assert feed(build_alert("loss", "stalled", patience=1), [10**400, 1]) == []
 
+    @pytest.mark.parametrize(
+        "value,crosses",
+        [(9007199254740991, "<"), (9007199254740992, "=="), (9007199254740993, ">")],
+    )
+    @pytest.mark.parametrize("condition", [">", "==", "<"])
+    def test_an_integer_a_float_cannot_hold_is_judged_exactly(
+        self, value, crosses, condition
+    ):
+        # 9007199254740993 is the first integer a float cannot hold: made one
+        # it *is* 9007199254740992, the threshold here. So a fold that
+        # rounded the observation -- or a grammar that rounded the operand --
+        # would have that observation fire '==' and miss '>', two rules
+        # disagreeing about which side of one threshold it fell. All three
+        # comparisons are asserted against all three integers because only
+        # the pair of them shows the disagreement.
+        alert = build_alert("count", "{0} 9007199254740992".format(condition))
+        assert feed(alert, [value]) == ([0] if condition == crosses else [])
+
+    def test_an_integer_observation_still_crosses_a_decimal_threshold(self):
+        # The fold hands the comparison whichever kind of number arrived, so
+        # the mixed pair has to still be judged -- Python compares an int
+        # against a float exactly, which is what makes that safe.
+        assert feed(build_alert("loss", "> 2.5"), [3]) == [0]
+        assert feed(build_alert("loss", "< 2.5"), [2]) == [0]
+        assert feed(build_alert("loss", "== 2.0"), [2]) == [0]
+
     def test_a_non_numeric_observation_breaks_a_streak(self):
         alert = build_alert("loss", "> 2.0", for_steps=2)
         assert feed(alert, [2.5, "paused", 2.5]) == []
@@ -387,6 +413,14 @@ class TestStalledCondition:
         alert = build_alert("loss", "stalled", patience=1)
         assert feed(alert, [5.0]) == []
         assert alert.best == 5.0
+
+    def test_an_improvement_a_float_could_not_see_is_still_an_improvement(self):
+        # Rounded into floats the two observations are one number, so the
+        # second would count as a step that brought no improvement and -- at
+        # patience 1 -- stall a run that is in fact still improving.
+        alert = build_alert("count", "stalled", patience=1)
+        assert feed(alert, [9007199254740993, 9007199254740992]) == []
+        assert alert.best == 9007199254740992
 
     def test_a_non_finite_observation_is_neither_a_stall_nor_an_improvement(self):
         alert = build_alert("loss", "stalled", patience=1)
@@ -522,6 +556,24 @@ class TestDescribe:
         alert = build_alert("loss", "> 1.0000001")
         assert describe(AlertEvent(alert, 1.00000011)) == (
             "loss is 1.00000011, > 1.0000001"
+        )
+
+    def test_a_message_writes_an_integer_out_in_full(self):
+        # Twelve significant digits is not enough for the pair this rule
+        # fired on: both sides would be written '9.00719925474e+15', and the
+        # notification would say a value is over a threshold it names as the
+        # same number. The fold tells those two apart, so the text must.
+        alert = build_alert("count", "> 9007199254740992")
+        assert describe(AlertEvent(alert, 9007199254740993, 7)) == (
+            "count is 9007199254740993, > 9007199254740992 at step 7"
+        )
+
+    def test_a_stall_message_names_an_integer_best_in_full(self):
+        alert = build_alert("count", "stalled", patience=1, goal=GOAL_MAX)
+        feed(alert, [9007199254740993])
+        assert describe(AlertEvent(alert, 9007199254740992, 2)) == (
+            "count has not improved in 1 observations "
+            "(best 9007199254740993) at step 2"
         )
 
     def test_a_nan_message_says_what_arrived(self):
