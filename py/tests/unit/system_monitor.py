@@ -23,7 +23,14 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from visdom.loggers.system_monitor import CPU_WIN, RAM_WIN, VisdomSystemMonitor
+from visdom.loggers.system_monitor import (
+    CPU_WIN,
+    GPU_MEM_WIN,
+    GPU_UTIL_WIN,
+    RAM_WIN,
+    VisdomSystemMonitor,
+    _gpu_reader,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -405,7 +412,7 @@ class TestThread(unittest.TestCase):
         viz = Mock()
         viz.line.side_effect = lambda *a, **kw: kw.get("win")
         monitor = VisdomSystemMonitor(
-            viz, interval=0.01, is_main_process=True, **kwargs
+            viz, interval=0.01, is_main_process=True, gpu=False, **kwargs
         )
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             monitor.start()
@@ -428,7 +435,7 @@ class TestThread(unittest.TestCase):
     def test_stop_sends_a_final_sample(self):
         viz = Mock()
         viz.line.side_effect = lambda *a, **kw: kw.get("win")
-        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True)
+        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True, gpu=False)
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             monitor.start()
         monitor.stop()
@@ -440,7 +447,7 @@ class TestThread(unittest.TestCase):
         viz.line.side_effect = lambda *a, **kw: (
             names.append(threading.current_thread().name) or kw.get("win")
         )
-        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True)
+        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True, gpu=False)
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             monitor.start()
         monitor.stop()
@@ -450,7 +457,9 @@ class TestThread(unittest.TestCase):
         release = threading.Event()
         viz = Mock()
         viz.line.side_effect = lambda *a, **kw: release.wait(5)
-        monitor = VisdomSystemMonitor(viz, interval=0.01, is_main_process=True)
+        monitor = VisdomSystemMonitor(
+            viz, interval=0.01, is_main_process=True, gpu=False
+        )
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             monitor.start()
         self.assertTrue(_wait_for(lambda: viz.line.called))
@@ -464,7 +473,9 @@ class TestThread(unittest.TestCase):
     def _stuck(self, release):
         viz = Mock()
         viz.line.side_effect = lambda *a, **kw: release.wait(5) and kw.get("win")
-        monitor = VisdomSystemMonitor(viz, interval=0.01, is_main_process=True)
+        monitor = VisdomSystemMonitor(
+            viz, interval=0.01, is_main_process=True, gpu=False
+        )
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             monitor.start()
         self.assertTrue(_wait_for(lambda: viz.line.called))
@@ -509,7 +520,7 @@ class TestThread(unittest.TestCase):
         monitor.stop()
 
     def test_stop_is_idempotent_and_safe_before_start(self):
-        VisdomSystemMonitor(Mock()).stop()
+        VisdomSystemMonitor(Mock(), gpu=False).stop()
         monitor = self._started()
         monitor.stop()
         monitor.stop()
@@ -517,7 +528,9 @@ class TestThread(unittest.TestCase):
     def test_context_manager_starts_and_stops(self):
         viz = Mock()
         viz.line.side_effect = lambda *a, **kw: kw.get("win")
-        monitor = VisdomSystemMonitor(viz, interval=0.01, is_main_process=True)
+        monitor = VisdomSystemMonitor(
+            viz, interval=0.01, is_main_process=True, gpu=False
+        )
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             with monitor as entered:
                 self.assertIs(entered, monitor)
@@ -525,9 +538,250 @@ class TestThread(unittest.TestCase):
         self.assertFalse(monitor._thread.is_alive())
 
     def test_context_manager_does_not_swallow_exceptions(self):
-        monitor = VisdomSystemMonitor(Mock(), interval=0.01, is_main_process=True)
+        monitor = VisdomSystemMonitor(
+            Mock(), interval=0.01, is_main_process=True, gpu=False
+        )
         with patch.dict(sys.modules, {"psutil": _fake_psutil()}):
             with self.assertRaises(RuntimeError):
                 with monitor:
                     raise RuntimeError("boom")
         self.assertFalse(monitor._thread.is_alive())
+
+
+def _fake_nvml(devices=((40, 512 * MB), (90, 1024 * MB))):
+    nvml = MagicMock()
+    nvml.nvmlDeviceGetCount.return_value = len(devices)
+    nvml.nvmlDeviceGetHandleByIndex.side_effect = lambda i: i
+    nvml.nvmlDeviceGetUtilizationRates.side_effect = lambda h: SimpleNamespace(
+        gpu=devices[h][0]
+    )
+    nvml.nvmlDeviceGetMemoryInfo.side_effect = lambda h: SimpleNamespace(
+        used=devices[h][1]
+    )
+    return nvml
+
+
+def _fake_amdsmi(devices=((25, 2048),)):
+    amd = MagicMock()
+    amd.amdsmi_get_processor_handles.return_value = list(range(len(devices)))
+    amd.amdsmi_get_gpu_activity.side_effect = lambda h: {"gfx_activity": devices[h][0]}
+    amd.amdsmi_get_gpu_vram_usage.side_effect = lambda h: {"vram_used": devices[h][1]}
+    return amd
+
+
+def _read(reader):
+    return [(reader.util(h), reader.mem(h)) for h in reader._handles]
+
+
+class TestGpu(unittest.TestCase):
+    def _gpu_monitor(self, modules, **kwargs):
+        monitor = _monitor(**kwargs)
+        with patch.dict(sys.modules, modules):
+            monitor._gpu = _gpu_reader()
+        return monitor
+
+    def test_no_gpu_library_means_no_reader(self):
+        with patch.dict(sys.modules, {"pynvml": None, "amdsmi": None}):
+            self.assertIsNone(_gpu_reader())
+
+    def test_driver_error_means_no_reader(self):
+        nvml = _fake_nvml()
+        nvml.nvmlInit.side_effect = RuntimeError("no driver")
+        with patch.dict(sys.modules, {"pynvml": nvml, "amdsmi": None}):
+            self.assertIsNone(_gpu_reader())
+
+    def test_library_without_devices_means_no_reader(self):
+        with patch.dict(sys.modules, {"pynvml": _fake_nvml(()), "amdsmi": None}):
+            self.assertIsNone(_gpu_reader())
+
+    def test_nvidia_is_tried_before_amd(self):
+        modules = {"pynvml": _fake_nvml(), "amdsmi": _fake_amdsmi()}
+        with patch.dict(sys.modules, modules):
+            reader = _gpu_reader()
+        self.assertEqual(_read(reader), [(40, 512.0), (90, 1024.0)])
+
+    def test_amd_is_used_when_nvidia_is_absent(self):
+        modules = {"pynvml": None, "amdsmi": _fake_amdsmi()}
+        with patch.dict(sys.modules, modules):
+            reader = _gpu_reader()
+        self.assertEqual(_read(reader), [(25, 2048)])
+
+    def test_no_gpu_plots_nothing_extra(self):
+        monitor = _monitor()
+        monitor._log()
+        wins = [c.kwargs["win"] for c in monitor.viz.line.call_args_list]
+        self.assertEqual(wins, [CPU_WIN, RAM_WIN])
+
+    def test_gpu_adds_one_trace_per_device_to_two_windows(self):
+        monitor = self._gpu_monitor({"pynvml": _fake_nvml(), "amdsmi": None})
+        monitor._log()
+        calls = monitor.viz.line.call_args_list[2:]
+        self.assertEqual(
+            [(c.kwargs["win"], c.kwargs["name"], c.kwargs["Y"]) for c in calls],
+            [
+                (GPU_UTIL_WIN, "gpu0", [40]),
+                (GPU_MEM_WIN, "gpu0", [512.0]),
+                (GPU_UTIL_WIN, "gpu1", [90]),
+                (GPU_MEM_WIN, "gpu1", [1024.0]),
+            ],
+        )
+        self.assertNotIn("update", calls[0].kwargs)
+        self.assertEqual(calls[2].kwargs["update"], "append")
+        legends = [
+            c.kwargs["opts"]["showlegend"] for c in monitor.viz.line.call_args_list
+        ]
+        self.assertEqual(legends, [False, False, True, True, True, True])
+
+    def test_gpu_read_error_warns_once_and_keeps_cpu_ram(self):
+        monitor = self._gpu_monitor({"pynvml": _fake_nvml(), "amdsmi": None})
+        nvml = monitor._gpu._nvml
+        nvml.nvmlDeviceGetUtilizationRates.side_effect = RuntimeError("lost")
+        nvml.nvmlDeviceGetMemoryInfo.side_effect = RuntimeError("lost")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            monitor._log()
+            monitor._log()
+        self.assertEqual(len(caught), 1)
+        wins = [c.kwargs["win"] for c in monitor.viz.line.call_args_list]
+        self.assertEqual(wins, [CPU_WIN, RAM_WIN] * 2)
+        self.assertEqual(monitor._failures, 0)
+
+    def test_gpu_false_skips_the_reader(self):
+        viz = Mock()
+        viz.line.side_effect = lambda *a, **kw: kw.get("win")
+        monitor = VisdomSystemMonitor(viz, is_main_process=True, gpu=False)
+        nvml = _fake_nvml()
+        with patch.dict(sys.modules, {"psutil": _fake_psutil(), "pynvml": nvml}):
+            monitor.start()
+            monitor.stop()
+        nvml.nvmlInit.assert_not_called()
+
+    def test_non_bool_gpu_raises(self):
+        with self.assertRaises(TypeError):
+            VisdomSystemMonitor(Mock(), gpu="yes")
+
+    def test_stop_shuts_the_library_down(self):
+        nvml = _fake_nvml()
+        viz = Mock()
+        viz.line.side_effect = lambda *a, **kw: kw.get("win")
+        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True)
+        with patch.dict(sys.modules, {"psutil": _fake_psutil(), "pynvml": nvml}):
+            monitor.start()
+        monitor.stop()
+        nvml.nvmlShutdown.assert_called_once_with()
+        wins = {c.kwargs["win"] for c in viz.line.call_args_list}
+        self.assertEqual(wins, {CPU_WIN, RAM_WIN, GPU_UTIL_WIN, GPU_MEM_WIN})
+
+    def test_shutdown_error_without_devices_keeps_amd(self):
+        nvml = _fake_nvml(())
+        nvml.nvmlShutdown.side_effect = RuntimeError("gone")
+        with patch.dict(sys.modules, {"pynvml": nvml, "amdsmi": _fake_amdsmi()}):
+            reader = _gpu_reader()
+        self.assertEqual(_read(reader), [(25, 2048)])
+
+    def test_unavailable_amd_util_keeps_memory(self):
+        monitor = self._gpu_monitor(
+            {"pynvml": None, "amdsmi": _fake_amdsmi(((("N/A"), 2048),))}
+        )
+        monitor._log()
+        calls = monitor.viz.line.call_args_list[2:]
+        self.assertEqual(
+            [(c.kwargs["win"], c.kwargs["Y"]) for c in calls],
+            [(GPU_MEM_WIN, [2048])],
+        )
+        monitor._gpu._amdsmi.amdsmi_get_gpu_activity.assert_called_once()
+
+    def test_one_failing_gpu_keeps_the_others(self):
+        monitor = self._gpu_monitor({"pynvml": _fake_nvml(), "amdsmi": None})
+        nvml = monitor._gpu._nvml
+        nvml.nvmlDeviceGetUtilizationRates.side_effect = lambda h: (
+            1 / 0 if h == 1 else SimpleNamespace(gpu=40)
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            monitor._log()
+        self.assertEqual(len(caught), 1)
+        calls = monitor.viz.line.call_args_list[2:]
+        self.assertEqual(
+            [(c.kwargs["win"], c.kwargs["name"]) for c in calls],
+            [
+                (GPU_UTIL_WIN, "gpu0"),
+                (GPU_MEM_WIN, "gpu0"),
+                (GPU_MEM_WIN, "gpu1"),
+            ],
+        )
+
+    def test_unreadable_metric_left_out(self):
+        # An integrated AMD GPU reports memory but no activity.
+        amd = _fake_amdsmi(((25, 2048), (0, 19)))
+        amd.amdsmi_get_gpu_activity.side_effect = lambda h: (
+            {"gfx_activity": 25} if h == 0 else 1 / 0
+        )
+        monitor = self._gpu_monitor({"pynvml": None, "amdsmi": amd})
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            monitor._log()
+        self.assertEqual(caught, [])
+        calls = monitor.viz.line.call_args_list[2:]
+        self.assertEqual(
+            [(c.kwargs["win"], c.kwargs["name"], c.kwargs["Y"]) for c in calls],
+            [
+                (GPU_UTIL_WIN, "gpu0", [25]),
+                (GPU_MEM_WIN, "gpu0", [2048]),
+                (GPU_MEM_WIN, "gpu1", [19]),
+            ],
+        )
+
+    def test_inaccessible_gpu_keeps_others(self):
+        nvml = _fake_nvml()
+        nvml.nvmlDeviceGetHandleByIndex.side_effect = lambda i: (1 / 0 if i == 0 else i)
+        monitor = self._gpu_monitor({"pynvml": nvml, "amdsmi": None})
+        monitor._log()
+        calls = monitor.viz.line.call_args_list[2:]
+        self.assertEqual(
+            [(c.kwargs["win"], c.kwargs["name"], c.kwargs["Y"]) for c in calls],
+            [(GPU_UTIL_WIN, "gpu1", [90]), (GPU_MEM_WIN, "gpu1", [1024.0])],
+        )
+
+    def test_no_readable_metric_no_reader(self):
+        nvml = _fake_nvml()
+        nvml.nvmlDeviceGetUtilizationRates.side_effect = RuntimeError("bad")
+        nvml.nvmlDeviceGetMemoryInfo.side_effect = RuntimeError("bad")
+        with patch.dict(sys.modules, {"pynvml": nvml, "amdsmi": None}):
+            self.assertIsNone(_gpu_reader())
+        nvml.nvmlShutdown.assert_called_once_with()
+
+    def test_discovery_error_shuts_nvidia_down(self):
+        nvml = _fake_nvml()
+        nvml.nvmlDeviceGetCount.side_effect = RuntimeError("bad")
+        with patch.dict(sys.modules, {"pynvml": nvml, "amdsmi": None}):
+            self.assertIsNone(_gpu_reader())
+        nvml.nvmlShutdown.assert_called_once_with()
+
+    def test_discovery_error_shuts_amd_down(self):
+        amd = _fake_amdsmi()
+        amd.amdsmi_get_processor_handles.side_effect = RuntimeError("bad")
+        with patch.dict(sys.modules, {"pynvml": None, "amdsmi": amd}):
+            self.assertIsNone(_gpu_reader())
+        amd.amdsmi_shut_down.assert_called_once_with()
+
+    def test_worker_error_still_shuts_down(self):
+        nvml = _fake_nvml()
+        viz = Mock()
+        monitor = VisdomSystemMonitor(viz, interval=60, is_main_process=True)
+        with patch.dict(sys.modules, {"psutil": _fake_psutil(), "pynvml": nvml}):
+            with patch.object(monitor, "_log", side_effect=RuntimeError("boom")):
+                with patch("threading.excepthook"):
+                    monitor.start()
+                    monitor._thread.join(timeout=2)
+                    monitor.stop()
+        nvml.nvmlShutdown.assert_called_once_with()
+
+    def test_failed_thread_start_shuts_down(self):
+        nvml = _fake_nvml()
+        monitor = VisdomSystemMonitor(Mock(), is_main_process=True)
+        with patch.dict(sys.modules, {"psutil": _fake_psutil(), "pynvml": nvml}):
+            with patch.object(threading.Thread, "start", side_effect=RuntimeError):
+                with self.assertRaises(RuntimeError):
+                    monitor.start()
+        nvml.nvmlShutdown.assert_called_once_with()

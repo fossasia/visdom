@@ -5,6 +5,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import functools
+import importlib
 import inspect
 import threading
 import time
@@ -14,6 +16,8 @@ from visdom.utils import rank_utils
 
 CPU_WIN = "system_cpu"
 RAM_WIN = "system_ram"
+GPU_UTIL_WIN = "system_gpu_util"
+GPU_MEM_WIN = "system_gpu_mem"
 MB = 2**20
 STOP_TIMEOUT = 5
 
@@ -31,6 +35,96 @@ def _lifetime_cpu(proc):
     return 100 * (times.user + times.system) / age if age > 0 else 0.0
 
 
+def _quiet(close):
+    try:
+        close()
+    except Exception:
+        pass
+
+
+class _NvmlReader:
+    def __init__(self, nvml):
+        nvml.nvmlInit()
+        self._nvml = nvml
+        try:
+            self._handles = []
+            for i in range(nvml.nvmlDeviceGetCount()):
+                try:
+                    self._handles.append(nvml.nvmlDeviceGetHandleByIndex(i))
+                except Exception:
+                    # A device this process may not open; keep the others.
+                    self._handles.append(None)
+        except Exception:
+            _quiet(self.close)
+            raise
+
+    def util(self, handle):
+        return self._nvml.nvmlDeviceGetUtilizationRates(handle).gpu
+
+    def mem(self, handle):
+        return self._nvml.nvmlDeviceGetMemoryInfo(handle).used / MB
+
+    def close(self):
+        self._nvml.nvmlShutdown()
+
+
+class _AmdReader:
+    def __init__(self, amdsmi):
+        amdsmi.amdsmi_init()
+        self._amdsmi = amdsmi
+        try:
+            self._handles = amdsmi.amdsmi_get_processor_handles()
+        except Exception:
+            _quiet(self.close)
+            raise
+
+    def util(self, handle):
+        util = self._amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+        if isinstance(util, (int, float)) and not isinstance(util, bool):
+            return util
+        return None
+
+    def mem(self, handle):
+        return self._amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+
+    def close(self):
+        self._amdsmi.amdsmi_shut_down()
+
+
+def _gpu_reader():
+    """A reader for the first GPU library that loads and finds a device, or None."""
+    for module, reader in (("pynvml", _NvmlReader), ("amdsmi", _AmdReader)):
+        try:
+            found = reader(importlib.import_module(module))
+        except Exception:
+            continue
+        found._plots = _gpu_plots(found)
+        if found._plots:
+            return found
+        _quiet(found.close)
+    return None
+
+
+def _gpu_plots(reader):
+    """(trace, window, title, read) for each GPU metric that can be read now."""
+    plots = []
+    for i, handle in enumerate(reader._handles):
+        if handle is None:
+            continue
+        for win, title, read in (
+            (GPU_UTIL_WIN, "GPU usage (%)", reader.util),
+            (GPU_MEM_WIN, "GPU memory (MB)", reader.mem),
+        ):
+            try:
+                if read(handle) is None:
+                    continue
+            except Exception:
+                continue
+            name = "gpu{}".format(i)
+            plots.append((name, win, title, functools.partial(read, handle)))
+    return plots
+
+
 class VisdomSystemMonitor:
     """Plots the CPU and RAM usage of the running script to Visdom.
 
@@ -43,6 +137,13 @@ class VisdomSystemMonitor:
     The x-axis is seconds since ``start()``. Values come straight from
     the OS through psutil; nothing is computed about the model. psutil is
     optional: without it ``start()`` warns and the monitor does nothing.
+    If nvidia-ml-py (NVIDIA) or amdsmi (AMD) is installed and finds a GPU,
+    up to two more plots show the utilization (%) and memory used (MB) of
+    each GPU that library can read, NVIDIA first. These are whole-device
+    numbers rather than this script's share; pass ``gpu=False`` to leave
+    them out. Without a GPU library or
+    a device nothing extra is plotted and no warning is raised. A metric
+    a GPU cannot report when the monitor starts is left out.
     RSS is summed per process, so memory shared between workers is
     counted once per worker. The cores the script may use are those in its
     CPU affinity mask (so a SLURM job pinned to 8 of 64 cores tops out at
@@ -71,7 +172,7 @@ class VisdomSystemMonitor:
         monitor.stop()
     """
 
-    def __init__(self, viz, env=None, interval=5, is_main_process=None):
+    def __init__(self, viz, env=None, interval=5, is_main_process=None, gpu=True):
         if isinstance(interval, bool) or not isinstance(interval, (int, float)):
             raise TypeError("interval must be a number, got {!r}".format(interval))
         if not 0 < interval <= threading.TIMEOUT_MAX:
@@ -84,6 +185,8 @@ class VisdomSystemMonitor:
                     is_main_process
                 )
             )
+        if not isinstance(gpu, bool):
+            raise TypeError("gpu must be True or False, got {!r}".format(gpu))
         if inspect.iscoroutinefunction(getattr(viz, "line", None)):
             raise TypeError(
                 "VisdomSystemMonitor needs the synchronous Visdom client, "
@@ -93,6 +196,8 @@ class VisdomSystemMonitor:
         self.env = env
         self.interval = interval
         self._main_override = is_main_process
+        self._use_gpu = gpu
+        self._gpu = None
         self._psutil = None
         self._root = None
         self._known = {}
@@ -134,6 +239,7 @@ class VisdomSystemMonitor:
         self._psutil = psutil
         self._root = psutil.Process()
         self._root.cpu_percent(None)
+        self._gpu = _gpu_reader() if self._use_gpu else None
         self._known = {self._root.pid: self._root}
         self._created = set()
         self._failures = 0
@@ -142,7 +248,11 @@ class VisdomSystemMonitor:
         self._thread = threading.Thread(
             target=self._run, name="visdom-system-monitor", daemon=True
         )
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            self._close_gpu()
+            raise
         return self
 
     def stop(self):
@@ -167,9 +277,17 @@ class VisdomSystemMonitor:
         return min(self.interval * 2 ** min(self._failures, 4), threading.TIMEOUT_MAX)
 
     def _run(self):
-        while not self._stop.wait(self._delay()):
+        try:
+            while not self._stop.wait(self._delay()):
+                self._log()
             self._log()
-        self._log()
+        finally:
+            self._close_gpu()
+
+    def _close_gpu(self):
+        gpu, self._gpu = self._gpu, None
+        if gpu is not None:
+            _quiet(gpu.close)
 
     def _warn(self, error):
         if not self._warned:
@@ -214,9 +332,23 @@ class VisdomSystemMonitor:
             self._plot(CPU_WIN, "CPU usage (%)", x, cpu),
             self._plot(RAM_WIN, "RAM usage (MB)", x, ram),
         ]
+        if self._gpu is not None:
+            sent += self._log_gpu(x)
         self._failures = 0 if all(sent) else self._failures + 1
 
-    def _plot(self, win, title, x, value):
+    def _log_gpu(self, x):
+        sent = []
+        for name, win, title, read in self._gpu._plots:
+            try:
+                value = read()
+            except Exception as e:
+                self._warn(e)
+                continue
+            if value is not None:
+                sent.append(self._plot(win, title, x, value, name))
+        return sent
+
+    def _plot(self, win, title, x, value, name="script"):
         update = {"update": "append"} if win in self._created else {}
         try:
             reply = self.viz.line(
@@ -224,8 +356,13 @@ class VisdomSystemMonitor:
                 Y=[value],
                 win=win,
                 env=self.env,
-                name="script",
-                opts={"title": title, "xlabel": "seconds", "ylabel": title},
+                name=name,
+                opts={
+                    "title": title,
+                    "xlabel": "seconds",
+                    "ylabel": title,
+                    "showlegend": name != "script",
+                },
                 **update
             )
         except Exception as e:
