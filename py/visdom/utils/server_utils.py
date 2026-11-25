@@ -17,11 +17,13 @@ in the previous server.py class.
 import contextlib
 import functools
 import hashlib
+import hmac
 import html
 import json
 import logging
 import os
 import errno
+import secrets
 from collections import OrderedDict
 
 import tornado.escape
@@ -138,6 +140,33 @@ def set_cookie(value=None):
         cookie_secret = input("Please input your cookie secret key here: ")
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
+
+
+def session_token(cookie_secret, user_credential):
+    """The login cookie's value for the current credential.
+
+    PBKDF2 of the client hash, so it survives restarts but not a password
+    change. Without ``client_hash`` a random seed is used instead.
+    """
+    username = user_credential["username"]
+    seed = user_credential.get("client_hash") or secrets.token_hex(32)
+    salt = "{0}\0{1}".format(cookie_secret, username).encode("utf-8")
+    key = hashlib.pbkdf2_hmac("sha256", seed.encode("utf-8"), salt, 100000)
+    return "{0}:{1}".format(username, key.hex())
+
+
+def current_session_user(handler):
+    """The login cookie, if it matches the current credential's token."""
+    app = getattr(handler, "application", None)
+    if not app or not app.settings.get("cookie_secret"):
+        return None
+    token = getattr(app, "session_token", None)
+    cookie = handler.get_secure_cookie("user_password")
+    if token is None or cookie is None:
+        return None
+    if not hmac.compare_digest(cookie, token.encode("utf-8")):
+        return None
+    return cookie
 
 
 def hash_password(password, salt=None):

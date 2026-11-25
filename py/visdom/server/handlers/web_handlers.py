@@ -1419,7 +1419,18 @@ class IndexHandler(BaseHandler):
         )
 
         if username_ok and password_ok:
-            self.set_secure_cookie("user_password", username + password)
+            # Secure only over https; a direct TLS connection ignores the header.
+            scheme = self.request.protocol
+            if scheme != "https":
+                forwarded = self.request.headers.get("X-Forwarded-Proto", "")
+                scheme = forwarded.split(",")[0].strip().lower() or scheme
+            self.set_secure_cookie(
+                "user_password",
+                self.application.session_token,
+                httponly=True,
+                samesite="Lax",
+                secure=scheme == "https",
+            )
         else:
             self.set_status(400)
 

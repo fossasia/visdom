@@ -115,12 +115,14 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
 :::note
 The `Upgrade` and `Connection` headers are required for WebSocket support, which Visdom uses for real-time updates and callbacks.
+`X-Forwarded-Proto` tells Visdom the browser connected over HTTPS, so the login cookie is marked `Secure`.
 :::
 
 ## Custom base URL

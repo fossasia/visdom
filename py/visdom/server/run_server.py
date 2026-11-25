@@ -499,6 +499,8 @@ def main(print_func=None):
         user_credential = {
             "username": username,
             "password": hash_password(client_hash),
+            # Derives the session token; the app does not keep it.
+            "client_hash": client_hash,
         }
 
         need_to_set_cookie = (
