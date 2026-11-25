@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: Apache-2.0
+# https://www.apache.org/licenses/LICENSE-2.0
+"""Named updates must address the traces created with custom legends."""
+
+from unittest.mock import patch
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("update", ["append", "replace", "remove"])
+@pytest.mark.parametrize("legend_type", [list, tuple])
+@pytest.mark.parametrize(
+    "metrics, labels",
+    [
+        ({"val": [0.9]}, ["train", "val"]),
+        ({"val": [0.9], "train": [0.8]}, ["train", "val"]),
+        ({"train": [0.8], "val": [0.9]}, ["train", 1]),
+    ],
+)
+def test_positional_updates_warn_and_use_metric_names(
+    offline_client, update, legend_type, metrics, labels
+):
+    opts = {"legend": legend_type(labels)}
+    with (
+        patch.object(offline_client, "_send", return_value="losses") as send,
+        patch.object(offline_client, "win_exists", return_value=True),
+        pytest.warns(UserWarning, match="metric-name mapping"),
+    ):
+        offline_client.learning_curve(
+            metrics, step=[1], win="losses", opts=opts, update=update
+        )
+
+    messages = [call.args[0] for call in send.call_args_list]
+    assert [message["name"] for message in messages] == list(metrics)
+    assert opts == {"legend": legend_type(labels)}
+    if update == "remove":
+        assert all(message["delete"] and message["data"] == [] for message in messages)
+    else:
+        assert [message["data"][0]["y"] for message in messages] == list(
+            metrics.values()
+        )
+
+
+def test_learning_curve_positional_legend_can_have_trailing_labels_at_creation(
+    offline_client,
+):
+    with patch.object(offline_client, "_send", return_value="losses") as send:
+        offline_client.learning_curve(
+            {"train": 1.0},
+            opts={"legend": ["Training loss", "Validation loss"]},
+        )
+    assert [trace["name"] for trace in send.call_args.args[0]["data"]] == [
+        "Training loss"
+    ]
+
+
+def test_default_legends_follow_metric_names_when_update_order_changes(offline_client):
+    with (
+        patch.object(offline_client, "_send", return_value="losses") as send,
+        patch.object(offline_client, "win_exists", return_value=True),
+    ):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="losses"
+        )
+        send.reset_mock()
+        offline_client.learning_curve(
+            {"val": [0.9], "train": [0.8]}, step=[1], win="losses", update="append"
+        )
+    messages = [call.args[0] for call in send.call_args_list]
+    assert [message["name"] for message in messages] == ["val", "train"]
+    assert [message["data"][0]["y"] for message in messages] == [[0.9], [0.8]]
+
+
+@pytest.mark.parametrize("update", ["append", "replace", "remove"])
+@pytest.mark.parametrize("metrics", [{"val": [0.9], "train": [0.8]}, {"val": [0.9]}])
+def test_metric_keyed_legends_preserve_targets_for_reordered_or_subset_updates(
+    offline_client, update, metrics
+):
+    legend = {"val": "Validation loss", "train": "Training loss"}
+    opts = {"legend": legend}
+    with (
+        patch.object(offline_client, "_send", return_value="losses") as send,
+        patch.object(offline_client, "win_exists", return_value=True),
+    ):
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]}, step=[0], win="losses", opts=opts
+        )
+        assert [trace["name"] for trace in send.call_args.args[0]["data"]] == [
+            "Training loss",
+            "Validation loss",
+        ]
+        send.reset_mock()
+        offline_client.learning_curve(
+            metrics, step=[1], win="losses", opts=opts, update=update
+        )
+
+    messages = [call.args[0] for call in send.call_args_list]
+    assert [message["name"] for message in messages] == [
+        legend[name] for name in metrics
+    ]
+    if update == "remove":
+        assert all(message["delete"] and message["data"] == [] for message in messages)
+    else:
+        assert [message["data"][0]["y"] for message in messages] == list(
+            metrics.values()
+        )
+        assert all(message["append"] == (update == "append") for message in messages)
+    assert opts == {"legend": {"val": "Validation loss", "train": "Training loss"}}
+
+
+def test_partial_legend_mapping_defaults_to_metric_names(offline_client):
+    with patch.object(offline_client, "_send", return_value="losses") as send:
+        offline_client.learning_curve(
+            {"train": [1.0], "val": [1.2]},
+            opts={"legend": {"train": "Training loss", "unused": "Other"}},
+        )
+    assert [trace["name"] for trace in send.call_args.args[0]["data"]] == [
+        "Training loss",
+        "val",
+    ]
+
+
+@pytest.mark.parametrize(
+    "legend",
+    [{"train": "Loss", "val": "Loss"}, {"train": "val"}],
+)
+def test_legend_mapping_rejects_ambiguous_trace_names(offline_client, legend):
+    with patch.object(offline_client, "_send") as send:
+        with pytest.raises(AssertionError, match="unique"):
+            offline_client.learning_curve(
+                {"train": [1.0], "val": [1.2]}, opts={"legend": legend}
+            )
+    send.assert_not_called()
+
+
+def test_legend_mapping_rejects_non_string_labels(offline_client):
+    with pytest.raises(AssertionError, match="strings"):
+        offline_client.learning_curve(
+            {"train": [1.0]}, opts={"legend": {"train": None}}
+        )
+
+
+@pytest.mark.parametrize("update", [None, "append", "replace", "remove"])
+def test_legend_mapping_rejects_duplicate_aliases_for_subsets(offline_client, update):
+    with patch.object(offline_client, "_send") as send:
+        with pytest.raises(AssertionError, match="unique"):
+            offline_client.learning_curve(
+                {"val": [0.9]},
+                step=[1],
+                win="losses",
+                opts={"legend": {"train": "Loss", "val": "Loss"}},
+                update=update,
+            )
+    send.assert_not_called()

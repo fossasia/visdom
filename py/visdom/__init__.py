@@ -3423,6 +3423,12 @@ class Visdom(object):
         `step` can be a scalar or a 1D series matching the metric length. When
         `update='append'`, `step` must be specified to avoid repeatedly appending
         points at the same x-coordinate.
+
+        `opts.legend` can map metric names to display labels. Reuse this mapping
+        on updates to keep labels attached to their metrics when the order changes
+        or only a subset is updated. Missing keys use the metric name. List/tuple
+        legends are positional at creation. Updates use metric names and warn
+        if the supplied labels differ from the current metric names.
         """
         assert hasattr(metrics, "items"), "metrics should be a mapping"
         metric_items = list(metrics.items())
@@ -3471,17 +3477,37 @@ class Visdom(object):
         if opts.get("legend") is None:
             legend = names
             opts["legend"] = legend
+        elif isinstance(opts["legend"], Mapping):
+            mapping = opts["legend"]
+            labels = mapping.values()
+            assert all(
+                isinstance(label, str) for label in labels
+            ), "legend mapping values should be strings"
+            assert len(set(labels)) == len(mapping), "legend labels should be unique"
+            legend = [mapping.get(name, name) for name in names]
+            assert len(set(legend)) == len(legend), "legend labels should be unique"
+            opts["legend"] = legend
         else:
             legend = opts["legend"]
             assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
-            assert len(legend) >= len(
-                names
-            ), "legend should have at least as many entries as metrics"
+            if update is None:
+                assert len(legend) >= len(
+                    names
+                ), "legend should have at least as many entries as metrics"
+            else:
+                if list(legend) != names:
+                    warnings.warn(
+                        "Positional legends do not select traces on learning_curve updates. "
+                        "Use a metric-name mapping for custom labels.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+                legend = names
 
         if update is not None:
             result = None
-            # Send one named update per metric so mapping order cannot swap traces.
-            for name, values in zip(names, series):
+            # A keyed legend keeps custom trace names stable across updates.
+            for name, values in zip(legend, series):
                 metric_opts = None
                 if update != "remove":
                     metric_opts = dict(opts)
