@@ -145,8 +145,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium and Firefox
+        run: npx playwright install --with-deps chromium firefox
 
       - name: Run Playwright tests
         run: npm test
@@ -167,8 +167,8 @@ jobs:
         uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/prepare
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium and Firefox
+        run: npx playwright install --with-deps chromium firefox
 
       - name: Run Playwright tests with polling
         run: npm run test:polling

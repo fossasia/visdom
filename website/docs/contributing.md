@@ -52,7 +52,7 @@ can check for side effects of your changes.
 
 ### Using the Playwright UI
 
-1. Run `npx playwright install chromium` on first setup
+1. Run `npx playwright install chromium firefox` on first setup
 2. Run `npm run build` or `npm run dev` to compile the frontend
 3. Make sure port `8098` is available; Playwright starts an isolated Visdom
    server automatically
@@ -60,7 +60,7 @@ can check for side effects of your changes.
 
 ### As CLI Tests
 
-1. Run `npx playwright install chromium` on first setup
+1. Run `npx playwright install chromium firefox` on first setup
 2. Run `npm run build` or `npm run dev`
 3. Run the WebSocket suite with `npm test`
 4. Run the polling suite with `npm run test:polling`

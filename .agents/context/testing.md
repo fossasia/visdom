@@ -24,7 +24,7 @@ excluded via `norecursedirs` so helpers are importable but never collected.
 ## Run E2E / Visual Tests (Playwright)
 
 ```bash
-npx playwright install chromium     # Install the browser once
+npx playwright install chromium firefox     # Install the browsers once
 npm test                            # WebSocket functional tests
 npm run test:polling                # Polling functional tests
 npm run test:gui                    # Interactive UI

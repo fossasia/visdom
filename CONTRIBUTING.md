@@ -237,14 +237,14 @@ If you add or change functions, feel free to adjust the tests or add new ones if
 To run the predefined tests
 
 **using the Playwright UI**:
-1. Run `npx playwright install chromium` on first setup.
+1. Run `npx playwright install chromium firefox` on first setup.
 2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
 3. Make sure port `8098` is available; Playwright starts an isolated Visdom
    server automatically.
 4. Run `npm run test:gui` and select the specs to inspect.
 
 **as CLI tests**:
-1. Run `npx playwright install chromium` on first setup.
+1. Run `npx playwright install chromium firefox` on first setup.
 2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
 3. Run the WebSocket suite with `npm test`.
 4. Run the same functional tests with frontend polling using
