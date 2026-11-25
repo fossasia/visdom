@@ -5431,7 +5431,7 @@ class Visdom(object):
                                    descending (requires `Y`)
         - `opts.title`:            plot title
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
