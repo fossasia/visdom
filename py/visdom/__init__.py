@@ -31,7 +31,7 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 import logging
 import warnings
 import time
@@ -56,9 +56,18 @@ if sys.version_info < (3, 12):
 
 
 def _normalize_tsne(Y):
+    """Rescale 2-D t-SNE coordinates to [-1, 1], ignoring NaN when finding bounds."""
     Y = np.asarray(Y)
-    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
-    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xmin, xmax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 0]))
+        else (np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0]))
+    )
+    ymin, ymax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 1]))
+        else (np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1]))
+    )
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
@@ -226,6 +235,33 @@ def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
+def _audio_sample_rate(rate, channels):
+    """``rate`` as an int that fits the WAV header of 16-bit audio.
+
+    The header stores the rate and the bytes per second (rate * channels * 2)
+    in 32 bits each. The range is checked before anything turns ``rate`` into
+    a float, so a huge int, NaN and inf are all rejected.
+    """
+    # A 0-d numpy array or a one-element tensor holds a plain number.
+    size = rate.size if isinstance(rate, np.ndarray) else None
+    if size is None and callable(getattr(rate, "numel", None)):
+        size = rate.numel()
+    if size == 1 and callable(getattr(rate, "item", None)):
+        rate = rate.item()
+    limit = 0xFFFFFFFF // (2 * channels)
+    if (
+        isinstance(rate, (bool, np.bool_))
+        or not isinstance(rate, numbers.Real)
+        or not 0 < rate <= limit
+        or rate != int(rate)
+    ):
+        raise ValueError(
+            "sample_frequency should be a positive whole number up to {} for "
+            "{}-channel audio, got {!r}".format(limit, channels, rate)
+        )
+    return int(rate)
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -237,15 +273,13 @@ from visdom.utils.shared_utils import NanSafeEncoder
 
 
 def loadfile(filename):
+    filename = os.fsdecode(filename)
     assert os.path.isfile(filename), "could not find file %s" % filename
-    fileobj = open(filename, "rb")
-    assert fileobj, "could not open file %s" % filename
-    str = fileobj.read()
-    fileobj.close()
-    return str
+    with open(filename, "rb") as fileobj:
+        return fileobj.read()
 
 
-def _finite_range(ar):
+def _finite_range(ar, *, as_float=True):
     """Smallest and largest finite value in `ar`, or `None` if it has none.
 
     This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
@@ -253,7 +287,8 @@ def _finite_range(ar):
     element just to read two numbers off it, which on an image-sized array is
     a second full array per call. `fmin`/`fmax` skip NaN the same way and
     reduce in place, so only an infinity -- which they propagate rather than
-    skip -- needs the mask at all.
+    skip -- needs the mask at all. Set `as_float=False` to retain extended
+    floating-point extrema for image normalization.
     """
     if ar.size == 0:
         return None
@@ -265,8 +300,10 @@ def _finite_range(ar):
         finite = ar[np.isfinite(ar)]
         if finite.size == 0:
             return None
-        return float(finite.min()), float(finite.max())
-    return float(ar_min), float(ar_max)
+        ar_min, ar_max = finite.min(), finite.max()
+    if as_float:
+        return float(ar_min), float(ar_max)
+    return ar_min.item(), ar_max.item()
 
 
 def _title2str(opts):
@@ -367,7 +404,7 @@ def _axisformat3d(xyz, opts):
 def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
-        "showlegend": opts.get("showlegend", "legend" in opts),
+        "showlegend": opts.get("showlegend", opts.get("legend") is not None),
         "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
@@ -399,7 +436,7 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(_normalize_title_strings(layout))
 
 
-def _normalize_labels(Y):
+def _normalize_labels(Y, max_label=None):
     """
     Normalizes arbitrary labels (int, float, string) to 1-based indices.
     Returns:
@@ -408,6 +445,7 @@ def _normalize_labels(Y):
                                            was already a valid set of 1-based integer labels.
         K (int): Number of unique labels
     """
+    # A compact legend can name sparse labels by their sorted unique values.
     Y = np.ravel(Y)
 
     try:
@@ -416,6 +454,8 @@ def _normalize_labels(Y):
                 np.issubdtype(Y.dtype, np.number)
                 and np.equal(np.mod(Y, 1), 0).all()
                 and np.nanmin(Y) >= 1
+                and int(np.nanmax(Y)) <= np.iinfo(int).max
+                and (max_label is None or int(np.nanmax(Y)) <= max_label)
             )
     except TypeError:
         is_integer_labels = False
@@ -688,144 +728,9 @@ def _resolve_torch_types():
     return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
-def _pil_to_chw(img):
-    """A PIL image as the CxHxW (or HxW) array it holds.
-
-    The values stay as they are, so a PIL image draws exactly like the array
-    ``np.asarray(img)``; only the layout and the less common modes change.
-    """
-    if img.mode in ("I", "F") or img.mode.startswith("I;"):
-        # 32-bit int, float and 16-bit modes, in native byte order
-        arr = np.asarray(img)
-        return arr.astype(arr.dtype.newbyteorder("="), copy=False)
-    if img.mode not in ("L", "RGB", "RGBA") or "transparency" in img.info:
-        # Read alpha from the mode, not band names: LAB has an "A" colour band.
-        alpha = (
-            img.mode in ("RGBA", "LA", "PA", "RGBa", "La")
-            or "transparency" in img.info
-            or (img.mode == "P" and getattr(img.palette, "mode", "") == "RGBA")
-        )
-        if img.mode == "La":
-            img = img.convert("LA")  # Pillow can't convert La to RGBA directly
-        img = img.convert("RGBA" if alpha else "L" if img.mode == "1" else "RGB")
-    arr = np.asarray(img)
-    return arr if arr.ndim == 2 else arr.transpose(2, 0, 1)
-
-
-def _is_16_bit(dtype):
-    """Whether ``dtype`` is uint16, in either byte order."""
-    return dtype.kind == "u" and dtype.itemsize == 2
-
-
-def _fit_integers(img):
-    """An integer or bool image as floats, scaled into [0, 1] if 0..255 can't hold it.
-
-    Unlike uint8 and uint16, a wider integer image (PIL mode I, say) has no
-    fixed white point, so clipping it at 255 would lose most of its values.
-    Values that fit, including masks in [-1, 1], are kept as they are.
-    """
-    img = img.astype(np.float64)
-    if img.size == 0:
-        return img
-    lo, hi = float(img.min()), float(img.max())
-    fits = (lo >= 0 and hi <= 255) or (lo >= -1 and hi <= 1)
-    return img if fits or hi == lo else (img - lo) / (hi - lo)
-
-
-def _image_to_bytes(img, normalize=False):
-    """``img`` as uint8, by the rules ``image()`` documents.
-
-    uint16 is a 16-bit image, shown at its full scale (65535 is white) as an
-    image viewer shows a 16-bit PNG. Other integers and bools are read by
-    value, like floats, unless they don't fit 0..255 (see ``_fit_integers``).
-    """
-    if img.dtype == np.uint8:
-        return img
-    if _is_16_bit(img.dtype):
-        img = img / 65535.0
-    elif not np.issubdtype(img.dtype, np.floating):
-        img = img.astype(np.float64) if normalize else _fit_integers(img)
-    finite_range = _finite_range(img)
-    if normalize:
-        return _stretch_to_bytes(img, finite_range)
-    if finite_range is not None:
-        img_min, img_max = finite_range
-    else:
-        img_min, img_max = 0.0, 0.0
-    if img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
-        img = img * 255.0
-    elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
-        img = (img + 1.0) / 2.0 * 255.0
-    img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-    return np.uint8(np.clip(img, 0, 255))
-
-
-def _stretch_to_bytes(img, value_range):
-    """``img`` min-max scaled so ``value_range`` fills [0, 255], as uint8.
-
-    ``value_range`` is ``_finite_range`` of the values to stretch; None, or a
-    single value, gives all zeros.
-    """
-    lo, hi = value_range if value_range is not None else (0.0, 0.0)
-    if hi > lo:
-        img = (img - lo) / (hi - lo) * 255.0
-    else:
-        img = np.zeros_like(img)
-    img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
-    return np.uint8(np.clip(img, 0, 255))
-
-
-def _match_channels(tile, channels):
-    """Pad a byte tile to ``channels``: gray to RGB, then an opaque alpha."""
-    if tile.shape[0] == 1 and channels > 1:
-        tile = np.repeat(tile, 3, axis=0)
-    if tile.shape[0] == 3 and channels == 4:
-        tile = np.concatenate([tile, np.full_like(tile[:1], 255)])
-    return tile
-
-
-def _stack_images(items, normalize=False):
-    """A list of images as a BxCxHxW batch, and whether it is already bytes.
-
-    Images of one kind (all uint8, all uint16, or all other numbers) and one
-    channel count are stacked as they are, so they share a scale, as a batch
-    array does. Mixed kinds have no common scale, so each is turned into
-    bytes on its own, as ``image()`` would show it.
-    """
-    tiles = [np.asarray(_to_numpy(x)) for x in items]
-    if not tiles or any(t.ndim not in (2, 3) for t in tiles):
-        return np.array(tiles), False  # not a list of images, e.g. nested rows
-    tiles = [t[None] if t.ndim == 2 else t for t in tiles]
-    sizes = {t.shape[1:] for t in tiles}
-    if len(sizes) > 1:
-        raise ValueError(
-            "images() needs images of one size, got {}".format(
-                " and ".join("{}x{}".format(*size) for size in sorted(sizes))
-            )
-        )
-    channels = {t.shape[0] for t in tiles}
-    kinds = {
-        "8" if t.dtype == np.uint8 else "16" if _is_16_bit(t.dtype) else ""
-        for t in tiles
-    }
-    if len(kinds) == 1 and len(channels) == 1:
-        return np.stack(tiles), False
-    if not channels <= {1, 3, 4}:
-        raise ValueError(
-            "Unsupported number of image channels: {}. Only 1 (grayscale), 3 "
-            "(RGB), or 4 (RGBA) channels are supported.".format(
-                sorted(channels - {1, 3, 4})[0]
-            )
-        )
-    tiles = [_image_to_bytes(t, normalize) for t in tiles]
-    return np.stack([_match_channels(t, max(channels)) for t in tiles]), True
-
-
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    if isinstance(a, Image.Image):
-        return _pil_to_chw(a)
     # one isinstance against the whole tuple rather than a Python loop: this
     # runs per argument of every plot call, and with no torch imported and
     # nothing registered in torch_types it is a single dict lookup.
@@ -835,6 +740,39 @@ def _to_numpy(a):
     if kinds and isinstance(a, kinds):
         return a.detach().cpu().numpy()
     return a
+
+
+def _plain_scalar(value, what):
+    """Turn a one-element tensor or numpy value into a plain Python number.
+
+    Anything else is returned as it is, except a complex number, which JSON
+    can't carry.
+    """
+    item = getattr(value, "item", None)
+    if callable(item):
+        numel = getattr(value, "numel", None)
+        count = numel() if callable(numel) else getattr(value, "size", 1)
+        if count != 1:
+            raise TypeError(
+                "{} must be a single value, got {} values".format(what, count)
+            )
+        # A masked value is missing; item() would give its hidden fill instead.
+        if np.ma.is_masked(value):
+            return None
+        value = item()
+    if isinstance(value, (complex, np.complexfloating)):
+        raise TypeError("{} must be a real number, got {}".format(what, value))
+    if not isinstance(value, np.floating):
+        return value
+    # np.longdouble.item() stays a numpy scalar, which json can't encode.
+    number = float(value)
+    # A float can't hold it, and inf or 0 would send a different value. The
+    # message uses str(): format() would print the value as that float.
+    if math.isinf(number) and np.isfinite(value):
+        raise ValueError("{} is too large to send: {!s}".format(what, value))
+    if number == 0 and value != 0:
+        raise ValueError("{} is too small to send: {!s}".format(what, value))
+    return number
 
 
 def pytorch_wrap(f):
@@ -868,7 +806,7 @@ def _binary_clf_curve(y_true, y_score, pos_label=1):
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
 
-    distinct_value_indices = np.where(np.diff(y_score))[0]
+    distinct_value_indices = np.where(y_score[1:] != y_score[:-1])[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
 
     tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
@@ -1085,14 +1023,114 @@ def _decode_binary_arrays(obj):
                     base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
                 )
                 if "shape" in obj:
-                    arr = arr.reshape(obj["shape"])
+                    shape = obj["shape"]
+                    if isinstance(shape, str):
+                        shape = tuple(int(dim) for dim in shape.split(","))
+                    arr = arr.reshape(shape)
                 return arr.tolist()
-            except (binascii.Error, ValueError, TypeError):
+            except (binascii.Error, ValueError, TypeError, OverflowError):
                 return obj
         return {k: _decode_binary_arrays(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _without_userinfo(url):
+    """``url`` with any ``user:password@`` dropped from its host.
+
+    ``show()`` puts the server URL in markup a notebook saves and people
+    share, and ``__repr__`` prints it. A password typed into ``server=`` has
+    no business in either.
+    """
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = "[{0}]".format(host)
+    if parsed.port is not None:
+        host = "{0}:{1}".format(host, parsed.port)
+    return urlunparse((parsed.scheme, host, "", "", "", ""))
+
+
+def _url_eid(eid):
+    """An env id as the server keys it, for building a dashboard URL.
+
+    ``escape_eid`` is the server's own choke point for this, but it lives in
+    ``visdom.utils.server_utils`` and the client deliberately does not import
+    the server side; ``Visdom.__init__`` inlines the same replacements for
+    ``self.env`` for the same reason. Whitespace is stripped here because the
+    server strips it too, so ``"run 7 "`` is keyed -- and routed -- as
+    ``"run 7"``.
+    """
+    return (
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
+    )
+
+
+def _embed_size(value):
+    """An iframe dimension as a CSS length.
+
+    A number is pixels, matching the ``height=600`` default, and has to be
+    finite and positive; a string is the CSS the caller wants, such as
+    ``"100%"`` or ``"40vh"``. It has to be a length and nothing else -- these end up in a ``style`` attribute, and a
+    second declaration smuggled in after a semicolon would be styling the
+    notebook rather than sizing the frame.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        text = str(value).strip()
+        if not text or ";" in text:
+            raise ValueError(
+                "iframe dimensions must be a CSS length, got {0!r}".format(value)
+            )
+        return text
+    if not math.isfinite(value):
+        # nan and inf are Numbers that survive the comparison below -- nan
+        # fails every comparison, inf passes -- and would format into a
+        # 'nanpx' / 'infpx' length the browser drops on the floor.
+        raise ValueError("iframe dimensions must be finite, got {0!r}".format(value))
+    if value <= 0:
+        raise ValueError("iframe dimensions must be positive, got {0!r}".format(value))
+    if isinstance(value, numbers.Integral):
+        return "{0}px".format(int(value))
+    return "{0}px".format(value)
+
+
+class _NotebookEmbed:
+    """A dashboard URL that renders as an iframe in a notebook cell.
+
+    Jupyter, VS Code and every other notebook frontend call ``_repr_html_``
+    when the displayed object has one, so nothing here imports IPython. A
+    terminal has
+    no such hook and falls back to ``__repr__``, which is the URL itself rather
+    than a wall of markup.
+    """
+
+    def __init__(self, url, height=600, width="100%", note=None):
+        self.url = url
+        # Normalized up front so a bad dimension raises from the show() call
+        # that passed it, rather than later from whatever displays the result.
+        self.height = _embed_size(height)
+        self.width = _embed_size(width)
+        self.note = note
+
+    def __repr__(self):
+        return self.note if self.url is None else self.url
+
+    def _repr_html_(self):
+        if self.url is None:
+            return "<p>{0}</p>".format(html.escape(self.note))
+        # The sizes go in the style, not in width=/height=: the HTML attributes
+        # are a legacy length that reads '40vh' as 40 pixels and drops the unit.
+        style = "width:{0};height:{1};border:0".format(self.width, self.height)
+        return '<iframe src="{0}" style="{1}" frameborder="0"></iframe>'.format(
+            html.escape(self.url, quote=True), html.escape(style, quote=True)
+        )
 
 
 class Visdom(object):
@@ -1777,6 +1815,12 @@ class Visdom(object):
             raise TypeError("params must be a dict of {name: value}")
         if tags is not None and not isinstance(tags, dict):
             raise TypeError("tags must be a dict of {name: value}")
+        if params is not None:
+            params = {
+                k: _plain_scalar(v, "param {!r}".format(k)) for k, v in params.items()
+            }
+        if tags is not None:
+            tags = {k: _plain_scalar(v, "tag {!r}".format(k)) for k, v in tags.items()}
         return self._experiment_send(
             {
                 "action": "log",
@@ -1793,10 +1837,15 @@ class Visdom(object):
 
         `metrics` is a dict of `{name: value}` recorded at an optional training
         `step`; the experiment is created automatically if it does not exist yet.
+        Values and `step` may be one-element torch tensors or numpy values.
         Returns the updated experiment as a dict.
         """
         if not isinstance(metrics, dict) or not metrics:
             raise TypeError("metrics must be a non-empty dict of {name: value}")
+        metrics = {
+            k: _plain_scalar(v, "metric {!r}".format(k)) for k, v in metrics.items()
+        }
+        step = _plain_scalar(step, "step")
         return self._experiment_send(
             {"action": "metrics", "metrics": metrics, "step": step}, env
         )
@@ -2108,13 +2157,18 @@ class Visdom(object):
         )
 
     def delete_envs(self, env_list):
-        """This function deletes a list of environments."""
+        """Delete a list of environments.
+
+        Validate all environment ID types before sending any delete request.
+        """
         if not isinstance(env_list, list):
             raise TypeError("env_list must be a list of strings")
-        responses = []
+        env_list = tuple(env_list)
         for env in env_list:
             if not isinstance(env, str):
                 raise TypeError(f"Environment ID must be a string, got {type(env)}")
+        responses = []
+        for env in env_list:
             responses.append(self.delete_env(env))
         return responses
 
@@ -2240,16 +2294,116 @@ class Visdom(object):
 
         return restore_run(json_path, self, env=env, delay=delay)
 
+    # Notebooks
+
+    def _dashboard_url(self, env=None):
+        """The browser URL for one of this server's environments.
+
+        ``env`` defaults to this client's own environment, as it does
+        everywhere else in the API. The server renders the dashboard at
+        ``/env/<eid>`` as well as at its root, so the URL deep-links straight
+        to that environment.
+        """
+        base = "{0}:{1}{2}".format(
+            _without_userinfo(self.server), self.port, self.base_url
+        )
+        eid = _url_eid(self.env if env is None else env)
+        return "{0}/env/{1}".format(base, quote(eid, safe=""))
+
+    def _repr_html_(self):
+        return self.show()._repr_html_()
+
+    def show(self, env=None, height=600, width="100%"):
+        """Embed the dashboard in a notebook cell.
+
+        Returns an object that renders as an iframe pointing at this client's
+        server, so displaying it in Jupyter or VS Code shows the live
+        dashboard where the plotting code is. A bare ``vis`` in a cell does
+        the same thing, by way of ``_repr_html_``.
+
+        Args:
+            env : str, optional
+                Environment to open; defaults to this client's own.
+            height : number or str, optional
+                Iframe height. A number is pixels; a string is a CSS length
+                such as ``"40vh"``. Both are applied as CSS.
+            width : number or str, optional
+                Iframe width. Defaults to the full cell width.
+
+        Nothing here imports IPython -- a notebook calls ``_repr_html_``
+        itself -- so this works without any extra dependency. Outside a
+        notebook the object prints the URL instead.
+
+        The environment has to exist on the server, which plotting into it is
+        what does: the dashboard answers ``404`` for an env it has never seen,
+        and that is what the frame would show.
+
+        The URL is built from this client's own ``server``, ``port`` and
+        ``base_url``, so it has to be an address the *browser* can reach --
+        which is the kernel's own machine when the notebook runs where you
+        are. A kernel somewhere else (a remote host, or a hosted notebook
+        such as Colab or Kaggle) serves its frontend from another origin, so
+        ``localhost`` there names the browser's machine and the frame stays
+        blank; that needs a port forward or a reverse proxy, and the client
+        pointed at that address.
+
+        Three things the embed cannot do anything about: a server started with
+        ``-enable_login`` serves the login form inside the frame, a JupyterLab
+        reached over HTTPS blocks a plain-HTTP frame to another port, and a
+        workspace-scoped client gets the server's default view because a
+        browser frame cannot send the header that selects a workspace.
+        """
+        if self.offline:
+            return _NotebookEmbed(
+                None,
+                height,
+                width,
+                note=(
+                    "This Visdom client is offline, so there is no server to "
+                    "embed. Point a client at a running server to see its "
+                    "dashboard here."
+                ),
+            )
+        if self.workspace:
+            logger.warning(
+                "This client is scoped to workspace %r, but a browser frame "
+                "cannot carry the X-Visdom-Workspace header that scoping "
+                "needs. The embedded dashboard shows the server's default "
+                "view, not this workspace.",
+                self.workspace,
+            )
+        return _NotebookEmbed(self._dashboard_url(env), height, width)
+
     # Content
 
     def text(self, text, win=None, env=None, opts=None, append=False):
         """
-        This function prints text in a box. It takes as input an `text` string.
+        This function prints text in a box. ``text`` is a string, or a value
+        that can be rendered as one: bytes, bytearray and a byte-typed
+        one-dimensional memoryview are decoded as UTF-8 and everything else
+        goes through ``str()``, so a numpy array or any other repr-able
+        object is shown as its ``str(...)`` form instead of a cryptic
+        ``Object of type ... is not JSON serializable`` from the JSON encoder.
+        A memoryview over anything but bytes (an int64 array, a 2-D view) has
+        no text to decode, so it raises ``TypeError`` rather than printing
+        raw memory.
         No specific `opts` are currently supported.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+        if isinstance(text, memoryview) and (
+            text.ndim != 1 or text.format not in ("B", "b", "c")
+        ):
+            raise TypeError(
+                "text() can only decode a one-dimensional byte memoryview; "
+                "got a memoryview with format %r and %d dimension(s)"
+                % (text.format, text.ndim)
+            )
+        if isinstance(text, (bytes, bytearray, memoryview)):
+            text = bytes(text).decode("utf-8", errors="replace")
+        elif not isinstance(text, str):
+            text = str(text)
         data = [{"content": text, "type": "text"}]
 
         if append:
@@ -2318,7 +2472,7 @@ class Visdom(object):
         the name of an SVG file. The function does not support any
         plot-specific `opts`.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2337,7 +2491,7 @@ class Visdom(object):
         is resized with the pane. You need `beautifulsoup4` and `lxml`
         packages installed to use this option.
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2485,7 +2639,16 @@ class Visdom(object):
             raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     def _register_embeddings(
-        self, features, labels, points, data_getter, data_type, win, env, opts
+        self,
+        features,
+        labels,
+        points,
+        data_getter,
+        data_type,
+        win,
+        env,
+        opts,
+        label_groups=None,
     ):
         self.win_data[win] = {
             "features": features,
@@ -2496,6 +2659,10 @@ class Visdom(object):
             "env": env,
             "opts": opts,
         }
+
+        if label_groups is None:
+            labels_normalized, _, _ = _normalize_labels(labels)
+            _, label_groups = np.unique(labels_normalized, return_inverse=True)
 
         def embedding_event_handler(event):
             window = event["target"]
@@ -2528,10 +2695,9 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(label_groups[i]),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
@@ -2602,9 +2768,10 @@ class Visdom(object):
         Y = do_tsne(features)
 
         labels_normalized, _, _ = _normalize_labels(labels)
+        _, label_groups = np.unique(labels_normalized, return_inverse=True)
         points = [
             {
-                "group": int(labels_normalized[i] - 1),
+                "group": int(label_groups[i]),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -2631,7 +2798,15 @@ class Visdom(object):
 
         if opts.get("register_embedding_events", True):
             self._register_embeddings(
-                features, labels, points, data_getter, data_type, win, env, opts
+                features,
+                labels,
+                points,
+                data_getter,
+                data_type,
+                win,
+                env,
+                opts,
+                label_groups=label_groups,
             )
         return win
 
@@ -2639,21 +2814,17 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image, or a PIL image, which is
-        drawn like the array it holds. The array values can be uint8 in
-        [0, 255], uint16 (a 16-bit image such as a 16-bit PNG, shown at its
-        full scale: 65535 is white), or other numbers. Other numbers (floats,
-        other integers, bools) are converted as follows: images whose
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        [0, 255] or float. Float arrays are converted as follows: images whose
         full range is within [0, 1] are scaled to [0, 255]; images whose full
         range is within [-1, 1] but includes negative values are mapped from
-        [-1, 1] to [0, 255]; all other values are clipped to [0, 255], except
-        integers, which are scaled to fit (a 32-bit image such as PIL mode `I`
-        has no fixed white point). Pass `opts.normalize=True` to min-max scale
-        the image to fill [0, 255] instead.
+        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
+        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
+        instead.
 
         The following `opts` are supported:
 
-        - `opts.normalize`: min-max scale a non-uint8 image to [0, 255] (`boolean`; default = `False`)
+        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
         - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
         - `opts.compresslevel`: PNG compression level (`integer` in [0, 9]; default = `6`)
         - `opts.caption`: caption below the image (`string`; optional)
@@ -2662,7 +2833,30 @@ class Visdom(object):
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
-        img = _image_to_bytes(img, opts.get("normalize", False))
+        if np.issubdtype(img.dtype, np.floating):
+            finite_range = _finite_range(img, as_float=False)
+            if finite_range is not None:
+                img_min, img_max = finite_range
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
 
         # extract dimensions and process formats
         if img.ndim == 2:
@@ -2761,7 +2955,7 @@ class Visdom(object):
         """
         Overlay a heatmap on an image.
 
-        `img` is a `CxHxW` or `HxW` tensor or a PIL image (same rules as
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
         `image()`). `heatmap` is an `HxW` float array. Values are expected in
         [0, 1] but any finite range is accepted — values outside [0, 1] are
         rescaled via min-max normalization before blending. NaN maps to 0;
@@ -2782,7 +2976,33 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        img = _image_to_bytes(np.asarray(img), opts.get("normalize", False))
+        img = np.asarray(img)
+        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
+            img = img.astype(np.float64)
+        if np.issubdtype(img.dtype, np.floating):
+            finite_range = _finite_range(img, as_float=False)
+            if finite_range is not None:
+                img_min, img_max = finite_range
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
 
         if img.ndim == 2:
             H, W = img.shape
@@ -2812,13 +3032,15 @@ class Visdom(object):
                     heatmap.shape, H, W
                 )
             )
-        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        h_min, h_max = float(heatmap.min()), float(heatmap.max())
-        if h_min < 0.0 or h_max > 1.0:
+        finite = np.isfinite(heatmap)
+        h_min = float(np.min(heatmap, where=finite, initial=np.inf))
+        h_max = float(np.max(heatmap, where=finite, initial=-np.inf))
+        if np.isfinite(h_min) and (h_min < 0.0 or h_max > 1.0):
             if h_max > h_min:
                 heatmap = (heatmap - h_min) / (h_max - h_min)
             else:
-                heatmap = np.zeros_like(heatmap)
+                heatmap = np.where(finite, 0.0, heatmap)
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
 
         colormap = opts.get("colormap", "jet")
         try:
@@ -2900,34 +3122,21 @@ class Visdom(object):
             endpoint="update",
         )
 
+    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
-        or a list of images all of the same size (arrays, tensors or PIL
-        images), makes a grid of images of size (B / nrow, nrow).
+        or a list of images all of the same size,
+        makes a grid of images of size (B / nrow, nrow).
 
-        Images in a list that are all of one kind (all uint8, all uint16, or
-        all other numbers) share one scale, as in a 4D tensor. A list mixing
-        kinds converts each image on its own, as `image()` would show it, so
-        `opts.normalize` then applies to each image.
 
         This is a modified from `make_grid()`
         https://github.com/pytorch/vision/blob/master/torchvision/utils.py
         """
 
-        # Not @pytorch_wrap, which would turn a list into one array before
-        # its images could be converted one by one.
-        normalize = opts is not None and opts.get("normalize", False)
-        is_bytes = False
+        # If list of images, convert to a 4D tensor
         if isinstance(tensor, list):
-            tensor, is_bytes = _stack_images(tensor, normalize)
-        else:
-            tensor = np.asarray(_to_numpy(tensor))
-        if _is_16_bit(tensor.dtype):
-            tensor = tensor / 65535.0  # full 16-bit scale, as image() reads it
-        elif tensor.dtype.kind in "biu" and tensor.dtype != np.uint8:
-            if not is_bytes and not normalize:
-                tensor = _fit_integers(tensor)  # as image() reads it
+            tensor = np.stack(tensor, 0)
 
         if tensor.ndim == 2:  # single image H x W
             tensor = np.expand_dims(tensor, 0)
@@ -2965,11 +3174,9 @@ class Visdom(object):
         # it, so the option would silently do nothing. Deciding this costs one
         # C-speed pass over the batch and saves a copy of it at eight times the
         # width.
-        # A mixed list is already bytes, scaled tile by tile: keep it as is.
+        normalize = opts is not None and opts.get("normalize", False)
         grid_shape = [tensor.shape[1], height * ymaps, width * xmaps]
-        if is_bytes or (
-            tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize
-        ):
+        if tensor.dtype == np.uint8 and tensor.max() > 1 and not normalize:
             grid = np.ones(grid_shape, dtype=np.uint8)
         else:
             grid = np.ones(grid_shape)
@@ -2993,25 +3200,23 @@ class Visdom(object):
         if remainder:
             slots[full_rows, :remainder] = tensor[full_rows * xmaps :]
 
-        if normalize and not is_bytes:
-            # By the images' own range: the padding is filled with 1, which
-            # would otherwise set the grid's min or max and squash the images.
-            grid = _stretch_to_bytes(grid, _finite_range(tensor))
         return self.image(grid, win, env, opts)
 
     @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
-        This function plays audio. It takes as input the filename of the audio
-        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
-        stereo audio). The function does not support any plot-specific `opts`.
+        This function plays audio. It takes as input the filename or `pathlib.Path`
+        of the audio file (`os.PathLike` supported) or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        stereo audio). The `(channels, N)` layout that torchaudio and librosa
+        return (`1xN` or `2xN`) is accepted too. The function does not support
+        any plot-specific `opts`.
 
         The following `opts` are supported:
 
-        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.sample_frequency`: sample frequency of a `tensor` (`integer` > 0, a whole-number float such as `16e3` is accepted; default = 44100). An `audiofile` plays at its own rate, so the value is passed through unchecked.
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)  # the caller's dict is left alone
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
         _title2str(opts)
         _assert_opts(opts)
@@ -3019,9 +3224,21 @@ class Visdom(object):
             tensor is not None or audiofile is not None
         ), "should specify audio tensor or file"
         if tensor is not None:
+            # torchaudio and librosa give (channels, N); scipy writes (N, channels).
+            # (N, 2) already is stereo, so only other shapes are turned around.
+            if tensor.ndim == 2 and tensor.shape[1] != 2:
+                if tensor.shape[0] == 2:
+                    tensor = tensor.T
+                elif 1 in tensor.shape:
+                    tensor = tensor.reshape(-1)
             assert tensor.ndim == 1 or (
                 tensor.ndim == 2 and tensor.shape[1] == 2
-            ), "tensor should be 1D vector or 2D matrix with 2 columns"
+            ), "tensor should be 1D vector or 2D matrix with 2 columns (or 2 rows)"
+            # Checked after the shape, so the channel count is the real one.
+            channels = tensor.shape[1] if tensor.ndim == 2 else 1
+            opts["sample_frequency"] = _audio_sample_rate(
+                opts["sample_frequency"], channels
+            )
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
@@ -3030,6 +3247,9 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
+            # Non-finite samples (NaN, +/-inf) would make max_val, and the
+            # whole scaled tensor, non-finite. Treat them as silence.
+            tensor = np.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
@@ -3038,6 +3258,7 @@ class Visdom(object):
                 tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
+        audiofile = os.fsdecode(audiofile)
         extension = audiofile.split(".")[-1].lower()
         mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
         mimetype = mimetypes.get(extension)
@@ -3103,8 +3324,8 @@ class Visdom(object):
         self, tensor=None, dim="LxHxWxC", videofile=None, win=None, env=None, opts=None
     ):
         """
-        This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        This function plays a video. It takes as input the filename or `pathlib.Path`
+        of the video `videofile` (`os.PathLike` supported) or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
         the frames of the video as input, as specified in `dim`. The color
         channels must be in BGR order.
 
@@ -3131,6 +3352,7 @@ class Visdom(object):
         ), "should specify video tensor or file"
 
         if tensor is None:
+            videofile = os.fsdecode(videofile)
             extension = videofile.split(".")[-1].lower()
             mimetypes = {"mp4": "mp4", "ogv": "ogg", "avi": "avi", "webm": "webm"}
             mimetype = mimetypes.get(extension)
@@ -3371,7 +3593,9 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            Y, label_values, K = _normalize_labels(Y)
+            legend = opts.get("legend") if opts else None
+            max_label = len(legend) if isinstance(legend, (list, tuple)) else None
+            Y, label_values, K = _normalize_labels(Y, max_label=max_label)
             labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
@@ -3415,10 +3639,15 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        if opts.get("legend"):
-            assert isinstance(opts["legend"], (tuple, list)) and K <= len(
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts["legend"], (tuple, list)
+            ), "opts.legend must be a list or tuple"
+            assert K <= len(
                 opts["legend"]
-            ), ("largest label should not be greater than size of " "the legends table")
+            ), "largest label should not be greater than size of the legends table"
+        else:
+            opts.pop("legend", None)
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
@@ -3455,8 +3684,8 @@ class Visdom(object):
         for position, k in enumerate(labels):
             ind = runs[position]
             if run_lengths[position]:
-                if "legend" in opts:
-                    trace_name = opts.get("legend")[k - 1]
+                if opts.get("legend") is not None:
+                    trace_name = opts["legend"][k - 1]
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
@@ -4095,15 +4324,15 @@ class Visdom(object):
 
         raw_cm = cm.copy()
         if normalize == "true":
-            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums = cm.sum(axis=1, keepdims=True, dtype=float)
             row_sums[row_sums == 0] = 1
             cm = cm.astype(float) / row_sums
         elif normalize == "pred":
-            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums = cm.sum(axis=0, keepdims=True, dtype=float)
             col_sums[col_sums == 0] = 1
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
-            total = float(cm.sum())
+            total = float(cm.sum(dtype=float))
             if total == 0:
                 warnings.warn(
                     "confusion matrix sum is zero; normalized values will be zero",
@@ -4137,7 +4366,7 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
-        raw_total = float(raw_cm.sum())
+        raw_total = float(raw_cm.sum(dtype=float))
         raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
@@ -4154,7 +4383,7 @@ class Visdom(object):
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        pct = float(raw_cm[i, j]) / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
@@ -4413,6 +4642,9 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+
+        Contours keep Plotly's automatic color domain unless either color limit
+        is supplied. A missing explicit limit then defaults to the data bound.
         """
 
         X = np.asarray(X)
@@ -4423,22 +4655,29 @@ class Visdom(object):
             "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
         )
 
-        opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
-        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
+        opts = {} if opts is None else opts.copy()
+        explicit_bounds = "xmin" in opts or "xmax" in opts
+        if stype == "surface" or explicit_bounds:
+            opts["xmin"] = float(opts["xmin"] if "xmin" in opts else np.nanmin(X))
+            opts["xmax"] = float(opts["xmax"] if "xmax" in opts else np.nanmax(X))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
 
+        lower_bound, upper_bound = (
+            ("zmin", "zmax") if stype == "contour" else ("cmin", "cmax")
+        )
         data = [
             {
                 "z": X.tolist(),
-                "cmin": opts["xmin"],
-                "cmax": opts["xmax"],
                 "type": stype,
                 "colorscale": opts["colormap"],
             }
         ]
+
+        if stype == "surface" or explicit_bounds:
+            data[0][lower_bound] = opts["xmin"]
+            data[0][upper_bound] = opts["xmax"]
 
         return self._send(
             {
@@ -4479,8 +4718,8 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-        - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+        - `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+        - `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
         """
 
         return self._surface(X=X, stype="contour", opts=opts, win=win, env=env)
@@ -4527,7 +4766,7 @@ class Visdom(object):
                 and opts["normalize"] > 0
                 and np.isfinite(opts["normalize"])
             ), "opts.normalize should be a finite positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            magnitude = np.hypot(X, Y, dtype=np.result_type(X, Y, np.float64))
             finite_mask = np.isfinite(magnitude)
 
             if not np.any(finite_mask):
@@ -4544,18 +4783,24 @@ class Visdom(object):
                         RuntimeWarning,
                     )
                 else:
-                    scale = max_mag / opts["normalize"]
-
-                    if scale <= 0 or not np.isfinite(scale):
-                        warnings.warn(
-                            "Skipping quiver normalization: invalid scale computed",
-                            RuntimeWarning,
-                        )
-                    else:
-                        X = np.where(np.isfinite(X), X, np.nan)
-                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                    with np.errstate(over="ignore", under="ignore"):
+                        scale = max_mag / opts["normalize"]
+                    nonzero_vectors = finite_mask & ((X != 0) | (Y != 0))
+                    X = np.where(np.isfinite(X), X, np.nan)
+                    Y = np.where(np.isfinite(Y), Y, np.nan)
+                    if scale >= np.finfo(magnitude.dtype).tiny and np.isfinite(scale):
+                        # Avoid losing tiny components with a normal scale.
                         X = X / scale
                         Y = Y / scale
+                    else:
+                        X = (X / max_mag) * opts["normalize"]
+                        Y = (Y / max_mag) * opts["normalize"]
+                    if np.any(nonzero_vectors & (X == 0) & (Y == 0)):
+                        warnings.warn(
+                            "Quiver normalization underflow: nonzero vectors became zero",
+                            RuntimeWarning,
+                            stacklevel=3,
+                        )
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
@@ -5083,10 +5328,21 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
-        G = nx.Graph()
-        G.add_edges_from(edges)
+        input_edges = list(edges)
+        G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
+        G.add_edges_from(input_edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
+        if opts.get("directed", False):
+            link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
+        else:
+            link_data = []
+            seen = set()
+            for edge in input_edges:
+                key = frozenset(edge[:2])
+                if key not in seen:
+                    seen.add(key)
+                    link_data.append(tuple(edge[:2]))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(
