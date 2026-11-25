@@ -2310,23 +2310,24 @@ class AlertsHandler(BaseHandler):
 
         The condition may be absent, which names every rule on the metric.
 
-        The metric is normalized here the way :class:`Alert` normalizes its
-        own ``key``, because ``clear_alerts`` matches the two with ``==``: a
-        rule that can be set is a rule that has to be clearable by the name
-        it was set under. The two are kept honest by
-        ``test_set_and_clear_agree_on_a_metric_with_whitespace_around_it``
-        rather than by this comment -- if the rule ever stops normalizing,
-        that test fails here instead of a padded metric name quietly becoming
-        a rule nobody can remove.
+        The metric is passed through exactly as sent, because that is what
+        :class:`Alert` does with its own ``key`` and ``clear_alerts`` matches
+        the two with ``==``: a rule that can be set is a rule that has to be
+        clearable by the name it was set under. Trimming here while the rule
+        keeps its name verbatim is what turns a padded metric name into a
+        rule nobody can remove. A name that is only whitespace is still
+        refused -- it names no series either way. The two halves are kept
+        honest by ``test_set_and_clear_agree_on_a_metric_with_whitespace_
+        around_it`` rather than by this comment.
         """
         metric = args.get("metric")
         if not isinstance(metric, str) or not metric.strip():
             return None, "'metric' is required to clear an alert"
         condition = args.get("condition")
         if condition is None:
-            return (metric.strip(), None), None
+            return (metric, None), None
         try:
-            return (metric.strip(), alert_rules.condition_name(condition)), None
+            return (metric, alert_rules.condition_name(condition)), None
         except ValueError as error:
             return None, str(error)
 
@@ -2337,6 +2338,15 @@ class AlertsHandler(BaseHandler):
             AlertsHandler._refuse(handler, 400, "unknown action {0!r}".format(action))
             return
 
+        # Checked before ``extract_eid``, which escapes the value and would
+        # raise ``AttributeError`` on anything without ``strip`` -- answering
+        # a request that named its environment as a number with a 500 rather
+        # than telling its sender what was wrong with it.
+        if args.get("eid") is not None and not isinstance(args.get("eid"), str):
+            AlertsHandler._refuse(
+                handler, 400, "'eid' must be a string naming an environment"
+            )
+            return
         eid = extract_eid(args)
 
         if action == "get":

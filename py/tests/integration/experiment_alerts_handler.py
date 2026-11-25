@@ -297,7 +297,9 @@ class TestAlertNotifications(AlertsTestCase):
 
         self.assertEqual(quiet.code, 200)
         self.assertEqual(loud.code, 200)
-        self.assertEqual(self.notifications(sub), ["main: loss is 2.5, > 2 at step 2"])
+        self.assertEqual(
+            self.notifications(sub), ["main: loss is 2.5, > 2.0 at step 2"]
+        )
         self.assertEqual(sub.last("notification")["data"]["type"], "warning")
 
     def test_the_firing_is_recorded_on_the_rule(self):
@@ -363,7 +365,10 @@ class TestAlertNotifications(AlertsTestCase):
 
     def test_an_integer_too_wide_for_a_float_does_not_break_the_request(self):
         # JSON has no bound on integer length, and both the comparison and
-        # the conversion behind it raise OverflowError on one this wide.
+        # the conversion behind it raise OverflowError on one this wide. The
+        # threshold rule cannot judge it and stays quiet; the 'nan' rule is
+        # the one that catches it, because an integer a float cannot hold is
+        # a metric whose arithmetic ran away just as an infinity is.
         sub = self.subscribe()
         self.set_alert(condition="> 2.0")
         self.set_alert(condition="nan")
@@ -371,7 +376,17 @@ class TestAlertNotifications(AlertsTestCase):
         response = self.log_metric(10**400, step=5)
 
         self.assertEqual(response.code, 200)
-        self.assertEqual(self.notifications(sub), [])
+        self.assertEqual(
+            self.notifications(sub), ["main: loss is not a finite number at step 5"]
+        )
+
+    def test_an_eid_that_is_not_a_string_is_refused_rather_than_raising(self):
+        # ``extract_eid`` escapes what it is given, which means calling
+        # ``strip`` on it: a JSON number would raise AttributeError out of
+        # the handler and answer 500, telling its sender nothing.
+        response = self.post_json("/experiments/alerts", {"action": "get", "eid": 42})
+        self.assertEqual(response.code, 400)
+        self.assertIn("eid", json.loads(response.body)["error"])
 
     def test_a_stall_watch_fires_on_the_run_that_stopped_improving(self):
         sub = self.subscribe()
@@ -404,7 +419,10 @@ class TestAlertNotifications(AlertsTestCase):
 
         expected = {
             "command": "notification",
-            "data": {"message": "main: loss is 2.5, > 2 at step 1", "type": "warning"},
+            "data": {
+                "message": "main: loss is 2.5, > 2.0 at step 1",
+                "type": "warning",
+            },
         }
         self.assertEqual(websocket.last("notification"), expected)
         self.assertEqual(polling.last("notification"), expected)
@@ -452,3 +470,8 @@ class TestAlertNotifications(AlertsTestCase):
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.notifications(sub), [])
+        # A 200 and a silent socket are also what dropping the observation
+        # would look like, so the point of this test is the third assertion:
+        # the metric reached the record the way it does without any rules.
+        experiment = ExperimentStore(JSONStore(self.env_path)).get_experiment("main")
+        self.assertEqual(experiment.latest_metric("loss").value, 2.5)

@@ -824,6 +824,12 @@ paths:
       responses:
         "200":
           description: The environment's alert rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlertRule"
         "401":
           description: Authentication required but not provided.
     post:
@@ -895,7 +901,15 @@ paths:
                       description: >
                         Consecutive matching observations before the rule
                         fires. It fires on the one that completes the streak
-                        and not again until the streak breaks.
+                        and not again until the streak breaks. "Consecutive"
+                        counts the observations the rule can judge: an
+                        observation that is not a finite number -- a NaN, an
+                        infinity, the `null` either becomes on the wire, or
+                        an integer too wide for a float -- leaves the streak
+                        where it is rather than breaking it, because a run
+                        that is already over its threshold is the one that
+                        starts logging nulls. So `2, null, 2` completes a
+                        two-step streak while `2, 0, 2` starts it over.
                     patience:
                       type: integer
                       minimum: 1
@@ -928,6 +942,12 @@ paths:
       responses:
         "200":
           description: The environment's alert rules after the change.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlertRule"
         "400":
           description: >
             Unknown action, a missing or malformed `alert` object, an
@@ -1691,6 +1711,84 @@ components:
                 type: string
               value:
                 type: string
+        alerts:
+          type: array
+          description: >-
+            The environment's metric alert rules, stored on the experiment
+            record so they are forked and reloaded with it.
+          items:
+            $ref: "#/components/schemas/AlertRule"
+
+    AlertRule:
+      type: object
+      description: >-
+        One stored metric alert rule: what it watches, when it fires, and the
+        fold state that decides. Both alert operations answer with the whole
+        of an environment's list, so a caller reads the state back from the
+        same shape it set the rule with.
+      properties:
+        key:
+          type: string
+          description: >-
+            The metric watched, exactly as the rule was set with it. Matched
+            against logged metric names with `==` and never trimmed, so a
+            name is the same name on both paths.
+        condition:
+          type: string
+          enum: [">", "<", "==", "nan", "stalled"]
+          description: The canonical condition, without its operand.
+        threshold:
+          type: [number, "null"]
+          description: >-
+            The number the three comparing conditions judge against, and
+            `null` for the two that watch the shape of the series. An integer
+            threshold is stored as an integer so it keeps every digit it was
+            written with.
+        for_steps:
+          type: integer
+          minimum: 1
+          description: >-
+            Consecutive matching observations required before the rule fires.
+        patience:
+          type: [integer, "null"]
+          description: Observations without improvement; `stalled` only.
+        goal:
+          type: [string, "null"]
+          enum: [min, max, null]
+          description: Which direction improves; `stalled` only.
+        action:
+          type: string
+          enum: [toast]
+          description: How a firing is delivered.
+        message:
+          type: string
+          description: The caller's own notification text, or empty.
+        created_at:
+          type: number
+          description: Unix timestamp when the rule was set.
+        streak:
+          type: integer
+          description: >-
+            Consecutive matching observations so far. Persisted, so a
+            restarted server picks a streak up where it left off.
+        fire_count:
+          type: integer
+          description: How many times the rule has fired.
+        last_fired_at:
+          type: [number, "null"]
+          description: Unix timestamp of the last firing, or `null`.
+        last_fired_step:
+          type: [integer, "null"]
+          description: >-
+            The step the last firing was recorded at. Only a whole number is
+            kept; a step of any other kind is stored as `null` rather than
+            written into a record that could not be read back.
+        best:
+          type: [number, "null"]
+          description: Best value seen; `stalled` only.
+        since_best:
+          type: integer
+          description: Observations since `best` improved; `stalled` only.
 
     UploadErrorResponse:
       type: object

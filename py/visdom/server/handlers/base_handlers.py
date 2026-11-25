@@ -33,6 +33,11 @@ WRITE_ENDPOINTS = {
     "fork_env",
     "upload_env",
     "restore_run",
+    # Setting or clearing a rule writes the environment file the same way the
+    # rest of these do, so a viewer is denied it and a workspace that is out
+    # of storage refuses it. Reading rules is a GET and is unaffected, which
+    # is the reason the endpoint has one.
+    "alerts",
 }
 
 FILL_ENDPOINTS = (WRITE_ENDPOINTS - {"close", "delete_env"}) | {"log"}
