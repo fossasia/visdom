@@ -313,6 +313,13 @@ async def _serve(
         # in memory until the process ends, and add one more callback per
         # ``serve`` call in a process that serves more than once (the tests do).
         atexit.unregister(app.shutdown_storage)
+        try:
+            from tornado import autoreload
+
+            if app.shutdown_storage in autoreload._reload_hooks:
+                autoreload._reload_hooks.remove(app.shutdown_storage)
+        except Exception:
+            pass
 
 
 def main(print_func=None):

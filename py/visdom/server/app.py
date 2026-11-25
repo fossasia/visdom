@@ -180,6 +180,7 @@ class Application(tornado.web.Application):
         save_interval=DEFAULT_SAVE_INTERVAL,
         save_threshold=DEFAULT_SAVE_THRESHOLD,
         debug=None,
+        autoreload=None,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
@@ -207,6 +208,8 @@ class Application(tornado.web.Application):
         settings = dict(tornado_settings)
         if debug is not None:
             settings["debug"] = bool(debug)
+        if autoreload is not None:
+            settings["autoreload"] = bool(autoreload)
         # Polling wrappers are reaped by ``ServerState`` instead; this reaches
         # only real websockets. The pong deadline is left at tornado's default,
         # which is the interval itself.
@@ -318,6 +321,19 @@ class Application(tornado.web.Application):
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **settings)
+
+        # Autoreload replaces the running process with execv without
+        # unwinding, skipping atexit handlers. Register a reload hook so
+        # unsaved environment state is persisted before Tornado restarts.
+        if self.settings.get("autoreload"):
+            try:
+                import tornado.autoreload
+
+                hooks = tornado.autoreload._reload_hooks
+                if self.shutdown_storage not in hooks:
+                    tornado.autoreload.add_reload_hook(self.shutdown_storage)
+            except Exception:
+                pass
 
     def internal_application(self):
         return tornado.web.Application(
