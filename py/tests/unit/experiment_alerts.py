@@ -19,6 +19,8 @@ The third thing, the fold that decides whether an observation fires a rule,
 is tested beside the code that does it.
 """
 
+import json
+
 import pytest
 
 from visdom.experiments.alerts import (
@@ -95,6 +97,25 @@ class TestParseCondition:
         # what that caller wanted.
         with pytest.raises(ValueError):
             parse_condition(text)
+
+    def test_an_integer_operand_is_read_as_an_integer(self):
+        # float('9007199254740993') is 9007199254740992.0 -- the integer
+        # below the one written -- so reading every operand as a float would
+        # hand back a rule watching a value its author never typed.
+        condition, threshold = parse_condition("== 9007199254740993")
+        assert (condition, threshold) == ("==", 9007199254740993)
+        assert isinstance(threshold, int)
+
+    @pytest.mark.parametrize("text", ["> 2.0", "< 0.5", "> -1e-3", "== 2."])
+    def test_a_decimal_operand_is_still_read_as_a_float(self, text):
+        assert isinstance(parse_condition(text)[1], float)
+
+    def test_an_integer_no_observation_could_reach_is_refused(self):
+        # An integer operand is not bounded by float's range the way a
+        # decimal one is -- '1e400' parses as an infinity and is refused
+        # below -- so the width has to be refused rather than overflowed.
+        with pytest.raises(ValueError):
+            parse_condition("== {0}".format(10**400))
 
     @pytest.mark.parametrize("text", [None, 2.0, [">", 2.0], True])
     def test_a_condition_has_to_be_text(self, text):
@@ -200,6 +221,30 @@ class TestAlertValidation:
         restored = Alert.from_dict(alert.to_dict())
         assert restored.to_dict() == alert.to_dict()
         assert (restored.streak, restored.fire_count) == (3, 1)
+
+    def test_an_integer_threshold_survives_the_written_rule(self):
+        alert = build_alert("count", "== 9007199254740993")
+        assert alert.threshold == 9007199254740993
+        assert isinstance(alert.threshold, int)
+
+    def test_an_integer_threshold_survives_the_saved_rule(self):
+        # Through JSON, which is what an environment is stored as: the
+        # rounding the grammar avoids would otherwise be reapplied on every
+        # load, so the rule would drift to the neighbouring integer and stay
+        # there.
+        alert = build_alert("count", "== 9007199254740993")
+        restored = Alert.from_dict(json.loads(json.dumps(alert.to_dict())))
+        assert restored.threshold == 9007199254740993
+        assert isinstance(restored.threshold, int)
+        assert restored.to_dict() == alert.to_dict()
+
+    def test_a_remembered_best_is_not_rounded_at_load(self):
+        # 'best' is an observation the record kept, and the stall watch
+        # compares the next one against it.
+        restored = Alert.from_dict(
+            {"key": "count", "condition": "stalled", "best": 9007199254740993}
+        )
+        assert restored.best == 9007199254740993
 
     def test_an_old_record_without_the_new_fields_still_loads(self):
         restored = Alert.from_dict({"key": "loss", "condition": "nan"})
