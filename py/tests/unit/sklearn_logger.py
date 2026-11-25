@@ -22,7 +22,10 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    HistGradientBoostingClassifier,
+)
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neural_network import MLPClassifier
@@ -221,6 +224,190 @@ class TestLogHistory(unittest.TestCase):
         logger._log_history(est)
         logger.viz.line.assert_not_called()
 
+    def _hist_gb(self, max_iter=15):
+        rng = np.random.RandomState(0)
+        X = rng.rand(300, 4)
+        y = (X[:, 0] > 0.5).astype(int)
+        return HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=max_iter, random_state=0
+        ).fit(X, y)
+
+    def _plot(self, logger, attr):
+        """The call that plotted ``attr``, matched on the whole curve name.
+
+        Titles are "<EstimatorName> <attr>", so a substring test would let
+        validation_score_ and validation_scores_ match each other's pane as
+        soon as either name changes.
+        """
+        for call in logger.viz.line.call_args_list:
+            if call.kwargs["opts"]["title"].split()[-1] == attr:
+                return call.kwargs
+        return None
+
+    def test_hist_gradient_boosting_train_score_starts_at_zero(self):
+        # train_score_ is (n_iter_ + 1) long: its first entry is the score
+        # before the first iteration, so the curve starts at 0, not 1.
+        logger = _logger()
+        est = self._hist_gb()
+        logger._log_history(est)
+        plot = self._plot(logger, "train_score_")
+        self.assertIsNotNone(plot)
+        self.assertEqual(len(est.train_score_), est.n_iter_ + 1)
+        self.assertEqual(plot["X"][0], 0)
+        self.assertEqual(plot["X"][-1], est.n_iter_)
+
+    def test_hist_gradient_boosting_validation_curve_starts_at_zero(self):
+        # The boosting validation history carries the same pre-training
+        # entry as train_score_, so it belongs on a zero-based axis too.
+        logger = _logger()
+        est = self._hist_gb()
+        logger._log_history(est)
+        plot = self._plot(logger, "validation_score_")
+        self.assertIsNotNone(plot)
+        self.assertEqual(len(est.validation_score_), est.n_iter_ + 1)
+        self.assertEqual(plot["X"][0], 0)
+        self.assertEqual(plot["X"][-1], est.n_iter_)
+
+    def test_a_warm_started_mlp_keeps_a_one_based_axis(self):
+        # warm_start accumulates epochs across fits while n_iter_ reports
+        # only the latest one, so len(curve) can equal n_iter_ + 1 by
+        # coincidence. That must not shift MLP's 1-based epochs to 0.
+        logger = _logger()
+        rng = np.random.RandomState(0)
+        X, y = rng.rand(60, 3), (rng.rand(60) > 0.5).astype(int)
+        est = MLPClassifier(
+            hidden_layer_sizes=(4,),
+            max_iter=10,
+            early_stopping=True,
+            n_iter_no_change=10,
+            warm_start=True,
+            random_state=0,
+        ).fit(X, y)
+        est.fit(X, y)
+        est.n_iter_ = len(est.validation_scores_) - 1
+        logger._log_history(est)
+        for attr in ("loss_curve_", "validation_scores_"):
+            plot = self._plot(logger, attr)
+            self.assertEqual(plot["X"][0], 1, attr)
+
+    def test_validation_curve_starts_at_one_without_a_baseline_entry(self):
+        # MLP* normally report one score per epoch and no pre-training entry,
+        # so that curve must keep starting at 1.
+        logger = _logger()
+        est = MLPClassifier(
+            hidden_layer_sizes=(2,),
+            max_iter=20,
+            early_stopping=True,
+            n_iter_no_change=2,
+            random_state=0,
+        ).fit(np.random.RandomState(0).rand(40, 2), np.array([0, 1] * 20))
+        self.assertEqual(len(est.validation_scores_), est.n_iter_)
+        logger._log_history(est)
+        plot = self._plot(logger, "validation_scores_")
+        self.assertEqual(plot["X"][0], 1)
+        self.assertEqual(plot["X"][-1], len(est.validation_scores_))
+
+    def test_axis_labels_name_the_right_step(self):
+        # loss_curve_ counts epochs; the score histories count boosting
+        # iterations. The label follows the curve, not the estimator.
+        logger = _logger()
+        logger._log_history(self._hist_gb())
+        for attr in ("train_score_", "validation_score_"):
+            self.assertEqual(
+                self._plot(logger, attr)["opts"]["xlabel"], "iteration", attr
+            )
+
+        mlp_logger = _logger()
+        rng = np.random.RandomState(0)
+        mlp_logger._log_history(
+            MLPClassifier(
+                hidden_layer_sizes=(2,),
+                max_iter=20,
+                early_stopping=True,
+                n_iter_no_change=2,
+                random_state=0,
+            ).fit(rng.rand(40, 2), np.array([0, 1] * 20))
+        )
+        for attr in ("loss_curve_", "validation_scores_"):
+            self.assertEqual(
+                self._plot(mlp_logger, attr)["opts"]["xlabel"], "epoch", attr
+            )
+
+    def test_gradient_boosting_train_score_still_starts_at_one(self):
+        # The older family records only the iterations themselves, so its
+        # curve must keep starting at 1.
+        logger = _logger()
+        X = np.arange(20).reshape(-1, 1).astype(float)
+        est = GradientBoostingRegressor(n_estimators=3, random_state=0).fit(
+            X, X.ravel() * 2
+        )
+        logger._log_history(est)
+        plot = self._plot(logger, "train_score_")
+        self.assertEqual(plot["X"], [1, 2, 3])
+
+
+class TestValidationCurveDiscovery(unittest.TestCase):
+    """The boosting estimators report a validation history under a different
+    name than MLP*, and without reporting a loss curve at all."""
+
+    def _hist_gb(self):
+        rng = np.random.RandomState(0)
+        X = rng.rand(300, 4)
+        y = (X[:, 0] > 0.5).astype(int)
+        return HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=15, random_state=0
+        ).fit(X, y)
+
+    def _curves(self, logger):
+        """The curve name each pane plotted, taken from the end of its title."""
+        return [
+            c.kwargs["opts"]["title"].split()[-1]
+            for c in logger.viz.line.call_args_list
+        ]
+
+    def test_singular_attribute_is_found(self):
+        logger = _logger()
+        est = self._hist_gb()
+        self.assertFalse(hasattr(est, "validation_scores_"))
+        self.assertTrue(hasattr(est, "validation_score_"))
+        logger._log_history(est)
+        self.assertIn("validation_score_", self._curves(logger))
+
+    def test_found_without_a_loss_curve(self):
+        # The lookup used to sit inside the loss_curve_ branch, which these
+        # estimators never enter.
+        logger = _logger()
+        est = self._hist_gb()
+        self.assertFalse(hasattr(est, "loss_curve_"))
+        logger._log_history(est)
+        self.assertEqual(logger.viz.line.call_count, 2)
+
+    def test_plural_attribute_still_wins_for_mlp(self):
+        logger = _logger()
+        rng = np.random.RandomState(0)
+        est = MLPClassifier(
+            hidden_layer_sizes=(2,),
+            max_iter=20,
+            early_stopping=True,
+            n_iter_no_change=2,
+            random_state=0,
+        ).fit(rng.rand(40, 2), np.array([0, 1] * 20))
+        logger._log_history(est)
+        self.assertIn("validation_scores_", self._curves(logger))
+        self.assertEqual(logger.viz.line.call_count, 2)
+
+    def test_only_one_validation_curve_when_both_names_exist(self):
+        # A future sklearn exposing both aliases must not produce two panes
+        # for the same history.
+        logger = _logger()
+        est = self._hist_gb()
+        est.validation_scores_ = list(est.validation_score_)
+        logger._log_history(est)
+        curves = self._curves(logger)
+        self.assertEqual(
+            sum(1 for c in curves if c.startswith("validation")), 1, curves
+        )
+
 
 class TestLogCv(unittest.TestCase):
     def setUp(self):
@@ -339,6 +526,147 @@ class TestPatchDepth(unittest.TestCase):
             with self.assertWarns(UserWarning):
                 result = Est().fit(np.zeros((2, 1)), np.zeros(2))
         self.assertIsInstance(result, Est)
+
+
+class TestPipelineHistory(unittest.TestCase):
+    """Only the outer fit is logged, and a Pipeline has no history of its
+    own, so the curve comes from its final step."""
+
+    def setUp(self):
+        rng = np.random.RandomState(0)
+        self.X = rng.rand(60, 3)
+        self.y = (self.X[:, 0] > 0.5).astype(int)
+
+    @staticmethod
+    def pipeline(*steps):
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        return make_pipeline(StandardScaler(), *steps)
+
+    def titles(self, logger):
+        return [c.kwargs["opts"]["title"] for c in logger.viz.line.call_args_list]
+
+    _SAME_Y = object()
+
+    def log(self, est, y=_SAME_Y):
+        logger = _logger()
+        logger._log_plain(est, self.X, self.y if y is self._SAME_Y else y, 0.1)
+        return logger
+
+    def test_the_final_steps_loss_curve_is_plotted(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["MLPClassifier loss_curve_"])
+
+    def test_the_final_steps_train_score_is_plotted(self):
+        gb = GradientBoostingRegressor(n_estimators=3, random_state=0)
+        est = self.pipeline(gb).fit(self.X, self.X[:, 0])
+        logger = self.log(est, y=self.X[:, 0])
+        self.assertIn("GradientBoostingRegressor train_score_", self.titles(logger))
+
+    def test_a_hist_gradient_boosting_step_keeps_its_zero_based_curves(self):
+        """The model's own axis and validation curve, in the Pipeline's panes."""
+        hgb = HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=10, random_state=0
+        )
+        est = self.pipeline(hgb).fit(self.X, self.y)
+        logger = self.log(est)
+        plots = {
+            c.kwargs["opts"]["title"]: c.kwargs for c in logger.viz.line.call_args_list
+        }
+        for attr in ("train_score_", "validation_score_"):
+            plot = plots["HistGradientBoostingClassifier " + attr]
+            self.assertEqual(plot["X"], list(range(len(getattr(est[-1], attr)))))
+            self.assertEqual(plot["win"], logger._win(est, attr))
+
+    def test_a_nested_pipeline_is_unwrapped_to_the_model(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(self.pipeline(mlp)).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["MLPClassifier loss_curve_"])
+
+    def test_a_passthrough_final_step_plots_nothing(self):
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        est = Pipeline([("scale", StandardScaler()), ("last", "passthrough")])
+        est.fit(self.X)
+        self.log(est, y=None).viz.line.assert_not_called()
+
+    def test_refitting_the_pipeline_reuses_the_curves_window(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp)
+        logger = _logger()
+        wins = []
+        for _ in range(2):
+            est.fit(self.X, self.y)
+            logger._log_plain(est, self.X, self.y, 0.1)
+            wins.append(logger.viz.line.call_args.kwargs["win"])
+        self.assertEqual(wins[0], wins[1])
+
+    def test_the_summary_still_describes_the_pipeline(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp).fit(self.X, self.y)
+        body = self.log(est).viz.text.call_args[0][0]
+        self.assertIn("Pipeline", body)
+
+    def test_pipelines_sharing_a_model_keep_their_own_windows(self):
+        """The pane belongs to the Pipeline that was fitted, not to the model
+        object, which two pipelines can share."""
+        from sklearn.preprocessing import MinMaxScaler
+
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        logger = _logger()
+        wins = []
+        for first in (MinMaxScaler(), MinMaxScaler()):
+            est = self.pipeline(first, mlp).fit(self.X, self.y)
+            logger._log_plain(est, self.X, self.y, 0.1)
+            wins.append(logger.viz.line.call_args.kwargs["win"])
+        self.assertNotEqual(wins[0], wins[1])
+
+    def test_an_unhashable_final_model_still_gets_its_curve(self):
+        class Unhashable(MLPClassifier):
+            def __eq__(self, other):
+                return self is other
+
+            __hash__ = None
+
+        model = Unhashable(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(model).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["Unhashable loss_curve_"])
+
+    def test_a_search_plots_its_refitted_models_curve(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp), {"mlpclassifier__alpha": [1e-4, 1e-2]}, cv=2
+        ).fit(self.X, self.y)
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        self.assertEqual(self.titles(logger), ["MLPClassifier loss_curve_"])
+
+    def test_a_search_without_refit_plots_no_curve(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp),
+            {"mlpclassifier__alpha": [1e-4, 1e-2]},
+            cv=2,
+            refit=False,
+        ).fit(self.X, self.y)
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        logger.viz.line.assert_not_called()
+
+    def test_a_stale_best_estimator_is_not_plotted_after_refit_false(self):
+        """sklearn keeps best_estimator_ from an earlier refit=True fit."""
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp), {"mlpclassifier__alpha": [1e-4, 1e-2]}, cv=2
+        ).fit(self.X, self.y)
+        search.set_params(refit=False).fit(self.X, self.y)
+        self.assertTrue(hasattr(search, "best_estimator_"))
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        logger.viz.line.assert_not_called()
 
 
 if __name__ == "__main__":
