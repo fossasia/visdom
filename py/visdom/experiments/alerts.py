@@ -563,9 +563,10 @@ class Alert:
 class AlertEvent:
     """A rule that has just fired, and the observation that fired it.
 
-    ``best`` is the stall watch's best value as it stood at that moment, read
-    off the rule here rather than when the text is built: the rule goes on
-    folding, and a later observation -- in the batch this event came out of,
+    ``best`` is the stall watch's best value as it stood at that moment, and
+    ``since_best`` how long it had gone unimproved; both are read off the
+    rule here rather than when the text is built, because the rule goes on
+    folding and a later observation -- in the batch this event came out of,
     even -- can improve it, leaving the notification quoting a best that was
     never the one the rule stalled against.
     """
@@ -574,10 +575,13 @@ class AlertEvent:
     value: Any
     step: Optional[int] = None
     best: Optional[float] = None
+    since_best: Optional[int] = None
 
     def __post_init__(self):
         if self.best is None:
             object.__setattr__(self, "best", self.alert.best)
+        if self.since_best is None:
+            object.__setattr__(self, "since_best", self.alert.since_best)
 
 
 def build_alert(
@@ -671,7 +675,14 @@ def observe(alert: Alert, value: Any, step: Optional[int] = None) -> bool:
 
     alert.fire_count += 1
     alert.last_fired_at = time.time()
-    alert.last_fired_step = step
+    # Only a step the record can be read back with. ``step`` is whatever the
+    # request that logged the metric sent, and :class:`Alert` refuses a
+    # stored one that is not a whole number -- so keeping a float here would
+    # write an experiment that raises on its next read, and logging,
+    # clearing a rule and finishing the run all read it first.
+    alert.last_fired_step = (
+        step if isinstance(step, int) and not isinstance(step, bool) else None
+    )
     return True
 
 
@@ -763,8 +774,13 @@ def describe(event: AlertEvent, env_id: Optional[str] = None) -> str:
 
     if alert.condition == CONDITION_STALLED:
         best = "" if event.best is None else " (best {0})".format(_written(event.best))
+        # The run the rule fired on, not ``patience``. A rule whose
+        # ``for_steps`` is over 1 goes on folding after the patience is
+        # spent -- it fires on the observation completing the streak,
+        # ``for_steps - 1`` observations later -- so naming the patience
+        # would report a shorter run than the one that went unimproved.
         return "{0}{1} has not improved in {2} observations{3}{4}".format(
-            where, alert.key, alert.patience, best, at
+            where, alert.key, event.since_best, best, at
         )
 
     held = (

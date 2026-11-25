@@ -542,6 +542,15 @@ class TestDebounce:
         assert alert.last_fired_step == 120
         assert alert.last_fired_at is not None
 
+    def test_a_step_the_record_could_not_read_back_is_not_kept(self):
+        # A step is whatever the request that logged the metric sent, and a
+        # stored rule refuses one that is not a whole number -- so keeping a
+        # float would leave an experiment that raises on its next read.
+        alert = build_alert("loss", "> 2.0")
+        assert feed(alert, [2.5], step=1.5) == [0]
+        assert alert.last_fired_step is None
+        assert Alert.from_dict(alert.to_dict()).last_fired_step is None
+
 
 # ---------------------------------------------------------------- evaluate --
 
@@ -591,8 +600,11 @@ class TestDescribe:
         )
 
     def test_a_stall_message_names_the_best_seen(self):
+        # Fired for real rather than assembled: the count in the text is the
+        # one the rule reached, so an event made by hand would prove nothing
+        # about what a notification says.
         alert = build_alert("acc", "stalled", patience=10, goal=GOAL_MAX)
-        feed(alert, [0.91])
+        feed(alert, [0.91] + [0.9] * 10, step=30)
         message = describe(AlertEvent(alert, 0.9, 30), env_id="run-7")
         assert message == (
             "run-7: acc has not improved in 10 observations (best 0.91) at step 30"
@@ -607,6 +619,22 @@ class TestDescribe:
         fired = evaluate(experiment, [("acc", 0.80), ("acc", 0.95)], step=2)
         assert describe(fired[0], env_id="run-7") == (
             "run-7: acc has not improved in 1 observations (best 0.9) at step 2"
+        )
+
+    def test_a_stall_message_counts_the_observations_it_waited(self):
+        # patience is when the rule starts matching; for_steps is how many
+        # matches it wants before firing. With both over one it fires later
+        # than the patience alone, and the text has to say how long the
+        # metric really sat rather than repeating the setting back.
+        alert = build_alert("acc", "stalled", for_steps=3, patience=2, goal=GOAL_MAX)
+        experiment = Record(alert)
+        evaluate(experiment, [("acc", 0.91)], step=1)
+        fired = []
+        for index in range(5):
+            fired += evaluate(experiment, [("acc", 0.9)], step=index + 2)
+        assert len(fired) == 1
+        assert describe(fired[0]) == (
+            "acc has not improved in 4 observations (best 0.91) at step 5"
         )
 
     def test_a_message_keeps_the_precision_that_made_the_rule_fire(self):
