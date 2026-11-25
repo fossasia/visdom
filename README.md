@@ -214,8 +214,11 @@ The following options can be provided to the server:
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
 10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
-11. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
-12. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
+11. `-allow_webhooks` : Let metric alert rules post to a webhook when they fire. Off by default, so an upgrade adds no outbound traffic until an operator asks for it; the hosts that may be reached still have to be named with `-webhook_hosts`.
+12. `-webhook_hosts` : Comma-separated hosts an alert webhook may be posted to, for example `hooks.slack.com,.example.com`. An entry with a leading dot matches that domain and its subdomains. Empty (the default) refuses every target, so this is required alongside `-allow_webhooks`.
+13. `-allow_local_webhooks` : Allow webhook targets that are loopback, link-local or private addresses. Refused by default, which is what keeps a rule from reading a cloud metadata service; it does not skip `-webhook_hosts`.
+14. `-internal_port` : A second port for the endpoints a gateway calls: `/_activity` and `/_metrics` to read, `/_evict` to close a workspace's sockets, `/_retire` to remove a workspace's environments older than a given number of days (a dry run unless asked otherwise), and `/_drop` to remove a whole workspace. They are not served at all without it, and never on the main port.
+15. `-internal_ssl_certfile` and `-internal_ssl_keyfile` : The certificate and key the internal port is served with. Both are required with `-internal_port`, which never answers plain HTTP. A self-signed certificate is enough when the caller pins it, for example with `openssl req -x509 -newkey rsa:3072 -nodes -days 730 -subj "/CN=visdom-internal" -keyout internal.key -out internal.crt`.
 
 The internal port only answers signed requests, except that `/_metrics` also answers a metrics token. Set the keys in the environment, comma separated so one can be replaced while the old one still works:
 
@@ -437,6 +440,9 @@ Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots
 - [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
 - [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over the selected runs
 - [`vis.update_hparams`](#visupdate_hparams)  : change or refresh an existing hyper-parameter pane
+- [`vis.set_alert`](#visset_alert)  : watch a metric and be notified when a rule about it holds
+- [`vis.list_alerts`](#vislist_alerts)  : read an env's alert rules and how often each has fired
+- [`vis.clear_alert`](#visclear_alert)  : stop watching a metric
 
 
 ## Loggers
@@ -1825,6 +1831,51 @@ Arguments:
 - `opts`: Overrides the pane's title/size; when omitted the current ones are kept.
 
 Returns the window id.
+
+#### vis.set_alert
+
+This function watches one of an env's metrics and has the server notify you when a rule about it holds. The rule is evaluated where the observations arrive, so it is `log_metrics` that fires it — a run that logs nothing never does — and it costs that call a comparison against the rule rather than a read of the metric history.
+
+```python
+vis.set_alert("val_loss", "> 2.0", for_steps=3)
+vis.set_alert("accuracy", "stalled", patience=10, goal="max")
+vis.set_alert("loss", "nan", message="the loss diverged")
+vis.set_alert("loss", "nan", action="webhook", url="https://hooks.slack.com/services/...")
+```
+
+Arguments:
+- `metric`: The name of the metric to watch, as it is logged.
+- `condition`: One of five, and nothing else is evaluated:
+  - `"> <number>"`, `"< <number>"`, `"== <number>"` compare each observation against a constant. `>=` and `<=` are not accepted — write the threshold a step over instead.
+  - `"nan"` fires on an observation that is not a finite number — a `NaN` or an infinity, and the `null` those become on the wire, since standard JSON cannot spell either. A threshold cannot catch them: every comparison against `NaN` is false, so a diverged loss slips past `> 2.0` unnoticed.
+  - `"stalled"` fires when the metric has not improved for `patience` observations.
+- `for_steps`: How many consecutive observations of `metric` the condition has to hold for before the rule fires. Defaults to `1`. A rule fires on the observation that completes its streak and not again until the streak breaks, so a metric that sits over its threshold for an hour is one notification rather than one per observation.
+- `patience`: Observations without an improvement before `stalled` fires. Defaults to `10`, and applies to that condition alone.
+- `goal`: Which direction counts as an improvement for `stalled`, `"min"` (the default, for a loss) or `"max"` (for an accuracy). Applies to that condition alone.
+- `action`: How the firing is delivered. `"toast"` (the default) is a notification in every browser watching that environment. `"webhook"` POSTs the firing as JSON to `url` instead, which is the one that reaches you when no browser is open.
+- `url`: Where a `"webhook"` rule posts to, `http` or `https`. Required by that action and refused by `"toast"`, which posts nowhere. The server makes the request, so where it may post is the operator's decision, not the rule author's: a webhook rule is refused with `403` unless the server was started with `-allow_webhooks` and the url's host is named in `-webhook_hosts`. Loopback, link-local and private addresses are refused on top of that unless it was also started with `-allow_local_webhooks`.
+- `message`: Replaces the generated text with one of your own, in the toast and in the webhook body alike.
+- `env`: Environment whose metrics to watch. Defaults to the client's env.
+
+Setting the same metric and condition again replaces that rule and resets its streak; a metric may carry several rules of different conditions at once. An environment is limited to 20 rules. Returns the environment's complete rule list.
+
+Rules live on the experiment record, so they are persisted, forked and restored with the environment, and a restarted server picks up a streak where it left off. A finished experiment refuses a new rule — it will record no further observations, so the rule could never fire.
+
+#### vis.list_alerts
+
+This function returns an env's alert rules, each with the state behind it: what it watches, how many times it has fired (`fire_count`), and the step it last fired at (`last_fired_step`). So a finished run can be asked whether an alert ever went off, rather than only being told at the time. An env with no rules returns an empty list.
+
+Arguments:
+- `env`: Environment whose rules to read. Defaults to the client's env.
+
+#### vis.clear_alert
+
+This function stops watching a metric and returns the remaining rules. Every rule on `metric` is dropped unless `condition` names one of them, written either as it was set (`"> 2.0"`) or as the bare condition (`">"`). Clearing a rule that was never set is not an error, and is allowed on a finished run.
+
+Arguments:
+- `metric`: The watched metric to stop watching.
+- `condition`: Optionally, which of its rules to drop.
+- `env`: Environment whose rule to clear. Defaults to the client's env.
 
 ## Customizing Visdom
 The user config directory for visdom is

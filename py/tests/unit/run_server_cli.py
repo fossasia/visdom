@@ -163,6 +163,27 @@ def test_the_switch_flags_are_forwarded(started):
     assert kwargs["use_frontend_client_polling"] is True
 
 
+def test_the_webhook_flags_default_to_refusing(started):
+    # The default matters more than the forwarding: an upgrade must not give
+    # an existing server a way to make outbound requests.
+    kwargs = started()
+    assert kwargs["allow_webhooks"] is False
+    assert kwargs["webhook_hosts"] == ""
+    assert kwargs["allow_local_webhooks"] is False
+
+
+def test_the_webhook_flags_are_forwarded(started):
+    kwargs = started(
+        "-allow_webhooks",
+        "-webhook_hosts",
+        "hooks.example.com,.internal.example",
+        "-allow_local_webhooks",
+    )
+    assert kwargs["allow_webhooks"] is True
+    assert kwargs["webhook_hosts"] == "hooks.example.com,.internal.example"
+    assert kwargs["allow_local_webhooks"] is True
+
+
 def test_the_internal_port_is_off_unless_given(started):
     assert started()["internal_port"] is None
 

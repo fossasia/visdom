@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tornado.ioloop
 
 from visdom.server.defaults import MAX_SOCKET_WAIT
+from visdom.server.webhooks import WebhookPolicy
 from visdom.utils.server_utils import run_on_storage_executor, snapshot_env
 from visdom.utils.shared_utils import warn_once
 
@@ -73,6 +74,10 @@ class StateAccessorsMixin:
     @property
     def readonly(self):
         return self.server_state.readonly
+
+    @property
+    def webhook_policy(self):
+        return self.server_state.webhook_policy
 
     @property
     def wrap_socket(self):
@@ -145,6 +150,7 @@ class ServerState:
         max_plot_history,
         save_interval,
         save_threshold,
+        webhook_policy=None,
     ):
         # Shared mutable containers (passed by reference, never rebound here).
         self.state = state
@@ -167,6 +173,12 @@ class ServerState:
         self.max_plot_history = max_plot_history
         self.save_interval = save_interval
         self.save_threshold = save_threshold
+        # Defaulted rather than required so that a server built without one
+        # refuses webhooks instead of failing to start: the policy that says
+        # no to everything is the one an operator who set no flags asked for.
+        self.webhook_policy = (
+            WebhookPolicy() if webhook_policy is None else webhook_policy
+        )
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go

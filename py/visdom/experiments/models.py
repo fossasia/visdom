@@ -27,6 +27,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from visdom.experiments.alerts import Alert, MAX_ALERTS_PER_ENV
+
 STATUS_RUNNING = "running"
 STATUS_FINISHED = "finished"
 STATUS_FAILED = "failed"
@@ -319,6 +321,11 @@ class Experiment:
     ``metrics`` and ``tags`` are held as typed lists but are keyed by name in
     practice, so :meth:`set_param`/:meth:`set_tag` replace-or-append while
     :meth:`add_metric` always appends (metrics form a time series).
+
+    ``alerts`` are the rules watching those metrics. They are keyed by metric
+    *and* condition, so one metric may carry a threshold rule and a stall
+    watch at once, and they are stored here rather than anywhere else because
+    a rule's running state has to survive a restart and travel with a fork.
     """
 
     env_id: str
@@ -330,6 +337,7 @@ class Experiment:
     params: list[Param] = field(default_factory=list)
     metrics: Sequence[Metric] = field(default_factory=list)
     tags: list[Tag] = field(default_factory=list)
+    alerts: list[Alert] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.name:
@@ -406,6 +414,51 @@ class Experiment:
         self.tags.append(tag)
         return tag
 
+    def set_alert(self, alert: Alert) -> Alert:
+        """Attach ``alert``, replacing any rule with the same identity.
+
+        A repeat of the same metric and condition replaces the rule rather
+        than adding a second one, and the replacement starts from a clean
+        state: re-stating a rule is how a caller changes its threshold, and
+        carrying the old streak over would judge the new rule by observations
+        the old one saw.
+        """
+        for i, existing in enumerate(self.alerts):
+            if existing.rule_id == alert.rule_id:
+                self.alerts[i] = alert
+                return alert
+        if len(self.alerts) >= MAX_ALERTS_PER_ENV:
+            raise ValueError(
+                "an environment is limited to {0} alert rules".format(
+                    MAX_ALERTS_PER_ENV
+                )
+            )
+        self.alerts.append(alert)
+        return alert
+
+    def get_alerts(self, key: Optional[str] = None) -> list[Alert]:
+        """This experiment's rules, or only those watching ``key``."""
+        if key is None:
+            return list(self.alerts)
+        return [alert for alert in self.alerts if alert.key == key]
+
+    def clear_alerts(self, key: str, condition: Optional[str] = None) -> int:
+        """Drop ``key``'s rules; return how many were removed.
+
+        Without a ``condition`` every rule watching that metric goes, which is
+        what a caller who set one rule means and what a caller who set three
+        means too. With one, only that rule goes.
+        """
+        kept = [
+            alert
+            for alert in self.alerts
+            if alert.key != key
+            or (condition is not None and alert.condition != condition)
+        ]
+        removed = len(self.alerts) - len(kept)
+        self.alerts = kept
+        return removed
+
     def is_terminal(self) -> bool:
         """True if the experiment is in a terminal state (finished/failed)."""
         return self.status in (STATUS_FINISHED, STATUS_FAILED)
@@ -450,6 +503,7 @@ class Experiment:
             "params": [p.to_dict() for p in self.params],
             "metrics": metric_data,
             "tags": [t.to_dict() for t in self.tags],
+            "alerts": [a.to_dict() for a in self.alerts],
         }
 
     @classmethod
@@ -478,4 +532,5 @@ class Experiment:
             params=[Param.from_dict(p) for p in data.get("params", [])],
             metrics=metrics,
             tags=[Tag.from_dict(t) for t in data.get("tags", [])],
+            alerts=[Alert.from_dict(a) for a in data.get("alerts", [])],
         )
