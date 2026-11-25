@@ -79,14 +79,53 @@ def _same_value(a: Any, b: Any) -> bool:
     ``amp=1``; :mod:`~visdom.experiments.query` draws the same line by refusing to
     treat a bool as a number. Looser than ``==`` about NaN, which is never equal
     to itself: a metric that is NaN in every run agrees across them, and calling
-    that a difference would bury the real ones.
+    that a difference would bury the real ones. Apply these rules inside
+    lists, tuples, sets and dictionaries with an iterator stack, so deeply nested settings
+    follow the same policy without consuming the Python call stack.
     """
-    if isinstance(a, bool) != isinstance(b, bool):
-        return False
-    if isinstance(a, float) and isinstance(b, float):
-        if math.isnan(a) and math.isnan(b):
-            return True
-    return bool(a == b)
+    comparisons = [iter(((a, b),))]
+    while comparisons:
+        pair = next(comparisons[-1], None)
+        if pair is None:
+            comparisons.pop()
+            continue
+        a, b = pair
+        if a is b and isinstance(a, (list, tuple, set, frozenset, dict)):
+            continue
+        if isinstance(a, bool) != isinstance(b, bool):
+            return False
+        if (isinstance(a, list) and isinstance(b, list)) or (
+            isinstance(a, tuple) and isinstance(b, tuple)
+        ):
+            if len(a) != len(b):
+                return False
+            comparisons.append(zip(a, b))
+        elif isinstance(a, (set, frozenset)) and isinstance(b, (set, frozenset)):
+            if len(a) != len(b):
+                return False
+            unmatched = list(b)
+            for item in a:
+                for index, candidate in enumerate(unmatched):
+                    if _same_value(item, candidate):
+                        unmatched.pop(index)
+                        break
+                else:
+                    return False
+        elif isinstance(a, dict) and isinstance(b, dict):
+            if a.keys() != b.keys():
+                return False
+            # Match values in a's key order, regardless of b's insertion order.
+            comparisons.append(zip(a.values(), map(b.__getitem__, a)))
+        elif (
+            isinstance(a, float)
+            and isinstance(b, float)
+            and math.isnan(a)
+            and math.isnan(b)
+        ):
+            continue
+        elif not bool(a == b):
+            return False
+    return True
 
 
 def _group_values(present: dict) -> list:
