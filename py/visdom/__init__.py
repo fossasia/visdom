@@ -1129,6 +1129,11 @@ class Visdom(object):
         # embed does -- has a 404 to show otherwise, and nothing but this to
         # tell it apart from a dashboard that is simply empty.
         self._env_registered = False
+        # The status of the last POST this client sent, or None when the
+        # send never reached a response -- a subclass with its own
+        # _handle_post, or a connection that failed. Only _register_env
+        # reads it, and only immediately after its own send.
+        self._last_post_status = None
         self.env = (
             env.replace("/", "_")
             .replace("\\", "_")
@@ -1567,9 +1572,17 @@ class Visdom(object):
         notices -- the notebook magic, whose frame would show the ``404`` --
         has to be able to ask again rather than carry the failure for the life
         of the process.
+
+        An answer is not an agreement: a server that is up but cannot take
+        the environment yet -- starting, overloaded, read only -- answers the
+        POST with an error status and a body, which ``_send`` hands back like
+        any other body. Taking that for a registration is the failure this
+        method exists to avoid, so the status has to say so too.
         """
+        self._last_post_status = None
         result = self._send({"eid": env}, endpoint="env/" + env)
-        self._env_registered = result is not False
+        status = self._last_post_status
+        self._env_registered = result is not False and (status is None or status < 400)
         return self._env_registered
 
     def _handle_post(self, url, data=None):
@@ -1584,6 +1597,7 @@ class Visdom(object):
         had_session = self._session is not None
         try:
             r = self.session.post(url, data=data, timeout=self.post_timeout)
+            self._last_post_status = r.status_code
             self._note_refusal(r.status_code, r.text)
             return r.text
         except requests.exceptions.SSLError:
@@ -1600,6 +1614,7 @@ class Visdom(object):
                     pass
                 self._session = None
             r = self.session.post(url, data=data, timeout=self.post_timeout)
+            self._last_post_status = r.status_code
             self._note_refusal(r.status_code, r.text)
             return r.text
 

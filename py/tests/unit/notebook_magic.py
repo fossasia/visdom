@@ -478,6 +478,49 @@ class TestTheRealClient:
 
         assert posted == ["http://localhost:8097/env/run-7"] * 2
 
+    def test_an_error_status_is_not_a_registration(self, monkeypatch):
+        # A server that is up but cannot take the environment yet answers
+        # with a status and a body. The body is what _send hands back, so
+        # the registration only counts if the status agrees.
+        class _Reply:
+            status_code = 503
+            text = "visdom server is starting"
+
+        class _Session:
+            def post(self, url, data=None, timeout=None):
+                return _Reply()
+
+        monkeypatch.setattr(visdom.Visdom, "session", property(lambda self: _Session()))
+
+        assert self._build()._env_registered is False
+
+    def test_an_error_answer_is_asked_again_and_a_good_one_is_not(self, monkeypatch):
+        # The whole point of retrying through the cache: the 503 run leaves
+        # the env uncreated, the next run creates it, and the run after that
+        # has nothing left to ask for.
+        statuses = [503, 200]
+        posted = []
+
+        class _Reply:
+            def __init__(self, status):
+                self.status_code = status
+                self.text = "visdom server is starting" if status >= 400 else ""
+
+        class _Session:
+            def post(self, url, data=None, timeout=None):
+                posted.append(url)
+                return _Reply(statuses.pop(0) if statuses else 200)
+
+        monkeypatch.setattr(visdom.Visdom, "session", property(lambda self: _Session()))
+        monkeypatch.setattr(notebook, "_NotebookClient", _REAL_CLIENT)
+
+        for _ in range(3):
+            notebook.visdom_magic("--env run-7")
+
+        assert posted == ["http://localhost:8097/env/run-7"] * 2
+        [client] = notebook._clients.values()
+        assert client._env_registered is True
+
     def test_the_registration_post_cannot_hold_the_cell_open(self, monkeypatch):
         timeouts = []
 
