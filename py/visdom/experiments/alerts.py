@@ -20,7 +20,9 @@ A condition is a **fixed enum with a numeric operand**, never an expression:
 observation that is not a finite number -- including the ``null`` a NaN
 becomes on the wire -- and ``stalled`` catches a metric that has stopped
 improving. :func:`parse_condition` is the only thing that reads the operand,
-and it reads it with ``float()``; nothing here evaluates user text.
+and it reads it with ``int()`` or ``float()`` -- an integer operand stays an
+integer, because ``float()`` would round the very value the rule names;
+nothing here evaluates user text.
 
 Evaluation is a fold, not a query. Every rule carries its own running state
 -- the streak of matching observations, the best value seen so far, how many
@@ -42,7 +44,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 CONDITION_GT = ">"
 CONDITION_LT = "<"
@@ -76,6 +78,12 @@ MAX_MESSAGE_LENGTH = 200
 # and interned values a threshold is actually written against (``== 0``) and
 # the wrong one for everything else. Documented rather than fudged with a
 # tolerance nobody asked for: ``>``/``<`` is what a real-valued metric wants.
+#
+# Which is also why an integer stays an integer everywhere below -- in the
+# operand the grammar reads, in the field the rule stores and in the
+# observation it is compared against. ``float()`` is lossy past 2**53, so
+# ``== 9007199254740993`` would otherwise be stored, reloaded and compared as
+# 9007199254740992: a rule watching the integer next to the one written.
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -84,8 +92,8 @@ def _is_finite_number(value: Any) -> bool:
     A ``bool`` is excluded so that ``True`` does not compare as ``1``, and an
     integer too wide to become a float is excluded rather than raising --
     JSON puts no bound on integer length, so an observation can hold one, and
-    both ``math.isfinite`` and the conversion below would otherwise raise
-    ``OverflowError`` out of a request. The same exclusion
+    ``math.isfinite`` would otherwise raise ``OverflowError`` out of a
+    request rather than answering. The same exclusion
     :func:`~visdom.experiments.store._is_number` makes, for the same reason.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -96,19 +104,21 @@ def _is_finite_number(value: Any) -> bool:
         return False
 
 
-def _as_number(value: Any) -> Optional[float]:
-    """``value`` as a float, or ``None`` if it is not a finite number.
+def _as_number(value: Any) -> Optional[Union[int, float]]:
+    """``value`` as the number it is, or ``None`` if it is not a finite one.
 
     A metric logged as a string, a ``None`` or a ``NaN`` cannot be over or
     under a threshold, and saying so here keeps every condition free of the
     question.
+
+    An integer comes back as itself rather than as ``float(value)``: a
+    threshold that was kept exact is of no use if the observation it is
+    compared against is rounded on the way in, and the comparison operators
+    are exact across the two types anyway.
     """
     if not _is_finite_number(value):
         return None
-    try:
-        return float(value)
-    except OverflowError:  # pragma: no cover - _is_finite_number refuses these
-        return None
+    return value
 
 
 def _is_diverged(value: Any) -> bool:
@@ -163,11 +173,14 @@ def _counter(value: Any, field_name: str) -> int:
     return value
 
 
-def _optional_number(value: Any, field_name: str) -> Optional[float]:
-    """``value`` as a finite float, or ``None``; anything else raises.
+def _optional_number(value: Any, field_name: str) -> Optional[Union[int, float]]:
+    """``value`` as a finite number, or ``None``; anything else raises.
 
     A remembered value and a timestamp are either absent or a number that can
-    be compared with another one.
+    be compared with another one. An integer is left as one, for the reason
+    the threshold is: ``best`` is an observation that was written to the
+    record, and rounding it on the way back in would have the stall watch
+    comparing against a value the series never held.
     """
     if value is None:
         return None
@@ -175,7 +188,7 @@ def _optional_number(value: Any, field_name: str) -> Optional[float]:
         raise ValueError(
             "{0} must be a finite number or absent, got {1!r}".format(field_name, value)
         )
-    return float(value)
+    return value if isinstance(value, int) else float(value)
 
 
 def _optional_int(value: Any, field_name: str) -> Optional[int]:
@@ -192,13 +205,33 @@ def _optional_int(value: Any, field_name: str) -> Optional[int]:
     return value
 
 
+def _written_number(operand: str) -> Union[int, float]:
+    """The number written in ``operand``, as the kind of number it is written as.
+
+    An integer literal comes back as an ``int``. ``float()`` is lossy past
+    sixteen digits -- ``float("9007199254740993")`` is ``9007199254740992.0``
+    -- and a threshold is the one number in a rule that is written rather
+    than measured, so rounding it hands its author a rule watching the
+    integer beside the one they typed. Anything else is a ``float``, which is
+    what a metric usually is.
+
+    ``ValueError`` out of either conversion is the caller's to report, which
+    is where the operand it was read out of is still in hand.
+    """
+    try:
+        return int(operand)
+    except ValueError:
+        return float(operand)
+
+
 def parse_condition(text: Any) -> tuple:
     """Split a written condition into ``(condition, threshold)``.
 
     The spelling a caller writes is the one in the docs --
     ``"> 2.0"``, ``"< 0.5"``, ``"== 0"``, ``"nan"``, ``"stalled"`` -- and this
-    is the only place it is read. The operand goes through ``float()``, so the
-    worst a hostile condition can be is a ``ValueError``.
+    is the only place it is read. The operand goes through ``int()`` or
+    ``float()`` and nothing else, so the worst a hostile condition can be is
+    a ``ValueError``; an integer one keeps every digit it was written with.
 
     ``>=`` and ``<=`` are deliberately absent rather than silently accepted as
     ``>``: a rule that fires on exactly the threshold is a different rule, and
@@ -233,13 +266,18 @@ def parse_condition(text: Any) -> tuple:
                 "for example {0!r} 2.0".format(operator)
             )
         try:
-            threshold = float(operand)
+            threshold = _written_number(operand)
         except ValueError:
             raise ValueError("{0!r} is not a number to compare against".format(operand))
-        if not math.isfinite(threshold):
+        # Not ``math.isfinite``, which raises ``OverflowError`` rather than
+        # answering for an integer too wide to become a float -- a 400-digit
+        # operand is a number no observation can reach, and it is refused
+        # here for the same reason an infinite one is.
+        if not _is_finite_number(threshold):
             raise ValueError(
-                "a threshold must be finite, got {0!r}; use the 'nan' "
-                "condition to catch a non-finite metric".format(operand)
+                "a threshold must be a finite number an observation can "
+                "reach, got {0!r}; use the 'nan' condition to catch a "
+                "metric that is not a finite number".format(operand)
             )
         return operator, threshold
 
@@ -331,7 +369,12 @@ class Alert:
                     "condition {0!r} needs a finite number to compare "
                     "against, got {1!r}".format(self.condition, self.threshold)
                 )
-            self.threshold = float(self.threshold)
+            # An integer is left alone rather than floated: it is already
+            # exact, and the rounding would land in the stored record and be
+            # redone on every load, so the rule would watch the wrong integer
+            # for good rather than only in the comparison.
+            if not isinstance(self.threshold, int):
+                self.threshold = float(self.threshold)
         elif self.threshold is not None:
             raise ValueError(
                 "condition {0!r} compares against nothing, so it takes no "
