@@ -18,7 +18,6 @@ const {
 
 const envmodal = 'div[aria-label="Environment Management Modal"] ';
 const envbutton = 'button[title="Manage Environments"] ';
-const envselecttrigger = envmodal + 'button.env-select-trigger';
 const envselectpanel = envmodal + '#env-select-panel';
 const viewmodal = 'div[aria-label="Layout Views Management Modal"] ';
 const viewbutton = 'button[title="Manage Views"] ';
@@ -30,23 +29,6 @@ async function dragMouse(page, locator, clientX, clientY) {
   await page.mouse.down();
   await page.mouse.move(clientX, clientY);
   await page.mouse.up();
-}
-
-async function openEnvSelect(page) {
-  const panel = page.locator(envselectpanel);
-  if (!(await panel.isVisible())) {
-    await page.locator(envselecttrigger).click();
-    await panel.waitFor({ state: 'visible' });
-  }
-  return panel;
-}
-
-async function closeEnvSelect(page) {
-  const panel = page.locator(envselectpanel);
-  if (await panel.isVisible()) {
-    await page.locator(envselecttrigger).click();
-    await panel.waitFor({ state: 'detached' });
-  }
 }
 
 function paneByTitle(page, title) {
@@ -68,6 +50,39 @@ test.describe.serial('Test Env Modal', () => {
     await expect(page.locator(envmodal)).toBeVisible();
     await page.locator(envmodal).press('Escape');
     await expect(page.locator(envmodal)).toHaveCount(0);
+  });
+
+  test('tag rows fit a narrow dialog and identify missing names', async ({
+    page,
+  }) => {
+    await page.locator(envbutton).click();
+    await page.setViewportSize({ width: 360, height: 640 });
+    const dialog = page.locator(envmodal);
+    await dialog.getByRole('button', { name: 'Tags', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Add Tag' }).click();
+    const name = dialog.getByLabel(/^Tag name /).last();
+    await dialog
+      .getByLabel(/^Tag value /)
+      .last()
+      .fill('1234');
+    await expect(name).toHaveAttribute('aria-invalid', 'true');
+    await expect(dialog.getByRole('alert')).toContainText('without a tag name');
+    await expect(
+      dialog.getByRole('button', { name: 'Update Tags' })
+    ).toBeDisabled();
+    expect(
+      await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)
+    ).toBe(true);
+    await name.fill('run');
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Add Tag' }).click();
+    await dialog
+      .getByLabel(/^Remove tag /)
+      .last()
+      .click();
+    await expect(name).toHaveValue('run');
+    await dialog.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(dialog).toHaveCount(0);
   });
 
   test('Env Modal forks envs', async ({ page }) => {
@@ -118,20 +133,18 @@ test.describe.serial('Test Env Modal', () => {
     ).toContainText('Changed text.');
   });
 
-  test('Env delete selector opens as a dropdown and keeps hidden picks', async ({
+  test('Delete shows the list and keeps selections across filters', async ({
     page,
   }) => {
     await page.locator(envbutton).click();
 
-    // the list stays collapsed until the trigger is clicked
-    await expect(page.locator(envselectpanel)).toHaveCount(0);
-    await expect(page.locator(envselecttrigger)).toContainText(
-      'Select environments to delete'
-    );
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
 
-    await openEnvSelect(page);
+    await expect(page.locator(envselectpanel)).toBeVisible();
+    await expect(
+      page.getByRole('checkbox', { name: /main.*protected/i })
+    ).toBeDisabled();
     const filterInput = page.getByLabel('Filter environments');
-    await expect(filterInput).toBeFocused();
 
     // a pick made under one filter survives a different filter
     await filterInput.fill(env + '_fork2');
@@ -149,8 +162,16 @@ test.describe.serial('Test Env Modal', () => {
     await expect(page.locator(envselectpanel)).toContainText(
       '1 hidden by the filter'
     );
-    await expect(page.locator(envselecttrigger)).toContainText(env + '_fork2');
-    await expect(page.locator(envselecttrigger)).toContainText(env + '_fork3');
+
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(
+      page.getByRole('button', { name: 'Delete Selected' })
+    ).toBeInViewport();
+    expect(
+      await page
+        .locator(envmodal)
+        .evaluate((el) => el.scrollWidth <= el.clientWidth)
+    ).toBe(true);
 
     // arrow keys step through Select All as well as the options
     await filterInput.press('ArrowDown');
@@ -162,20 +183,6 @@ test.describe.serial('Test Env Modal', () => {
     await page.keyboard.press('ArrowUp');
     await expect(page.getByLabel('Select All')).toBeFocused();
 
-    // shift+tab hands focus to the trigger; escape still closes the dropdown
-    await filterInput.press('Shift+Tab');
-    await expect(page.locator(envselecttrigger)).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(page.locator(envselectpanel)).toHaveCount(0);
-    await expect(page.locator(envmodal)).toBeVisible();
-    await openEnvSelect(page);
-
-    // escape closes the dropdown only; the modal stays open
-    await filterInput.press('Escape');
-    await expect(page.locator(envselectpanel)).toHaveCount(0);
-    await expect(page.locator(envmodal)).toBeVisible();
-    await expect(page.locator(envselecttrigger)).toBeFocused();
-
     await page.locator(envmodal).press('Escape');
     await expect(page.locator(envmodal)).toHaveCount(0);
   });
@@ -183,7 +190,7 @@ test.describe.serial('Test Env Modal', () => {
   test('Remove Env', async ({ page }) => {
     // filter to one environment and delete it individually
     await page.locator(envbutton).click();
-    await openEnvSelect(page);
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
     const filterInput = page.getByLabel('Filter environments');
     await filterInput.fill(env + '_fork2');
     await expect(
@@ -195,7 +202,6 @@ test.describe.serial('Test Env Modal', () => {
     await page
       .locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
       .check();
-    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(
@@ -205,9 +211,7 @@ test.describe.serial('Test Env Modal', () => {
     ).toBeVisible();
 
     // Select env before filtering to verify it remains checked across filter
-    // operations. The filter and the checkboxes live inside the dropdown, so
-    // it has to be open before either can be reached.
-    await openEnvSelect(page);
+    // operations.
     await filterInput.fill('');
     await page
       .locator(envmodal + `input[type="checkbox"][value="${env}"]`)
@@ -264,7 +268,6 @@ test.describe.serial('Test Env Modal', () => {
       page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
     ).not.toBeChecked();
 
-    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(
@@ -274,14 +277,12 @@ test.describe.serial('Test Env Modal', () => {
     ).toBeVisible();
 
     // deleting the active environment falls back to main without closing
-    await openEnvSelect(page);
     await filterInput.fill(env);
     const activeEnvCheckbox = page.locator(
       envmodal + `input[type="checkbox"][value="${env}"]`
     );
     await expect(activeEnvCheckbox).toBeVisible();
     await activeEnvCheckbox.check();
-    await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();
     await expect(page.getByLabel('Environment name')).toHaveValue('main');

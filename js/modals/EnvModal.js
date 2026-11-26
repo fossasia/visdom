@@ -9,26 +9,22 @@
 
 import './EnvModal.css';
 
+import { Folder, Tags, Trash2 } from 'lucide-react';
 import React, { useContext, useEffect, useState } from 'react';
 import ReactModal from 'react-modal';
 
 import ApiContext from '../api/ApiContext';
-import { MODAL_STYLE } from '../settings';
 import { showToast } from '../toasts/toastEvents';
-import EnvSelectDropdown from './EnvSelectDropdown';
+import EnvDeleteList from './EnvDeleteList';
+
+const TASKS = [
+  { label: 'General', Icon: Folder },
+  { label: 'Tags', Icon: Tags },
+  { label: 'Delete', Icon: Trash2 },
+];
 
 const MAX_TAG_NAME_LENGTH = 50;
 const MAX_TAGS_PER_ENV = 20;
-const ENV_MODAL_STYLE = {
-  ...MODAL_STYLE,
-  content: {
-    ...MODAL_STYLE.content,
-    maxHeight: 'calc(100vh - 40px)',
-    overflowY: 'auto',
-    width: 'min(760px, calc(100vw - 40px))',
-  },
-};
-
 let nextTagRowID = 0;
 const createTagRow = (name = '', value = '') => ({
   id: `environment-tag-${nextTagRowID++}`,
@@ -57,6 +53,7 @@ function EnvModal(props) {
   // -------
 
   // change input / select value when activeEnv changes
+  const [task, setTask] = useState('General');
   const [inputText, setInputText] = useState(activeEnv);
   const [tagEnv, setTagEnv] = useState(activeEnv);
   const [tagRows, setTagRows] = useState([]);
@@ -71,6 +68,7 @@ function EnvModal(props) {
   }, [activeEnv, show]);
 
   useEffect(() => {
+    setTask('General');
     setSelectedEnvs([]);
   }, [show]);
 
@@ -145,242 +143,279 @@ function EnvModal(props) {
       onRequestClose={onModalClose}
       contentLabel="Environment Management Modal"
       ariaHideApp={false}
-      style={ENV_MODAL_STYLE}
+      className="env-manager"
+      overlayClassName="env-manager-overlay"
     >
-      <span className="visdom-title">Manage Environments</span>
-      <br />
-      Save or fork current environment:
-      <br />
-      <div className="form-inline">
-        <input
-          aria-label="Environment name"
-          className="form-control"
-          type="text"
-          value={inputText}
-          onChange={(ev) => {
-            setInputText(ev.target.value);
-          }}
-        />
+      <header className="env-manager-header">
+        <h2>Manage Environments</h2>
         <button
-          className="btn btn-default"
-          disabled={!(canWrite && inputText && inputText.length > 0)}
-          onClick={() => onEnvSave(inputText)}
-        >
-          {envList.indexOf(inputText) >= 0 ? 'save' : 'fork'}
-        </button>
-      </div>
-      <br />
-      <div className="env-delete-heading">
-        <span>Select environments to delete:</span>
-        <span className="env-delete-hint">
-          {selectedEnvs.length === 0
-            ? 'Pick one or more environments below.'
-            : `${selectedEnvs.length} environment${
-                selectedEnvs.length === 1 ? '' : 's'
-              } will be removed permanently.`}
-        </span>
-      </div>
-      <EnvSelectDropdown
-        activeEnv={activeEnv}
-        disabled={!canWrite}
-        envList={envList}
-        onChange={setSelectedEnvs}
-        resetToken={show}
-        selectedEnvs={selectedEnvs}
-      />
-      <div className="env-delete-row">
-        <button
-          className="btn btn-danger"
-          disabled={
-            !canWrite ||
-            selectedEnvs.length === 0 ||
-            selectedEnvsSet.has('main')
-          }
-          onClick={() => {
-            const deletedEnvs = [...selectedEnvs];
-            // push active env at last to prevent breaking the queue
-            let sortedEnvs = deletedEnvs.filter((env) => env !== activeEnv);
-            if (selectedEnvsSet.has(activeEnv)) {
-              sortedEnvs.push(activeEnv);
-            }
-            const requestedDeletions = onEnvDelete(sortedEnvs, activeEnv);
-            if (requestedDeletions.length === 0) {
-              showToast(
-                'Unable to delete environments because the server connection is unavailable.',
-                'error'
-              );
-              return;
-            }
-            const requestedDeletionSet = new Set(requestedDeletions);
-            const failedDeletions = deletedEnvs.filter(
-              (env) => !requestedDeletionSet.has(env)
-            );
-            if (
-              requestedDeletionSet.has(tagEnv) &&
-              !requestedDeletionSet.has(activeEnv)
-            ) {
-              setTagEnv(activeEnv || 'main');
-              setTagSaveStatus('idle');
-              setTagSaveError('');
-            }
-            setSelectedEnvs(failedDeletions);
-            if (failedDeletions.length > 0) {
-              showToast(
-                'Some environment deletion requests could not be sent.',
-                'error'
-              );
-              return;
-            }
-            showToast(
-              deletedEnvs.length === 1
-                ? `Successfully deleted environment "${deletedEnvs[0]}".`
-                : `Successfully deleted ${deletedEnvs.length} environments.`,
-              'success'
-            );
-          }}
+          className="env-close"
           type="button"
+          aria-label="Close dialog"
+          onClick={onModalClose}
         >
-          Delete Selected
+          ×
         </button>
-      </div>
-      <hr className="env-modal-divider" />
-      <span className="visdom-title">Manage Tags</span>
-      <br />
-      Add optional key/value tags to an environment:
-      <br />
-      <div style={{ marginTop: '8px' }}>
-        <select
-          aria-label="Tag environment"
-          className="form-control"
-          disabled={!connected || tagSaveStatus === 'saving'}
-          value={tagEnv || ''}
-          onChange={(ev) => {
-            setTagEnv(ev.target.value);
-            setTagSaveStatus('idle');
-            setTagSaveError('');
-          }}
-          style={{ marginBottom: '8px' }}
-        >
-          {envList.map((env) => (
-            <option key={env} value={env}>
-              {env}
-            </option>
+      </header>
+      <div className="env-manager-body">
+        <nav className="env-task-nav" aria-label="Environment tasks">
+          {TASKS.map(({ label, Icon }) => (
+            <button
+              key={label}
+              type="button"
+              aria-current={task === label ? 'page' : undefined}
+              onClick={() => setTask(label)}
+            >
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </button>
           ))}
-        </select>
-
-        {tagRows.length === 0 && (
-          <div style={{ color: '#777', marginBottom: '8px' }}>
-            This environment has no tags.
-          </div>
-        )}
-
-        {tagRows.map((row, index) => (
-          <div
-            className="form-inline"
-            key={row.id}
-            style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}
-          >
+        </nav>
+        <section hidden={task !== 'General'}>
+          <h3>Save or fork</h3>
+          <div className="env-save-row">
+            <label htmlFor="env-save-name">Environment name</label>
             <input
-              aria-label={`Tag name ${index + 1}`}
+              id="env-save-name"
               className="form-control"
-              disabled={!canWrite || tagSaveStatus === 'saving'}
-              onChange={(ev) => updateTagRow(row.id, 'name', ev.target.value)}
-              placeholder="name"
-              style={{ flex: 1 }}
               type="text"
-              value={row.name}
-            />
-            <input
-              aria-label={`Tag value ${index + 1}`}
-              className="form-control"
-              disabled={!canWrite || tagSaveStatus === 'saving'}
-              onChange={(ev) => updateTagRow(row.id, 'value', ev.target.value)}
-              placeholder="optional value"
-              style={{ flex: 1 }}
-              type="text"
-              value={row.value}
+              value={inputText}
+              onChange={(ev) => {
+                setInputText(ev.target.value);
+              }}
             />
             <button
-              aria-label={`Remove tag ${index + 1}`}
-              className="btn btn-default"
-              disabled={!canWrite || tagSaveStatus === 'saving'}
-              onClick={() => removeTagRow(row.id)}
-              type="button"
+              className="btn btn-primary"
+              disabled={!(canWrite && inputText && inputText.length > 0)}
+              onClick={() => onEnvSave(inputText)}
             >
-              Remove
+              {envList.indexOf(inputText) >= 0 ? 'Save' : 'Fork'}
             </button>
           </div>
-        ))}
+          <p className="env-field-hint">
+            Enter a new name to fork the current environment.
+          </p>
+        </section>
+        <section hidden={task !== 'Tags'} className="env-tags-section">
+          <h3>Environment tags</h3>
+          <div className="env-tag-target">
+            <label htmlFor="env-tags-target">Environment</label>
+            <select
+              id="env-tags-target"
+              aria-label="Tag environment"
+              className="form-control"
+              disabled={!connected || tagSaveStatus === 'saving'}
+              value={tagEnv || ''}
+              onChange={(ev) => {
+                setTagEnv(ev.target.value);
+                setTagSaveStatus('idle');
+                setTagSaveError('');
+              }}
+            >
+              {envList.map((env) => (
+                <option key={env} value={env}>
+                  {env}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="form-inline">
-          <button
-            className="btn btn-default"
-            disabled={
-              !canWrite ||
-              tagSaveStatus === 'saving' ||
-              tagRows.length >= MAX_TAGS_PER_ENV
-            }
-            onClick={() => {
-              setTagRows((prev) => [...prev, createTagRow()]);
-              setTagSaveStatus('idle');
-              setTagSaveError('');
-            }}
-            type="button"
+          <div className="env-tag-editor">
+            <div className="env-tag-toolbar">
+              <strong>
+                Tags{' '}
+                <span>
+                  ({tagRows.length}/{MAX_TAGS_PER_ENV})
+                </span>
+              </strong>
+              <button
+                className="btn btn-default"
+                disabled={
+                  !canWrite ||
+                  tagSaveStatus === 'saving' ||
+                  tagRows.length >= MAX_TAGS_PER_ENV
+                }
+                onClick={() => {
+                  setTagRows((prev) => [...prev, createTagRow()]);
+                  setTagSaveStatus('idle');
+                  setTagSaveError('');
+                }}
+                type="button"
+              >
+                Add Tag
+              </button>
+            </div>
+            <div className="env-tag-list">
+              {tagRows.length === 0 && (
+                <p className="env-empty-tags">No tags yet</p>
+              )}
+              {tagRows.map((row, index) => (
+                <div className="env-tag-row" key={row.id}>
+                  <label className="env-tag-field">
+                    <span>Tag name</span>
+                    <input
+                      aria-label={`Tag name ${index + 1}`}
+                      className="form-control"
+                      disabled={!canWrite || tagSaveStatus === 'saving'}
+                      onChange={(ev) =>
+                        updateTagRow(row.id, 'name', ev.target.value)
+                      }
+                      placeholder="Tag name"
+                      aria-invalid={
+                        (!row.name.trim() && !!row.value) ||
+                        duplicateNames.has(row.name.trim()) ||
+                        row.name.trim().length > MAX_TAG_NAME_LENGTH
+                      }
+                      type="text"
+                      value={row.name}
+                    />
+                  </label>
+                  <label className="env-tag-field">
+                    <span>Value (optional)</span>
+                    <input
+                      aria-label={`Tag value ${index + 1}`}
+                      className="form-control"
+                      disabled={!canWrite || tagSaveStatus === 'saving'}
+                      onChange={(ev) =>
+                        updateTagRow(row.id, 'value', ev.target.value)
+                      }
+                      placeholder="Value (optional)"
+                      type="text"
+                      value={row.value}
+                    />
+                  </label>
+                  <button
+                    title="Remove tag"
+                    aria-label={`Remove tag ${index + 1}`}
+                    className="btn btn-default"
+                    disabled={!canWrite || tagSaveStatus === 'saving'}
+                    onClick={() => removeTagRow(row.id)}
+                    type="button"
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          {hasUnnamedValue && (
+            <div className="env-tag-error" role="alert">
+              A tag value cannot be saved without a tag name.
+            </div>
+          )}
+          {hasLongName && (
+            <div className="env-tag-error" role="alert">
+              Tag names must not exceed {MAX_TAG_NAME_LENGTH} characters.
+            </div>
+          )}
+          {hasTooManyTags && (
+            <div className="env-tag-error" role="alert">
+              Environments may have at most {MAX_TAGS_PER_ENV} tags.
+            </div>
+          )}
+          {duplicateNames.size > 0 && (
+            <div className="env-tag-error" role="alert">
+              Tag names must be unique: {Array.from(duplicateNames).join(', ')}.
+            </div>
+          )}
+          {tagSaveError && (
+            <div className="env-tag-error" role="alert">
+              Unable to update tags: {tagSaveError}
+            </div>
+          )}
+          <div className="env-tag-actions">
+            <button
+              className={
+                tagSaveStatus === 'saved'
+                  ? 'btn btn-success'
+                  : tagSaveStatus === 'error'
+                    ? 'btn btn-danger'
+                    : 'btn btn-primary'
+              }
+              disabled={
+                !canWrite ||
+                !tagEnv ||
+                tagSaveStatus === 'saving' ||
+                hasInvalidTags
+              }
+              onClick={handleTagsSave}
+              type="button"
+            >
+              {tagSaveStatus === 'saving'
+                ? 'Saving...'
+                : tagSaveStatus === 'saved'
+                  ? 'Saved!'
+                  : tagSaveStatus === 'error'
+                    ? 'Retry Save'
+                    : 'Update Tags'}
+            </button>
+          </div>
+        </section>
+        <section hidden={task !== 'Delete'} className="env-delete-section">
+          <h3>Delete environments</h3>
+          <EnvDeleteList
+            activeEnv={activeEnv}
+            disabled={!canWrite}
+            envList={envList}
+            onChange={setSelectedEnvs}
+            selectedEnvs={selectedEnvs}
           >
-            Add Tag
-          </button>{' '}
-          <button
-            className={
-              tagSaveStatus === 'saved'
-                ? 'btn btn-success'
-                : tagSaveStatus === 'error'
-                  ? 'btn btn-danger'
-                  : 'btn btn-primary'
-            }
-            disabled={
-              !canWrite ||
-              !tagEnv ||
-              tagSaveStatus === 'saving' ||
-              hasInvalidTags
-            }
-            onClick={handleTagsSave}
-            type="button"
-          >
-            {tagSaveStatus === 'saving'
-              ? 'Saving...'
-              : tagSaveStatus === 'saved'
-                ? 'Saved!'
-                : tagSaveStatus === 'error'
-                  ? 'Retry Save'
-                  : 'Update Tags'}
-          </button>
-        </div>
-
-        {hasUnnamedValue && (
-          <div style={{ color: '#d9534f' }}>
-            A tag value cannot be saved without a tag name.
-          </div>
-        )}
-        {hasLongName && (
-          <div style={{ color: '#d9534f' }}>
-            Tag names must not exceed {MAX_TAG_NAME_LENGTH} characters.
-          </div>
-        )}
-        {hasTooManyTags && (
-          <div style={{ color: '#d9534f' }}>
-            Environments may have at most {MAX_TAGS_PER_ENV} tags.
-          </div>
-        )}
-        {duplicateNames.size > 0 && (
-          <div style={{ color: '#d9534f' }}>
-            Tag names must be unique: {Array.from(duplicateNames).join(', ')}.
-          </div>
-        )}
-        {tagSaveError && (
-          <div style={{ color: '#d9534f' }}>
-            Unable to update tags: {tagSaveError}
-          </div>
-        )}
+            <button
+              className="btn btn-danger"
+              disabled={
+                !canWrite ||
+                selectedEnvs.length === 0 ||
+                selectedEnvsSet.has('main')
+              }
+              onClick={() => {
+                const deletedEnvs = [...selectedEnvs];
+                // push active env at last to prevent breaking the queue
+                let sortedEnvs = deletedEnvs.filter((env) => env !== activeEnv);
+                if (selectedEnvsSet.has(activeEnv)) {
+                  sortedEnvs.push(activeEnv);
+                }
+                const requestedDeletions = onEnvDelete(sortedEnvs, activeEnv);
+                if (requestedDeletions.length === 0) {
+                  showToast(
+                    'Unable to delete environments because the server connection is unavailable.',
+                    'error'
+                  );
+                  return;
+                }
+                const requestedDeletionSet = new Set(requestedDeletions);
+                const failedDeletions = deletedEnvs.filter(
+                  (env) => !requestedDeletionSet.has(env)
+                );
+                if (
+                  requestedDeletionSet.has(tagEnv) &&
+                  !requestedDeletionSet.has(activeEnv)
+                ) {
+                  setTagEnv(activeEnv || 'main');
+                  setTagSaveStatus('idle');
+                  setTagSaveError('');
+                }
+                setSelectedEnvs(failedDeletions);
+                if (failedDeletions.length > 0) {
+                  showToast(
+                    'Some environment deletion requests could not be sent.',
+                    'error'
+                  );
+                  return;
+                }
+                const count = deletedEnvs.length;
+                showToast(
+                  count === 1
+                    ? `Successfully deleted environment "${deletedEnvs[0]}".`
+                    : `Successfully deleted ${count} environments.`,
+                  'success'
+                );
+              }}
+              type="button"
+            >
+              Delete Selected
+            </button>
+          </EnvDeleteList>
+        </section>
       </div>
     </ReactModal>
   );
