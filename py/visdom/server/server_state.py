@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import tornado.ioloop
 
-from visdom.server.defaults import MAX_SOCKET_WAIT
+from visdom.server.defaults import MAX_SOCKET_WAIT, MIN_ENV_IDLE_SECONDS
 from visdom.utils.server_utils import (
     LazyEnvData,
     run_on_storage_executor,
@@ -180,6 +180,12 @@ class ServerState:
         self.max_plot_history = max_plot_history
         self.save_interval = save_interval
         self.save_threshold = save_threshold
+        if env_idle_seconds < 0 or 0 < env_idle_seconds < MIN_ENV_IDLE_SECONDS:
+            raise ValueError(
+                "env_idle_seconds must be 0 (off) or at least %d, so an "
+                "environment is not dropped while a request that is still using "
+                "it is in flight" % MIN_ENV_IDLE_SECONDS
+            )
         self.env_idle_seconds = env_idle_seconds
 
         # Runtime values that get reassigned while the server runs. These are
@@ -190,7 +196,7 @@ class ServerState:
         self.dirty_envs = Counter()
         # When each environment last took a write, on the monotonic clock. Read
         # by ``evict_idle_envs`` to tell an env that is merely resident from one
-        # that is in use.
+        # that is in use; only kept while eviction is on, and pruned by it.
         self.last_dirty = {}
         # Envs a request is relying on staying resident -- one being written
         # directly, or read across awaits. Kept apart from ``dirty_envs``: that
@@ -276,7 +282,8 @@ class ServerState:
         waiting for the next tick.
         """
         self.dirty_envs[eid] += 1
-        self.last_dirty[eid] = time.monotonic()
+        if self.env_idle_seconds > 0:
+            self.last_dirty[eid] = time.monotonic()
         if 0 < self.save_threshold <= self.dirty_envs[eid]:
             self.flush_envs([eid])
 
@@ -448,19 +455,17 @@ class ServerState:
                 del stamps[eid]
         return evicted
 
-    def start_env_eviction(self):
-        """Evict idle environments on a timer; a no-op when disabled."""
-        if self.env_eviction is None and self.env_idle_seconds > 0:
-            # Checking a few times per idle period keeps an env from overstaying
-            # by much, without scanning ``state`` more than once a second.
-            interval = max(1.0, min(60.0, self.env_idle_seconds / 4.0))
-            self.env_eviction = tornado.ioloop.PeriodicCallback(
-                self.evict_idle_envs, interval * 1000
-            )
-            self.env_eviction.start()
-        return self.env_eviction
+    def eviction_interval_ms(self):
+        """How often the idle sweep runs.
+
+        A few times per idle period keeps an env from overstaying by much,
+        without scanning ``state`` more than once a second or waiting longer
+        than a minute between sweeps.
+        """
+        return max(1.0, min(60.0, self.env_idle_seconds / 4.0)) * 1000
 
     def stop_env_eviction(self):
+        """Stop the idle sweep; started by ``Application.start_env_eviction``."""
         if self.env_eviction is not None:
             self.env_eviction.stop()
             self.env_eviction = None

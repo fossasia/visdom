@@ -197,6 +197,30 @@ class AccessTrackingDict(dict):
         super().__setitem__(key, value)
         self.accessed[key] = time.monotonic()
 
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    # A removed env takes its stamp with it, so ``accessed`` never outgrows the
+    # envs actually held -- whether or not idle eviction is turned on.
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.accessed.pop(key, None)
+
+    def pop(self, key, *default):
+        self.accessed.pop(key, None)
+        return super().pop(key, *default)
+
+    def popitem(self):
+        key, value = super().popitem()
+        self.accessed.pop(key, None)
+        return key, value
+
+    def clear(self):
+        super().clear()
+        self.accessed.clear()
+
 
 class LazyEnvData(Mapping):
     def __init__(self, store, eid):
@@ -334,15 +358,17 @@ def hold_envs(handler, eids):
                 held.pop(eid, None)
 
 
-def _hold_unsaved(handler, eids, written):
+def _hold_unsaved(handler, eids):
     """Hold ``eids`` resident while a direct write of them is in flight.
 
     A handler that replaces an env and saves it itself never marks it dirty, so
     until the write finishes the copy on disk is older than the one in memory.
     The hold stops idle eviction from reverting it meanwhile. It is not a dirty
-    mark: if the write fails or is declined, the hold is dropped and the env is
-    marked dirty properly, so the autosave retries it and settles that mark
-    itself. ``written`` maps the write's result to the ids it covered.
+    mark: if the write raises or is cancelled, the hold is dropped and the env
+    is marked dirty properly, so the autosave retries it and settles that mark
+    itself. A write the backend declines -- one with no ``env_path`` to write
+    to -- is not marked, because no retry could ever clear it and the autosave
+    would deep-copy the env on every tick for nothing.
     """
     held = getattr(handler, "held_envs", None)
     dirty = getattr(handler, "dirty_envs", None)
@@ -353,16 +379,13 @@ def _hold_unsaved(handler, eids, written):
         held[eid] += 1
 
     def release(future):
-        try:
-            done = set() if future.cancelled() else set(written(future.result()))
-        except Exception:
-            done = set()
+        failed = future.cancelled() or future.exception() is not None
         for eid in eids:
             if held.get(eid, 0) > 1:
                 held[eid] -= 1
             else:
                 held.pop(eid, None)
-            if eid not in done:
+            if failed:
                 dirty[eid] += 1
 
     return release
@@ -373,7 +396,7 @@ def save_env_off_loop(handler, eid):
     snapshot = snapshot_env(handler.state[eid])
     if snapshot is None:
         return None
-    release = _hold_unsaved(handler, [eid], lambda ok: [eid] if ok else [])
+    release = _hold_unsaved(handler, [eid])
     future = run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
     future.add_done_callback(release)
     return future
@@ -389,7 +412,7 @@ def save_envs_off_loop(handler, eids):
     """
     eids = list(eids)
     snapshots = snapshot_envs(handler.state, eids)
-    release = _hold_unsaved(handler, list(snapshots), lambda written: written or [])
+    release = _hold_unsaved(handler, list(snapshots))
     future = run_on_storage_executor(
         handler, handler.storage.save_envs, snapshots, eids
     )

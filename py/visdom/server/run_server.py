@@ -437,10 +437,11 @@ def main(print_func=None):
         metavar="env_idle_seconds",
         type=int,
         default=DEFAULT_ENV_IDLE_SECONDS,
-        help="Drop a saved environment from memory once nothing has touched it "
-        "for this many seconds (minimum 10); it is read back from disk on next use. Bounds "
-        "the memory a long-running server holds. 0 (default) keeps every "
-        "environment loaded. Has no effect with env_path disabled.",
+        help="Drop a saved environment from memory once nothing has touched "
+        "it for this many seconds; it is read back from disk on next use. "
+        "Bounds the memory a long-running server holds. 0 (default) keeps "
+        "every environment loaded; otherwise at least %d. Has no effect "
+        "without an env_path." % MIN_ENV_IDLE_SECONDS,
     )
     parser.add_argument(
         "-ssl_certfile",
@@ -542,7 +543,7 @@ def main(print_func=None):
     else:
         user_credential = None
 
-    if 0 < FLAGS.env_idle_seconds < MIN_ENV_IDLE_SECONDS:
+    if FLAGS.env_idle_seconds < 0 or 0 < FLAGS.env_idle_seconds < MIN_ENV_IDLE_SECONDS:
         parser.error(
             "-env_idle_seconds must be 0 (off) or at least %d, so an environment "
             "is not dropped while a request that is still using it is in flight"

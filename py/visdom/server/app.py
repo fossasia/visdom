@@ -440,9 +440,8 @@ class Application(tornado.web.Application):
         """
         state = self.server_state
         if state.env_eviction is None and state.env_idle_seconds > 0:
-            interval = max(1.0, min(60.0, state.env_idle_seconds / 4.0))
             state.env_eviction = tornado.ioloop.PeriodicCallback(
-                self.evict_idle_envs, interval * 1000
+                self.evict_idle_envs, state.eviction_interval_ms()
             )
             state.env_eviction.start()
         return state.env_eviction

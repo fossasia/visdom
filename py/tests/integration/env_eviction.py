@@ -322,3 +322,49 @@ def test_direct_save_never_touches_the_autosave_counter(env_path):
 
     assert seen == {"dirty": {}, "held": {"a": 1}}  # mid-write: held, not dirty
     assert not state.dirty_envs and not state.held_envs  # settled cleanly
+
+
+def test_declined_direct_save_is_not_marked_dirty(env_path):
+    """No ``env_path`` means no write can ever land, so no retry is queued."""
+    app = _make_app(env_path)
+    handler = _Handler(app)
+
+    class Declining:
+        def save_env(self, eid, env):
+            return False
+
+    handler.storage = Declining()
+    app.state["a"] = {"jsons": {}, "reload": {}}
+    assert _direct_save(handler, "a") is False
+    assert not app.server_state.dirty_envs
+    assert not app.server_state.held_envs
+
+
+def test_removed_env_takes_its_access_stamp_with_it(env_path):
+    app = _make_app(env_path, idle=0)
+    for eid in ("a", "b", "c"):
+        app.state[eid] = {"jsons": {}, "reload": {}}
+    app.state.pop("a")
+    del app.state["b"]
+    assert set(app.state.accessed) == {"c"}
+    app.state.clear()
+    assert app.state.accessed == {}
+
+
+def test_write_times_are_not_kept_while_eviction_is_off(env_path):
+    app = _make_app(env_path, idle=0)
+    app.server_state.mark_dirty("main")
+    assert app.server_state.last_dirty == {}
+
+
+@pytest.mark.parametrize("idle", [-1, 1, 9])
+def test_too_short_or_negative_idle_period_is_refused(env_path, idle):
+    with pytest.raises(ValueError):
+        _make_app(env_path, idle=idle)
+
+
+@pytest.mark.parametrize("idle, expected", [(10, 2500), (120, 30000), (3600, 60000)])
+def test_sweep_interval_tracks_the_idle_period(env_path, idle, expected):
+    assert (
+        _make_app(env_path, idle=idle).server_state.eviction_interval_ms() == expected
+    )
