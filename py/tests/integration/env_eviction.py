@@ -24,7 +24,7 @@ import pytest
 
 from visdom.server import run_server
 from visdom.server.app import Application
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import LazyEnvData, save_env_off_loop
 
 pytestmark = pytest.mark.integration
 
@@ -243,3 +243,47 @@ def test_env_idle_seconds_cannot_shift_existing_positional_arguments():
     for func in (run_server.start_server, run_server._serve):
         params = list(inspect.signature(func).parameters)
         assert params[-1] == "env_idle_seconds"
+
+
+class _Handler:
+    """The slice of a handler the direct-save helpers use."""
+
+    def __init__(self, app):
+        self.state = app.state
+        self.storage = app.storage
+        self.dirty_envs = app.server_state.dirty_envs
+        self.storage_executor = None
+
+
+def _direct_save(handler, eid):
+    async def run():
+        return await save_env_off_loop(handler, eid)
+
+    return asyncio.run(run())
+
+
+def test_direct_save_holds_the_env_dirty_until_it_lands(env_path):
+    app = _make_app(env_path)
+    handler = _Handler(app)
+    app.state["forked"] = {"jsons": {"w": {"v": 3}}, "reload": {}}
+    _direct_save(handler, "forked")
+    assert "forked" not in app.server_state.dirty_envs  # written, so released
+
+
+def test_failed_direct_save_keeps_the_env_dirty_and_resident(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    handler = _Handler(app)
+    app.state["a"] = {"jsons": {"w": {"v": 2}}, "reload": {}}  # newer than disk
+
+    def broken(eid, env):
+        raise OSError("disk full")
+
+    handler.storage = type("S", (), {"save_env": staticmethod(broken)})()
+    with pytest.raises(OSError):
+        _direct_save(handler, "a")
+
+    assert app.server_state.dirty_envs["a"] == 1
+    _age(app, "a")
+    assert _sweep(app.server_state) == []
+    assert app.state["a"]["jsons"]["w"]["v"] == 2

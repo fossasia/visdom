@@ -309,12 +309,49 @@ def run_on_storage_executor(handler, func, *args):
     )
 
 
+def _hold_unsaved(handler, eids, written):
+    """Keep ``eids`` marked unsaved until a direct write of them lands.
+
+    A handler that replaces an env and saves it itself never marks it dirty, so
+    until the write finishes the copy on disk is older than the one in memory.
+    The mark stops idle eviction from reverting that env if the write fails,
+    and a failed write leaves it for the autosave to retry. ``written`` maps the
+    write's result to the ids it covered; only those are released.
+    """
+    dirty = getattr(handler, "dirty_envs", None)
+    if dirty is None:
+        return lambda future: None
+    eids = list(eids)
+    for eid in eids:
+        dirty[eid] += 1
+
+    def release(future):
+        if future.cancelled():
+            return
+        try:
+            done = set(written(future.result()))
+        except Exception:
+            return
+        for eid in eids:
+            if eid not in done:
+                continue
+            if dirty.get(eid, 0) > 1:
+                dirty[eid] -= 1
+            else:
+                dirty.pop(eid, None)
+
+    return release
+
+
 def save_env_off_loop(handler, eid):
     """Persist one env off the loop, or ``None`` when there is nothing to write."""
     snapshot = snapshot_env(handler.state[eid])
     if snapshot is None:
         return None
-    return run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+    release = _hold_unsaved(handler, [eid], lambda ok: [eid] if ok else [])
+    future = run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+    future.add_done_callback(release)
+    return future
 
 
 def save_envs_off_loop(handler, eids):
@@ -326,9 +363,13 @@ def save_envs_off_loop(handler, eids):
     save ran inline.
     """
     eids = list(eids)
-    return run_on_storage_executor(
-        handler, handler.storage.save_envs, snapshot_envs(handler.state, eids), eids
+    snapshots = snapshot_envs(handler.state, eids)
+    release = _hold_unsaved(handler, list(snapshots), lambda written: written or [])
+    future = run_on_storage_executor(
+        handler, handler.storage.save_envs, snapshots, eids
     )
+    future.add_done_callback(release)
+    return future
 
 
 def save_all_off_loop(handler):

@@ -111,6 +111,10 @@ class StateAccessorsMixin:
         return self.server_state.live_updates
 
     @property
+    def dirty_envs(self):
+        return self.server_state.dirty_envs
+
+    @property
     def deleting_envs(self):
         return self.server_state.deleting_envs
 
