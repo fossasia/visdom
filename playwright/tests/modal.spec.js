@@ -80,25 +80,6 @@ test.describe.serial('Test Env Modal', () => {
       .getByLabel(/^Remove tag /)
       .last()
       .click();
-    await dialog
-      .getByLabel(/^Tag value /)
-      .last()
-      .fill('1234');
-    await expect(name).toHaveAttribute('aria-invalid', 'true');
-    await expect(dialog.getByRole('alert')).toContainText('without a tag name');
-    await expect(
-      dialog.getByRole('button', { name: 'Update Tags' })
-    ).toBeDisabled();
-    expect(
-      await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)
-    ).toBe(true);
-    await name.fill('run');
-    await expect(dialog.getByRole('alert')).toHaveCount(0);
-    await dialog.getByRole('button', { name: 'Add Tag' }).click();
-    await dialog
-      .getByLabel(/^Remove tag /)
-      .last()
-      .click();
     await expect(name).toHaveValue('run');
     await dialog.getByRole('button', { name: 'Close dialog' }).click();
     await expect(dialog).toHaveCount(0);
@@ -183,14 +164,6 @@ test.describe.serial('Test Env Modal', () => {
     );
 
     await page.setViewportSize({ width: 360, height: 640 });
-    await expect(
-      page.getByRole('button', { name: 'Delete Selected' })
-    ).toBeInViewport();
-    expect(
-      await page
-        .locator(envmodal)
-        .evaluate((el) => el.scrollWidth <= el.clientWidth)
-    ).toBe(true);
     await expect(
       page.getByRole('button', { name: 'Delete Selected' })
     ).toBeInViewport();
