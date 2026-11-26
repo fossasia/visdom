@@ -344,7 +344,36 @@ class ServerState:
             self.autosave.start()
         return self.autosave
 
-    def evict_idle_envs(self):
+    def _last_touched(self, eid, env):
+        """When ``eid`` was last read or written, or ``None`` if never this run."""
+        stamps = [self.last_dirty.get(eid)]
+        if isinstance(env, LazyEnvData):
+            stamps.append(env.last_access)
+        accessed = getattr(self.state, "accessed", None)
+        if accessed is not None:
+            stamps.append(accessed.get(eid))
+        stamps = [stamp for stamp in stamps if stamp is not None]
+        return max(stamps) if stamps else None
+
+    def _evictable(self, eid, env, now):
+        """Whether ``eid`` is idle, resident and safe to drop right now."""
+        if (
+            env is None
+            or eid in self.dirty_envs
+            or eid in self.saving_envs
+            or eid in self.deleting_envs
+            or self.env_delete_watches.get(eid)
+        ):
+            return False
+        if isinstance(env, LazyEnvData) and not env.is_loaded:
+            return False
+        touched = self._last_touched(eid, env)
+        return touched is not None and now - touched >= self.env_idle_seconds
+
+    def _existing_envs(self, eids):
+        return {eid for eid in eids if self.storage.env_exists(eid)}
+
+    async def evict_idle_envs(self):
         """Drop saved, idle environments from memory; return the ids dropped.
 
         Without this every environment a client has ever opened or written to
@@ -356,42 +385,53 @@ class ServerState:
 
         Skipped, because dropping them would lose or resurrect data: anything
         dirty, being written, or being deleted; anything with no file on disk;
-        and envs loaded with ``-eager_data_loading`` that were never written
-        to, since the operator asked for those to stay resident. Runs on the
-        loop without yielding, so no handler is mid-update while it decides.
+        and anything not touched at all since startup, such as an env loaded
+        with ``-eager_data_loading`` that nobody has asked for. Every write
+        marks its env dirty before it can yield, and a write refreshes the idle
+        clock, so a request that is still using an env keeps it resident for
+        ``env_idle_seconds`` after its last write (the CLI refuses values too
+        small for that to hold).
+
+        The file check runs on the storage worker, behind any queued write, so a
+        slow filesystem never stalls the loop. Everything is decided again on
+        the loop once it answers, because the env may have been used meanwhile.
         """
         if self.env_idle_seconds <= 0 or self.env_path is None:
             return []
         now = time.monotonic()
+        candidates = [
+            eid
+            for eid, env in list(self.state.items())
+            if self._evictable(eid, env, now)
+        ]
         evicted = []
-        for eid, env in list(self.state.items()):
-            if (
-                eid in self.dirty_envs
-                or eid in self.saving_envs
-                or eid in self.deleting_envs
-                or self.env_delete_watches.get(eid)
-            ):
-                continue
-            if isinstance(env, LazyEnvData):
-                if not env.is_loaded:
+        if candidates:
+            try:
+                present = await tornado.ioloop.IOLoop.current().run_in_executor(
+                    self.storage_executor, self._existing_envs, candidates
+                )
+            except Exception:
+                logging.warning(
+                    "Idle environment check failed; will retry", exc_info=True
+                )
+                return []
+            now = time.monotonic()
+            for eid in candidates:
+                env = dict.get(self.state, eid)
+                if not self._evictable(eid, env, now):
                     continue
-                touched = max(env.last_access, self.last_dirty.get(eid, 0))
-            elif eid in self.last_dirty:
-                touched = self.last_dirty[eid]
-            else:
-                continue
-            if now - touched < self.env_idle_seconds:
-                continue
-            if not self.storage.env_exists(eid):
-                continue
-            if isinstance(env, LazyEnvData):
-                env.unload()
-            else:
-                self.state[eid] = LazyEnvData(self.storage, eid)
-            self.last_dirty.pop(eid, None)
-            evicted.append(eid)
-        for eid in [e for e in self.last_dirty if e not in self.state]:
-            del self.last_dirty[eid]
+                if eid not in present:
+                    logging.debug("Not evicting %r: no file on disk", eid)
+                    continue
+                if isinstance(env, LazyEnvData):
+                    env.unload()
+                else:
+                    self.state[eid] = LazyEnvData(self.storage, eid)
+                self.last_dirty.pop(eid, None)
+                evicted.append(eid)
+        for stamps in (self.last_dirty, getattr(self.state, "accessed", {})):
+            for eid in [e for e in stamps if e not in self.state]:
+                del stamps[eid]
         return evicted
 
     def start_env_eviction(self):

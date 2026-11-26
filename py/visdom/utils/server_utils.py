@@ -168,6 +168,36 @@ def hash_password_off_loop(password, salt):
 # ------- File management helpers ----- #
 
 
+class AccessTrackingDict(dict):
+    """The server's ``state`` mapping, remembering when each env was last used.
+
+    Idle eviction has to tell an env nobody asks for from one that is merely
+    not being written to, and a plain-dict env cannot say when it was read.
+    Lookups and assignments through ``state[eid]`` / ``state.get(eid)`` stamp
+    ``accessed``; iteration and ``items()`` do not, so a sweep does not keep
+    what it is looking at alive. Building one from an existing mapping stamps
+    nothing: an env nobody has touched since startup has no entry.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.accessed = {}
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.accessed[key] = time.monotonic()
+        return value
+
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.accessed[key] = time.monotonic()
+
+
 class LazyEnvData(Mapping):
     def __init__(self, store, eid):
         self._store = store
@@ -201,6 +231,7 @@ class LazyEnvData(Mapping):
         """
         if self._raw_dict is not None:
             return
+        self.last_access = time.monotonic()
 
         try:
             raw = dict(env_data)

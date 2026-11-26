@@ -33,7 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from visdom.data_model.json_store import HASHED_ENV_RE, JSONStore
 from visdom.server.server_state import ServerState
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import AccessTrackingDict, LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
 
 # How long a disk scan is reused before the directories are walked again.
@@ -65,7 +65,9 @@ def build_state(storage, eager=False, ensure_main=True):
     Application.load_state but reusable for any workspace's storage."""
     state = {}
     if storage is None:
-        return {"main": {"jsons": {}, "reload": {}}} if ensure_main else {}
+        return AccessTrackingDict(
+            {"main": {"jsons": {}, "reload": {}}} if ensure_main else {}
+        )
     for eid in storage.list_envs():
         if eager:
             env_data = storage.load_env(eid)
@@ -79,7 +81,7 @@ def build_state(storage, eager=False, ensure_main=True):
     if ensure_main and "main" not in state:
         state["main"] = {"jsons": {}, "reload": {}}
         storage.save_env("main", state["main"])
-    return state
+    return AccessTrackingDict(state)
 
 
 class WorkspaceState(ServerState):

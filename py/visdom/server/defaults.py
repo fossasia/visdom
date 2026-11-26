@@ -28,4 +28,7 @@ DEFAULT_SAVE_THRESHOLD = 50
 # Seconds a saved environment may sit untouched before it is dropped from memory
 # and read back from disk on next use. 0 keeps every environment resident.
 DEFAULT_ENV_IDLE_SECONDS = 0
+# Smaller non-zero values are refused: an env must stay resident for longer than
+# any request that is still using it can take.
+MIN_ENV_IDLE_SECONDS = 10
 UNDO_DIRNAME = ".undo"

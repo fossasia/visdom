@@ -24,6 +24,7 @@ import tornado.web  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import (
+    AccessTrackingDict,
     LazyEnvData,
     broadcast_envs,
     delete_env_off_loop,
@@ -424,11 +425,11 @@ class Application(tornado.web.Application):
             self.server_state.autosave.start()
         return self.server_state.autosave
 
-    def evict_idle_envs(self):
+    async def evict_idle_envs(self):
         """Drop saved, idle environments from memory in every workspace."""
         evicted = []
         for state in self.workspace_env_manager.spaces():
-            evicted.extend(state.evict_idle_envs())
+            evicted.extend(await state.evict_idle_envs())
         return evicted
 
     def start_env_eviction(self):
@@ -757,7 +758,7 @@ class Application(tornado.web.Application):
                 "env_path=None.",
                 RuntimeWarning,
             )
-            return {"main": {"jsons": {}, "reload": {}}}
+            return AccessTrackingDict({"main": {"jsons": {}, "reload": {}}})
         ensure_dir_exists(env_path)
         for eid in self.storage.list_envs():
             if self.eager_data_loading:
@@ -785,7 +786,7 @@ class Application(tornado.web.Application):
             state["main"] = {"jsons": {}, "reload": {}}
             self.storage.save_env("main", state["main"])
 
-        return state
+        return AccessTrackingDict(state)
 
     def load_user_settings(self):
         settings = {}

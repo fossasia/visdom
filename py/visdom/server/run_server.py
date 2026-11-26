@@ -31,6 +31,7 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
     DEFAULT_ENV_IDLE_SECONDS,
+    MIN_ENV_IDLE_SECONDS,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
 )
@@ -89,10 +90,10 @@ def start_server(
     ssl_keyfile=None,
     save_interval=DEFAULT_SAVE_INTERVAL,
     save_threshold=DEFAULT_SAVE_THRESHOLD,
-    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
     internal_port=None,
     internal_ssl_certfile=None,
     internal_ssl_keyfile=None,
+    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
@@ -213,9 +214,9 @@ async def _serve(
     ssl_ctx,
     save_interval,
     save_threshold,
-    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
     internal_port=None,
     internal_ssl_ctx=None,
+    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -437,7 +438,7 @@ def main(print_func=None):
         type=int,
         default=DEFAULT_ENV_IDLE_SECONDS,
         help="Drop a saved environment from memory once nothing has touched it "
-        "for this many seconds; it is read back from disk on next use. Bounds "
+        "for this many seconds (minimum 10); it is read back from disk on next use. Bounds "
         "the memory a long-running server holds. 0 (default) keeps every "
         "environment loaded. Has no effect with env_path disabled.",
     )
@@ -540,6 +541,13 @@ def main(print_func=None):
 
     else:
         user_credential = None
+
+    if 0 < FLAGS.env_idle_seconds < MIN_ENV_IDLE_SECONDS:
+        parser.error(
+            "-env_idle_seconds must be 0 (off) or at least %d, so an environment "
+            "is not dropped while a request that is still using it is in flight"
+            % MIN_ENV_IDLE_SECONDS
+        )
 
     start_server(
         port=FLAGS.port,
