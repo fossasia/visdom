@@ -70,44 +70,44 @@ def test_video_fps_numpy_int32_works(capture_send):
 
 
 def test_video_fps_bool_raises(capture_send):
-    """Boolean FPS values should raise ValueError."""
+    """Boolean FPS values should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(ValueError, match="fps must be a numeric FPS, not a boolean"):
+    with pytest.raises(AssertionError, match="fps should be a number"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": True}))
 
 
 def test_video_fps_negative_raises(capture_send):
-    """Negative FPS values should raise ValueError."""
+    """Negative FPS values should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(ValueError, match="fps must be a finite positive number"):
+    with pytest.raises(AssertionError, match="fps must be greater than 0"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": -5}))
 
 
 def test_video_fps_zero_raises(capture_send):
-    """Zero FPS should raise ValueError."""
+    """Zero FPS should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(ValueError, match="fps must be a finite positive number"):
+    with pytest.raises(AssertionError, match="fps must be greater than 0"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": 0}))
 
 
 def test_video_fps_nan_raises(capture_send):
-    """NaN FPS should raise ValueError."""
+    """NaN FPS should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(ValueError, match="fps must be a finite positive number"):
+    with pytest.raises(AssertionError, match="fps must be greater than 0"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": float("nan")}))
 
 
 def test_video_fps_inf_raises(capture_send):
-    """Infinite FPS should raise ValueError."""
+    """Infinite FPS should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(ValueError, match="fps must be a finite positive number"):
+    with pytest.raises(AssertionError, match="fps must be greater than 0"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": float("inf")}))
 
 
 def test_video_fps_string_raises(capture_send):
-    """String FPS should raise TypeError."""
+    """String FPS should raise AssertionError."""
     tensor = np.full((1, 16, 16, 3), 0.5, dtype=np.float32)
-    with pytest.raises(TypeError, match="fps must be a numeric type"):
+    with pytest.raises(AssertionError, match="fps should be a number"):
         capture_send(lambda client: client.video(tensor=tensor, opts={"fps": "30"}))
 
 

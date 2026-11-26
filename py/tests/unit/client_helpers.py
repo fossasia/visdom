@@ -758,6 +758,14 @@ def test_assert_opts_accepts_scalar_and_sequence_marker_sizes(markersize):
         ({"opacity": 1.5}, "opacity should be a number between 0 and 1"),
         ({"fps": "fast"}, "fps should be a number"),
         ({"fps": -1}, "fps must be greater than 0"),
+        ({"fps": 0}, "fps must be greater than 0"),
+        ({"fps": True}, "fps should be a number"),
+        ({"fps": False}, "fps should be a number"),
+        ({"fps": float("nan")}, "fps must be greater than 0"),
+        ({"fps": float("inf")}, "fps must be greater than 0"),
+        ({"fps": float("-inf")}, "fps must be greater than 0"),
+        ({"fps": np.float64("nan")}, "fps must be greater than 0"),
+        ({"fps": np.float64("inf")}, "fps must be greater than 0"),
     ],
 )
 def test_assert_opts_rejects_bad_input(opts, message):
@@ -776,6 +784,13 @@ def test_assert_opts_rejects_bad_input(opts, message):
         {"opacity": 0},
         {"opacity": 1},
         {"fps": 1},
+        {"fps": 25},
+        {"fps": 29.97},
+        {"fps": 30.0},
+        {"fps": np.int32(30)},
+        {"fps": np.int64(25)},
+        {"fps": np.float32(29.97)},
+        {"fps": np.float64(30.0)},
     ],
 )
 def test_assert_opts_accepts_the_boundaries(opts):

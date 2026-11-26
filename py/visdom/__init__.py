@@ -651,9 +651,12 @@ def _assert_opts(opts):
         if not isinstance(fps_val, (int, float, np.number)):
             raise AssertionError("fps should be a number")
         if isinstance(fps_val, bool):
-            raise AssertionError("fps must be greater than 0")
+            raise AssertionError("fps should be a number")
         # Check for NaN/inf before rounding (round() fails on these)
+        # Covers both Python float and NumPy floating types
         if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
+            raise AssertionError("fps must be greater than 0")
+        if isinstance(fps_val, np.floating) and (np.isnan(fps_val) or np.isinf(fps_val)):
             raise AssertionError("fps must be greater than 0")
         fps_int = int(round(fps_val))
         if fps_int <= 0:
@@ -3355,15 +3358,18 @@ class Visdom(object):
         # Ensure fps is a positive integer for PyAV (it only accepts int)
         fps_val = opts.get("fps", 25)
         if not isinstance(fps_val, (int, float, np.number)):
-            raise TypeError("fps must be a numeric type")
+            raise AssertionError("fps should be a number")
         if isinstance(fps_val, bool):
-            raise ValueError("fps must be a numeric FPS, not a boolean")
+            raise AssertionError("fps should be a number")
         # Check for NaN/inf before rounding (round() fails on these)
+        # Covers both Python float and NumPy floating types
         if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
-            raise ValueError("fps must be a finite positive number")
+            raise AssertionError("fps must be greater than 0")
+        if isinstance(fps_val, np.floating) and (np.isnan(fps_val) or np.isinf(fps_val)):
+            raise AssertionError("fps must be greater than 0")
         fps_int = int(round(fps_val))
         if fps_int <= 0:
-            raise ValueError("fps must be a finite positive number")
+            raise AssertionError("fps must be greater than 0")
         opts["fps"] = fps_int
         opts["loop"] = opts.get("loop", False)
         opts["autoplay"] = opts.get("autoplay", False)
