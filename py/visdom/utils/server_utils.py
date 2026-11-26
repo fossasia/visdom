@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import errno
+import time
 from collections import OrderedDict
 
 import tornado.escape
@@ -172,13 +173,23 @@ class LazyEnvData(Mapping):
         self._store = store
         self._eid = eid
         self._raw_dict = None
+        self.last_access = time.monotonic()
 
     @property
     def is_loaded(self):
         """Whether this environment has been materialized in memory."""
         return self._raw_dict is not None
 
+    def unload(self):
+        """Drop the in-memory copy; the next access reads it from disk again.
+
+        Only safe once the on-disk copy is current -- the caller (see
+        ``ServerState.evict_idle_envs``) checks that.
+        """
+        self._raw_dict = None
+
     def lazy_load_data(self):
+        self.last_access = time.monotonic()
         if self._raw_dict is not None:
             return
         self.prime(self._store.load_env(self._eid))

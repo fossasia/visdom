@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Idle environments are dropped from memory once they are safely on disk.
+
+Every environment a client opened or wrote to used to stay in ``state`` until it
+was deleted or the server restarted, so a long-lived server only ever grew.
+``-env_idle_seconds`` lets a saved, untouched environment fall back to the cold
+``LazyEnvData`` it was at startup. What matters is what must *not* be dropped:
+anything unsaved, being written or deleted, or with nothing on disk to read back.
+"""
+
+import json
+import os
+import time
+
+import pytest
+
+from visdom.server.app import Application
+from visdom.utils.server_utils import LazyEnvData
+
+pytestmark = pytest.mark.integration
+
+IDLE = 60
+
+
+def _write_env(env_path, eid, value):
+    with open(os.path.join(env_path, "%s.json" % eid), "w") as fn:
+        json.dump({"jsons": {"w": {"v": value}}, "reload": {}}, fn)
+
+
+def _make_app(env_path, idle=IDLE):
+    return Application(port=8097, env_path=env_path, env_idle_seconds=idle)
+
+
+def _age(app, eid, seconds=IDLE + 1):
+    """Make ``eid`` look untouched for ``seconds``."""
+    state = app.server_state
+    env = app.state[eid]
+    if isinstance(env, LazyEnvData):
+        env.last_access -= seconds
+    if eid in state.last_dirty:
+        state.last_dirty[eid] -= seconds
+
+
+def test_loaded_lazy_env_is_unloaded_when_idle(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    assert app.state["a"]["jsons"]["w"]["v"] == 1
+    assert app.state["a"].is_loaded
+
+    _age(app, "a")
+    assert app.server_state.evict_idle_envs() == ["a"]
+    assert not app.state["a"].is_loaded
+
+    # Reading it again brings it back from disk, unchanged.
+    assert app.state["a"]["jsons"]["w"]["v"] == 1
+    assert app.state["a"].is_loaded
+
+
+def test_recently_used_env_stays_loaded(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    app.state["a"]["jsons"]
+    assert app.server_state.evict_idle_envs() == []
+    assert app.state["a"].is_loaded
+
+
+def test_reading_resets_the_idle_clock(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    app.state["a"]["jsons"]
+    _age(app, "a")
+    app.state["a"]["jsons"]  # a viewer reads it just before the sweep
+    assert app.server_state.evict_idle_envs() == []
+
+
+def test_disabled_by_default_evicts_nothing(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path, idle=0)
+    app.state["a"]["jsons"]
+    _age(app, "a", 10**6)
+    assert app.server_state.evict_idle_envs() == []
+    assert app.state["a"].is_loaded
+
+
+def test_dirty_env_is_never_evicted(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    app.state["a"]["jsons"]["w"]["v"] = 2
+    app.server_state.dirty_envs["a"] += 1  # changed, not yet written
+    _age(app, "a")
+    assert app.server_state.evict_idle_envs() == []
+    assert app.state["a"]["jsons"]["w"]["v"] == 2
+
+
+def test_env_being_saved_or_deleted_is_not_evicted(env_path):
+    for eid in ("saving", "deleting"):
+        _write_env(env_path, eid, 1)
+    app = _make_app(env_path)
+    for eid in ("saving", "deleting"):
+        app.state[eid]["jsons"]
+        _age(app, eid)
+    app.server_state.saving_envs.add("saving")
+    app.server_state.deleting_envs["deleting"] = object()
+    assert app.server_state.evict_idle_envs() == []
+
+
+def test_env_without_a_file_is_not_evicted(env_path):
+    app = _make_app(env_path)
+    app.state["fresh"] = LazyEnvData(app.storage, "fresh")
+    app.state["fresh"]._raw_dict = {"jsons": {"w": 1}, "reload": {}}
+    _age(app, "fresh")
+    assert app.server_state.evict_idle_envs() == []
+    assert app.state["fresh"].is_loaded
+
+
+def test_plain_dict_env_written_this_session_is_evicted_once_saved(env_path):
+    app = _make_app(env_path)
+    app.state["made"] = {"jsons": {"w": {"v": 5}}, "reload": {}}
+    app.server_state.mark_dirty("made")
+    app.storage.save_env("made", app.state["made"])
+    app.server_state.dirty_envs.clear()  # what a completed autosave does
+    _age(app, "made")
+
+    assert "made" in app.server_state.evict_idle_envs()
+    assert isinstance(app.state["made"], LazyEnvData)
+    assert not app.state["made"].is_loaded
+    assert app.state["made"]["jsons"]["w"]["v"] == 5
+
+
+def test_eager_loaded_env_never_written_stays_resident(env_path):
+    _write_env(env_path, "a", 1)
+    app = Application(
+        port=8097, env_path=env_path, env_idle_seconds=IDLE, eager_data_loading=True
+    )
+    assert app.server_state.evict_idle_envs() == []
+    assert isinstance(app.state["a"], dict)
+
+
+def test_write_after_eviction_reloads_and_persists(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    app.state["a"]["jsons"]
+    _age(app, "a")
+    app.server_state.evict_idle_envs()
+
+    app.state["a"]["jsons"]["w"]["v"] = 9
+    app.storage.save_env("a", app.state["a"])
+    with open(os.path.join(env_path, "a.json")) as fn:
+        assert json.load(fn)["jsons"]["w"]["v"] == 9
+
+
+def test_application_sweep_covers_the_default_state(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    app.state["a"]["jsons"]
+    _age(app, "a")
+    assert app.evict_idle_envs() == ["a"]
+
+
+def test_start_env_eviction_only_runs_when_enabled(env_path):
+    off = _make_app(env_path, idle=0)
+    assert off.start_env_eviction() is None
+    on = _make_app(env_path)
+    try:
+        assert on.start_env_eviction() is not None
+    finally:
+        on.server_state.stop_env_eviction()

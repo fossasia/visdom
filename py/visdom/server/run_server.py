@@ -30,6 +30,7 @@ from visdom.server.defaults import (
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
+    DEFAULT_ENV_IDLE_SECONDS,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
 )
@@ -88,6 +89,7 @@ def start_server(
     ssl_keyfile=None,
     save_interval=DEFAULT_SAVE_INTERVAL,
     save_threshold=DEFAULT_SAVE_THRESHOLD,
+    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
     internal_port=None,
     internal_ssl_certfile=None,
     internal_ssl_keyfile=None,
@@ -114,6 +116,7 @@ def start_server(
             ssl_ctx=ssl_ctx,
             save_interval=save_interval,
             save_threshold=save_threshold,
+            env_idle_seconds=env_idle_seconds,
             internal_port=internal_port,
             internal_ssl_ctx=internal_ssl_ctx,
         )
@@ -210,6 +213,7 @@ async def _serve(
     ssl_ctx,
     save_interval,
     save_threshold,
+    env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
     internal_port=None,
     internal_ssl_ctx=None,
 ):
@@ -231,6 +235,7 @@ async def _serve(
         eager_data_loading=eager_data_loading,
         save_interval=save_interval,
         save_threshold=save_threshold,
+        env_idle_seconds=env_idle_seconds,
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
@@ -276,6 +281,7 @@ async def _serve(
     _install_stop_handlers(stop)
 
     app.start_autosave()
+    app.start_env_eviction()
     app.start_ownership_monitor()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
@@ -426,6 +432,16 @@ def main(print_func=None):
         "so a busy one is not left unsaved for a whole interval. 0 disables.",
     )
     parser.add_argument(
+        "-env_idle_seconds",
+        metavar="env_idle_seconds",
+        type=int,
+        default=DEFAULT_ENV_IDLE_SECONDS,
+        help="Drop a saved environment from memory once nothing has touched it "
+        "for this many seconds; it is read back from disk on next use. Bounds "
+        "the memory a long-running server holds. 0 (default) keeps every "
+        "environment loaded. Has no effect with env_path disabled.",
+    )
+    parser.add_argument(
         "-ssl_certfile",
         metavar="ssl_certfile",
         type=str,
@@ -540,6 +556,7 @@ def main(print_func=None):
         ssl_keyfile=FLAGS.ssl_keyfile,
         save_interval=FLAGS.save_interval,
         save_threshold=FLAGS.save_threshold,
+        env_idle_seconds=FLAGS.env_idle_seconds,
         internal_port=FLAGS.internal_port,
         internal_ssl_certfile=FLAGS.internal_ssl_certfile,
         internal_ssl_keyfile=FLAGS.internal_ssl_keyfile,

@@ -89,6 +89,7 @@ from visdom.server.defaults import (
     DEFAULT_MAX_PLOT_HISTORY,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
+    DEFAULT_ENV_IDLE_SECONDS,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
     WEBSOCKET_PING_INTERVAL,
@@ -180,6 +181,7 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
         save_interval=DEFAULT_SAVE_INTERVAL,
         save_threshold=DEFAULT_SAVE_THRESHOLD,
+        env_idle_seconds=DEFAULT_ENV_IDLE_SECONDS,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
@@ -234,6 +236,7 @@ class Application(tornado.web.Application):
             max_plot_history=self.max_plot_history,
             save_interval=save_interval,
             save_threshold=save_threshold,
+            env_idle_seconds=env_idle_seconds,
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
 
@@ -420,6 +423,28 @@ class Application(tornado.web.Application):
             )
             self.server_state.autosave.start()
         return self.server_state.autosave
+
+    def evict_idle_envs(self):
+        """Drop saved, idle environments from memory in every workspace."""
+        evicted = []
+        for state in self.workspace_env_manager.spaces():
+            evicted.extend(state.evict_idle_envs())
+        return evicted
+
+    def start_env_eviction(self):
+        """Evict idle environments on a timer, across every workspace.
+
+        Started here for the same reason as :meth:`start_autosave`: the
+        callback has to walk every workspace, not only this server's own state.
+        """
+        state = self.server_state
+        if state.env_eviction is None and state.env_idle_seconds > 0:
+            interval = max(1.0, min(60.0, state.env_idle_seconds / 4.0))
+            state.env_eviction = tornado.ioloop.PeriodicCallback(
+                self.evict_idle_envs, interval * 1000
+            )
+            state.env_eviction.start()
+        return state.env_eviction
 
     def start_ownership_monitor(self):
         """Begin checking whether this instance still owns the workspaces it holds

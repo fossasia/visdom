@@ -25,7 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 import tornado.ioloop
 
 from visdom.server.defaults import MAX_SOCKET_WAIT
-from visdom.utils.server_utils import run_on_storage_executor, snapshot_env
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    run_on_storage_executor,
+    snapshot_env,
+)
 from visdom.utils.shared_utils import warn_once
 
 
@@ -145,6 +149,7 @@ class ServerState:
         max_plot_history,
         save_interval,
         save_threshold,
+        env_idle_seconds=0,
     ):
         # Shared mutable containers (passed by reference, never rebound here).
         self.state = state
@@ -167,6 +172,7 @@ class ServerState:
         self.max_plot_history = max_plot_history
         self.save_interval = save_interval
         self.save_threshold = save_threshold
+        self.env_idle_seconds = env_idle_seconds
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go
@@ -174,6 +180,11 @@ class ServerState:
         self._layouts = self._load_layouts()
         self._socket_wrap_monitor = None
         self.dirty_envs = Counter()
+        # When each environment last took a write, on the monotonic clock. Read
+        # by ``evict_idle_envs`` to tell an env that is merely resident from one
+        # that is in use.
+        self.last_dirty = {}
+        self.env_eviction = None
         self.saving_envs = set()
         # Environments whose removal is queued or running on the worker. A read
         # that started before one of those deletes must not file what it read
@@ -252,6 +263,7 @@ class ServerState:
         waiting for the next tick.
         """
         self.dirty_envs[eid] += 1
+        self.last_dirty[eid] = time.monotonic()
         if 0 < self.save_threshold <= self.dirty_envs[eid]:
             self.flush_envs([eid])
 
@@ -332,6 +344,73 @@ class ServerState:
             self.autosave.start()
         return self.autosave
 
+    def evict_idle_envs(self):
+        """Drop saved, idle environments from memory; return the ids dropped.
+
+        Without this every environment a client has ever opened or written to
+        stays in ``state`` until it is deleted or the server restarts, so a
+        long-lived server only ever grows. An env goes back to a cold
+        ``LazyEnvData`` -- the same thing it was at startup -- once it has been
+        untouched for ``env_idle_seconds`` and its on-disk copy is current, and
+        is read back transparently the next time anything asks for it.
+
+        Skipped, because dropping them would lose or resurrect data: anything
+        dirty, being written, or being deleted; anything with no file on disk;
+        and envs loaded with ``-eager_data_loading`` that were never written
+        to, since the operator asked for those to stay resident. Runs on the
+        loop without yielding, so no handler is mid-update while it decides.
+        """
+        if self.env_idle_seconds <= 0 or self.env_path is None:
+            return []
+        now = time.monotonic()
+        evicted = []
+        for eid, env in list(self.state.items()):
+            if (
+                eid in self.dirty_envs
+                or eid in self.saving_envs
+                or eid in self.deleting_envs
+                or self.env_delete_watches.get(eid)
+            ):
+                continue
+            if isinstance(env, LazyEnvData):
+                if not env.is_loaded:
+                    continue
+                touched = max(env.last_access, self.last_dirty.get(eid, 0))
+            elif eid in self.last_dirty:
+                touched = self.last_dirty[eid]
+            else:
+                continue
+            if now - touched < self.env_idle_seconds:
+                continue
+            if not self.storage.env_exists(eid):
+                continue
+            if isinstance(env, LazyEnvData):
+                env.unload()
+            else:
+                self.state[eid] = LazyEnvData(self.storage, eid)
+            self.last_dirty.pop(eid, None)
+            evicted.append(eid)
+        for eid in [e for e in self.last_dirty if e not in self.state]:
+            del self.last_dirty[eid]
+        return evicted
+
+    def start_env_eviction(self):
+        """Evict idle environments on a timer; a no-op when disabled."""
+        if self.env_eviction is None and self.env_idle_seconds > 0:
+            # Checking a few times per idle period keeps an env from overstaying
+            # by much, without scanning ``state`` more than once a second.
+            interval = max(1.0, min(60.0, self.env_idle_seconds / 4.0))
+            self.env_eviction = tornado.ioloop.PeriodicCallback(
+                self.evict_idle_envs, interval * 1000
+            )
+            self.env_eviction.start()
+        return self.env_eviction
+
+    def stop_env_eviction(self):
+        if self.env_eviction is not None:
+            self.env_eviction.stop()
+            self.env_eviction = None
+
     def stop_autosave(self):
         """Stop the timer, so no further tick can queue a write."""
         if self.autosave is not None:
@@ -371,6 +450,7 @@ class ServerState:
             if self._storage_shut_down:
                 return
             self.stop_autosave()
+            self.stop_env_eviction()
             self.storage_executor.shutdown(wait=True)
             self.storage.save_all(self.state)
             self._storage_shut_down = True

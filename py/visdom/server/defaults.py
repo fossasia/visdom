@@ -25,4 +25,7 @@ DEFAULT_MAX_TEXT_LINES = 500
 DEFAULT_MAX_UNDO_HISTORY = 4
 DEFAULT_SAVE_INTERVAL = 30
 DEFAULT_SAVE_THRESHOLD = 50
+# Seconds a saved environment may sit untouched before it is dropped from memory
+# and read back from disk on next use. 0 keeps every environment resident.
+DEFAULT_ENV_IDLE_SECONDS = 0
 UNDO_DIRNAME = ".undo"

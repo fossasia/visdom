@@ -56,6 +56,7 @@ _INHERITED_SETTINGS = (
     "max_plot_history",
     "save_interval",
     "save_threshold",
+    "env_idle_seconds",
 )
 
 
