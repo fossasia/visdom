@@ -3873,10 +3873,10 @@ class Visdom(object):
 
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
-            if X is not None and X.ndim == 2 and X.shape[1] == 1:
-                X = X.ravel()
-            if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
-                Z = Z.ravel()
+        if X is not None and X.ndim == 2 and X.shape[1] == 1:
+            X = X.ravel()
+        if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
+            Z = Z.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
