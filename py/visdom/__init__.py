@@ -649,15 +649,15 @@ def _assert_opts(opts):
     if opts.get("fps") is not None:
         fps_val = opts.get("fps")
         if not isinstance(fps_val, (int, float, np.number)):
-            raise TypeError("fps must be a numeric type")
+            raise AssertionError("fps should be a number")
         if isinstance(fps_val, bool):
-            raise ValueError("fps must be a numeric FPS, not a boolean")
+            raise AssertionError("fps must be greater than 0")
         # Check for NaN/inf before rounding (round() fails on these)
         if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
-            raise ValueError("fps must be a finite positive number")
+            raise AssertionError("fps must be greater than 0")
         fps_int = int(round(fps_val))
         if fps_int <= 0:
-            raise ValueError("fps must be a finite positive number")
+            raise AssertionError("fps must be greater than 0")
 
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
