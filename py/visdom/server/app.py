@@ -53,6 +53,7 @@ from visdom.server.handlers.experiments_handler import (
 from visdom.server.handlers.tracking_restore_handler import RestoreRunHandler
 from visdom.server.handlers.web_handlers import (
     ActivityHandler,
+    AlertsHandler,
     EvictHandler,
     CloseHandler,
     CompareHandler,
@@ -80,6 +81,7 @@ from visdom.server.handlers.web_handlers import (
     UserSettingsHandler,
 )
 from visdom.server.server_state import ServerState
+from visdom.server.webhooks import WebhookPolicy
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
@@ -180,6 +182,9 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
         save_interval=DEFAULT_SAVE_INTERVAL,
         save_threshold=DEFAULT_SAVE_THRESHOLD,
+        allow_webhooks=False,
+        webhook_hosts=(),
+        allow_local_webhooks=False,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
@@ -203,6 +208,13 @@ class Application(tornado.web.Application):
         self.login_enabled = False
         self.last_access = time.time()
         self.wrap_socket = use_frontend_client_polling
+        # Built here, from the three flags, so that every handler reads one
+        # answer rather than three flags it has to combine the same way.
+        self.webhook_policy = WebhookPolicy(
+            enabled=allow_webhooks,
+            hosts=webhook_hosts,
+            allow_local=allow_local_webhooks,
+        )
 
         settings = dict(tornado_settings)
         # Polling wrappers are reaped by ``ServerState`` instead; this reaches
@@ -234,6 +246,7 @@ class Application(tornado.web.Application):
             max_plot_history=self.max_plot_history,
             save_interval=save_interval,
             save_threshold=save_threshold,
+            webhook_policy=self.webhook_policy,
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
 
@@ -307,6 +320,7 @@ class Application(tornado.web.Application):
                 server_state_args,
             ),
             (r"%s/tags" % experiments_url, TagsHandler, server_state_args),
+            (r"%s/alerts" % experiments_url, AlertsHandler, server_state_args),
             (
                 r"%s/user/(.*)" % self.base_url,
                 UserSettingsHandler,

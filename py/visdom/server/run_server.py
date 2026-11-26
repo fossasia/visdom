@@ -25,6 +25,7 @@ import socket
 import tornado.httpserver
 import tornado.netutil
 from visdom.server.app import Application
+from visdom.server import webhooks
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
@@ -91,6 +92,9 @@ def start_server(
     internal_port=None,
     internal_ssl_certfile=None,
     internal_ssl_keyfile=None,
+    allow_webhooks=False,
+    webhook_hosts=(),
+    allow_local_webhooks=False,
 ):
     logging.info("Server started")
     # Reading the certificate before anything is constructed keeps a bad path
@@ -116,6 +120,9 @@ def start_server(
             save_threshold=save_threshold,
             internal_port=internal_port,
             internal_ssl_ctx=internal_ssl_ctx,
+            allow_webhooks=allow_webhooks,
+            webhook_hosts=webhook_hosts,
+            allow_local_webhooks=allow_local_webhooks,
         )
     )
 
@@ -212,6 +219,9 @@ async def _serve(
     save_threshold,
     internal_port=None,
     internal_ssl_ctx=None,
+    allow_webhooks=False,
+    webhook_hosts=(),
+    allow_local_webhooks=False,
 ):
     """Build the server on a running loop, then serve until asked to stop.
 
@@ -231,6 +241,9 @@ async def _serve(
         eager_data_loading=eager_data_loading,
         save_interval=save_interval,
         save_threshold=save_threshold,
+        allow_webhooks=allow_webhooks,
+        webhook_hosts=webhook_hosts,
+        allow_local_webhooks=allow_local_webhooks,
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
@@ -297,6 +310,11 @@ async def _serve(
         server.stop()
         if internal_server is not None:
             internal_server.stop()
+        # Alert webhooks already in flight are given a moment to land, so the
+        # loop closing does not take them with it.
+        await webhooks.drain(
+            app.server_state.pending_webhooks, timeout=webhooks.SHUTDOWN_DRAIN
+        )
         app.drain_sockets()
         # Through the state that owns them: rebinding ``app.subs`` left both
         # the live sockets and the dictionaries the handlers share untouched.
@@ -426,6 +444,34 @@ def main(print_func=None):
         "so a busy one is not left unsaved for a whole interval. 0 disables.",
     )
     parser.add_argument(
+        "-allow_webhooks",
+        default=False,
+        action="store_true",
+        help="Let alert rules post to a webhook when they fire. Off by "
+        "default: the url is written by whoever can reach the endpoint and "
+        "the server is what makes the request, so an upgrade adds no "
+        "outbound traffic until an operator asks for it. The hosts that may "
+        "be reached still have to be named with -webhook_hosts.",
+    )
+    parser.add_argument(
+        "-webhook_hosts",
+        metavar="webhook_hosts",
+        type=str,
+        default="",
+        help="Comma-separated hosts an alert webhook may be posted to, for "
+        "example 'hooks.slack.com,.example.com'. An entry with a leading dot "
+        "matches that domain and its subdomains. Empty (the default) refuses "
+        "every target, so this is required alongside -allow_webhooks.",
+    )
+    parser.add_argument(
+        "-allow_local_webhooks",
+        default=False,
+        action="store_true",
+        help="Allow webhook targets that are loopback, link-local or private "
+        "addresses. Refused by default, which is what keeps a rule from "
+        "reading a cloud metadata service. Does not skip -webhook_hosts.",
+    )
+    parser.add_argument(
         "-ssl_certfile",
         metavar="ssl_certfile",
         type=str,
@@ -543,6 +589,9 @@ def main(print_func=None):
         internal_port=FLAGS.internal_port,
         internal_ssl_certfile=FLAGS.internal_ssl_certfile,
         internal_ssl_keyfile=FLAGS.internal_ssl_keyfile,
+        allow_webhooks=FLAGS.allow_webhooks,
+        webhook_hosts=FLAGS.webhook_hosts,
+        allow_local_webhooks=FLAGS.allow_local_webhooks,
     )
 
 

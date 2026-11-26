@@ -6,6 +6,15 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.experiments.alerts import (
+    ACTION_TOAST,
+    ACTION_WEBHOOK,
+    Alert,
+    AlertEvent,
+    build_alert,
+    MAX_ALERTS_PER_ENV,
+    parse_webhook_url,
+)
 from visdom.experiments.compare import (
     ComparableExperiment,
     SECTIONS,
@@ -54,6 +63,10 @@ from visdom.experiments.tags import (
 )
 
 __all__ = [
+    "ACTION_TOAST",
+    "ACTION_WEBHOOK",
+    "Alert",
+    "AlertEvent",
     "And",
     "ComparableExperiment",
     "Comparison",
@@ -65,6 +78,7 @@ __all__ = [
     "ExperimentLike",
     "ExperimentStore",
     "LiveUpdateQueue",
+    "MAX_ALERTS_PER_ENV",
     "MAX_QUERY_DEPTH",
     "MAX_QUERY_LENGTH",
     "METADATA_KEY",
@@ -78,10 +92,12 @@ __all__ = [
     "Tag",
     "normalize_tags",
     "tags_to_mapping",
+    "build_alert",
     "build_comparison",
     "build_record",
     "flatten_experiments",
     "parse_query",
+    "parse_webhook_url",
     "resolve_targets",
     "retarget_experiment",
     "STATUS_FAILED",

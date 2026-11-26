@@ -1896,6 +1896,137 @@ class Visdom(object):
             "experiments/tags",
         )
 
+    def set_alert(
+        self,
+        metric,
+        condition,
+        for_steps=1,
+        patience=None,
+        goal=None,
+        action="toast",
+        message=None,
+        url=None,
+        env=None,
+    ):
+        """Watch a metric and be told when a rule about it holds.
+
+        The rule is evaluated by the server as the observations arrive, so it
+        is `log_metrics` that fires it and a run logging nothing never does:
+
+            vis.set_alert("val_loss", "> 2.0", for_steps=3)
+            vis.set_alert("accuracy", "stalled", patience=10, goal="max")
+            vis.set_alert("loss", "nan", message="the loss diverged")
+
+        `condition` is one of five, and nothing else is evaluated:
+
+        * `"> <number>"`, `"< <number>"`, `"== <number>"` compare each
+          observation against a constant. `>=`/`<=` are not accepted; write
+          the threshold a step over instead.
+        * `"nan"` fires on an observation that is not a finite number, which
+          `>` and `<` cannot catch — every comparison against NaN is false.
+        * `"stalled"` fires when the metric has not improved for `patience`
+          observations. `goal` says which way is better, `"min"` (the default,
+          for a loss) or `"max"` (for an accuracy); both apply to this
+          condition alone and are refused on any other.
+
+        `for_steps` is the debounce: the condition has to hold for that many
+        consecutive observations of `metric` before the rule fires, so a noisy
+        metric crossing its threshold once stays quiet. A rule fires on the
+        observation that completes its streak and not again until the streak
+        breaks, so a metric that stays over its threshold is one notification
+        rather than one per step.
+
+        `action` is how the firing is delivered. `"toast"` (the default) is a
+        notification in every browser watching that environment.
+        `"webhook"` POSTs the firing as JSON to `url` instead, for a Slack or
+        Discord endpoint — a browser nobody has open shows nobody a toast, so
+        this is the one that reaches you at three in the morning. It needs a
+        server started with `-allow_webhooks` and the url's host named in
+        `-webhook_hosts`, and is refused (403) otherwise: the server is what
+        makes the request, so where it may post is the operator's decision and
+        not the rule author's. `message` replaces the generated text with one
+        of your own, in the toast and in the webhook body alike.
+
+        Setting the same `metric` and condition again replaces that rule, with
+        its streak reset; a metric may carry several rules of different
+        conditions at once. `env` defaults to this client's environment.
+        Returns the environment's complete rule list.
+        """
+        if not isstr(metric) or not metric.strip():
+            raise TypeError("metric must be the name of a metric to watch")
+        if not isstr(condition) or not condition.strip():
+            raise TypeError(
+                "condition must be a string such as '> 2.0', 'nan' or 'stalled'"
+            )
+        if isinstance(for_steps, bool) or not isinstance(for_steps, int):
+            raise TypeError("for_steps must be an integer")
+        if for_steps < 1:
+            raise ValueError("for_steps must be at least 1")
+        if patience is not None:
+            if isinstance(patience, bool) or not isinstance(patience, int):
+                raise TypeError("patience must be an integer")
+            if patience < 1:
+                raise ValueError("patience must be at least 1")
+        if message is not None and not isstr(message):
+            raise TypeError("message must be a string")
+        if url is not None and not isstr(url):
+            raise TypeError("url must be a string")
+
+        return self._experiment_request(
+            {
+                "action": "set",
+                "eid": env if env is not None else self.env,
+                "alert": {
+                    "metric": metric,
+                    "condition": condition,
+                    "for_steps": for_steps,
+                    "patience": patience,
+                    "goal": goal,
+                    "action": action,
+                    "message": message,
+                    "url": url,
+                },
+            },
+            "experiments/alerts",
+        )
+
+    def list_alerts(self, env=None):
+        """Return an environment's alert rules, with the state of each.
+
+        Each rule reports what it watches and how often it has fired
+        (`fire_count`, `last_fired_step`), so a run can be asked whether an
+        alert ever went off rather than only being told at the time. An
+        environment with no rules returns an empty list. `env` defaults to
+        this client's environment.
+        """
+        return self._experiment_query(
+            {"action": "get", "eid": env if env is not None else self.env},
+            "experiments/alerts",
+        )
+
+    def clear_alert(self, metric, condition=None, env=None):
+        """Stop watching `metric`, and return the remaining rules.
+
+        Every rule on `metric` is dropped unless `condition` names one of
+        them — written either as it was set (`"> 2.0"`) or as the bare
+        condition (`">"`). Clearing a rule that was never set is not an
+        error, and is allowed on a finished run; setting one is not.
+        `env` defaults to this client's environment.
+        """
+        if not isstr(metric) or not metric.strip():
+            raise TypeError("metric must be the name of a watched metric")
+        if condition is not None and not isstr(condition):
+            raise TypeError("condition must be a string")
+        return self._experiment_request(
+            {
+                "action": "clear",
+                "eid": env if env is not None else self.env,
+                "metric": metric,
+                "condition": condition,
+            },
+            "experiments/alerts",
+        )
+
     def search_experiments(
         self, query=None, limit=100, offset=0, sort_by=None, descending=True
     ):
