@@ -646,9 +646,18 @@ def _assert_opts(opts):
             0 <= opts.get("opacity") <= 1
         ), "opacity should be a number between 0 and 1"
 
-    if opts.get("fps"):
-        assert isnum(opts.get("fps")), "fps should be a number"
-        assert opts.get("fps") > 0, "fps must be greater than 0"
+    if opts.get("fps") is not None:
+        fps_val = opts.get("fps")
+        if not isinstance(fps_val, (int, float, np.number)):
+            raise TypeError("fps must be a numeric type")
+        if isinstance(fps_val, bool):
+            raise ValueError("fps must be a numeric FPS, not a boolean")
+        # Check for NaN/inf before rounding (round() fails on these)
+        if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
+            raise ValueError("fps must be a finite positive number")
+        fps_int = int(round(fps_val))
+        if fps_int <= 0:
+            raise ValueError("fps must be a finite positive number")
 
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
@@ -3336,13 +3345,26 @@ class Visdom(object):
         The function does not support any plot-specific `opts`. The following
         video `opts` are supported:
 
-        - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+        - `opts.fps`: FPS for the video (`number` > 0; default = 25). Float values
+          (e.g., OpenCV's 29.97) are rounded to the nearest integer.
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else opts
-        opts["fps"] = opts.get("fps", 25)
+        opts = {} if opts is None else dict(opts)   # copy to avoid mutating caller's dict
+        # Ensure fps is a positive integer for PyAV (it only accepts int)
+        fps_val = opts.get("fps", 25)
+        if not isinstance(fps_val, (int, float, np.number)):
+            raise TypeError("fps must be a numeric type")
+        if isinstance(fps_val, bool):
+            raise ValueError("fps must be a numeric FPS, not a boolean")
+        # Check for NaN/inf before rounding (round() fails on these)
+        if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
+            raise ValueError("fps must be a finite positive number")
+        fps_int = int(round(fps_val))
+        if fps_int <= 0:
+            raise ValueError("fps must be a finite positive number")
+        opts["fps"] = fps_int
         opts["loop"] = opts.get("loop", False)
         opts["autoplay"] = opts.get("autoplay", False)
         _title2str(opts)
