@@ -523,6 +523,10 @@ def test_update_window_opts_routes_env(capture_send):
     "opts,expected",
     [
         ({}, {}),
+        ({"legend": None}, {}),
+        ({"tight_layout": None}, {}),
+        ({"legend": None, "showlegend": False}, {"showlegend": False}),
+        ({"tight_layout": None, "marginleft": 5}, {"margin": {"l": 5}}),
         ({"title": "Loss"}, {"title": {"text": "Loss"}}),
         ({"xlabel": "epoch"}, {"xaxis": {"title": {"text": "epoch"}}}),
         ({"marginleft": 5}, {"margin": {"l": 5}}),

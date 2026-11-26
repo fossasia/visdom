@@ -275,6 +275,27 @@ def test_options_only_layout_update_replaces_range_array(plot_pane):
     assert layout["xaxis"] == {"range": [2, 8], "title": {"text": "epoch"}}
 
 
+def test_none_window_options_preserve_existing_plot(capture_send, plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout.update(
+        showlegend=True,
+        xaxis={"range": [0, 5]},
+        margin={"l": 5, "r": 10, "t": 15, "b": 20},
+    )
+    sent = capture_send(
+        lambda v: v.update_window_opts(
+            "w1", {"title": "new", "legend": None, "tight_layout": None}
+        )
+    )
+    update_window(plot_pane, sent["payload"])
+    assert layout == {
+        "title": {"text": "new"},
+        "showlegend": True,
+        "xaxis": {"range": [0, 5]},
+        "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+    }
+
+
 def test_content_update_keeps_layout_replacement_semantics(plot_pane):
     layout = plot_pane["content"]["layout"]
     layout["xaxis"] = {"range": [0, 5]}

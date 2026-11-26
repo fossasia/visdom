@@ -3409,8 +3409,11 @@ class Visdom(object):
     def update_window_opts(self, win, opts, env=None):
         """
         This function allows pushing new options to an existing plot window
-        without updating the content. Options not supplied are preserved.
+        without updating the content. Options not supplied or set to None
+        are preserved. Upgrade the Python client and server together to obtain
+        this behavior; older peers may retain the previous layout resets.
         """
+        opts = {key: value for key, value in opts.items() if value is not None}
         data_to_send = {
             "win": win,
             "eid": env,
