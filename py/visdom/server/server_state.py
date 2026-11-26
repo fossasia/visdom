@@ -115,6 +115,10 @@ class StateAccessorsMixin:
         return self.server_state.dirty_envs
 
     @property
+    def held_envs(self):
+        return self.server_state.held_envs
+
+    @property
     def deleting_envs(self):
         return self.server_state.deleting_envs
 
@@ -188,6 +192,11 @@ class ServerState:
         # by ``evict_idle_envs`` to tell an env that is merely resident from one
         # that is in use.
         self.last_dirty = {}
+        # Envs a request is relying on staying resident -- one being written
+        # directly, or read across awaits. Kept apart from ``dirty_envs``: that
+        # counter belongs to the autosave, which subtracts what it recorded when
+        # its write settles, and a second owner would be released twice.
+        self.held_envs = Counter()
         self.env_eviction = None
         self.saving_envs = set()
         # Environments whose removal is queued or running on the worker. A read
@@ -366,6 +375,7 @@ class ServerState:
             or eid in self.dirty_envs
             or eid in self.saving_envs
             or eid in self.deleting_envs
+            or self.held_envs.get(eid)
             or self.env_delete_watches.get(eid)
         ):
             return False

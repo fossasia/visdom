@@ -41,6 +41,7 @@ from visdom.utils.server_utils import (
     delete_env_off_loop,
     ensure_env_loaded,
     ensure_env_present,
+    hold_envs,
     check_readonly_message,
     reject_readonly,
     extract_eid,
@@ -1241,16 +1242,17 @@ class CompareHandler(BaseHandler):
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
                 # read costs a worker thread rather than the loop.
-                for eid in eids:
-                    await ensure_env_present(self, eid)
-                compare_envs(
-                    self.state,
-                    eids,
-                    self.subs[sid],
-                    self.storage,
-                    show_all=show_all,
-                    warmed=True,
-                )
+                with hold_envs(self, eids):
+                    for eid in eids:
+                        await ensure_env_present(self, eid)
+                    compare_envs(
+                        self.state,
+                        eids,
+                        self.subs[sid],
+                        self.storage,
+                        show_all=show_all,
+                        warmed=True,
+                    )
             except ValueError:
                 notify(
                     self,

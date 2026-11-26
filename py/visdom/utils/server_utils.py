@@ -309,36 +309,61 @@ def run_on_storage_executor(handler, func, *args):
     )
 
 
+@contextlib.contextmanager
+def hold_envs(handler, eids):
+    """Keep ``eids`` resident for the body of the ``with``.
+
+    Idle eviction skips a held env. For a request that names several envs and
+    yields between reading them: without it, the sweep can drop an env it has
+    already prepared, and the read that follows loads it from disk on the loop.
+    """
+    held = getattr(handler, "held_envs", None)
+    eids = list(eids)
+    if held is None:
+        yield
+        return
+    for eid in eids:
+        held[eid] += 1
+    try:
+        yield
+    finally:
+        for eid in eids:
+            if held.get(eid, 0) > 1:
+                held[eid] -= 1
+            else:
+                held.pop(eid, None)
+
+
 def _hold_unsaved(handler, eids, written):
-    """Keep ``eids`` marked unsaved until a direct write of them lands.
+    """Hold ``eids`` resident while a direct write of them is in flight.
 
     A handler that replaces an env and saves it itself never marks it dirty, so
     until the write finishes the copy on disk is older than the one in memory.
-    The mark stops idle eviction from reverting that env if the write fails,
-    and a failed write leaves it for the autosave to retry. ``written`` maps the
-    write's result to the ids it covered; only those are released.
+    The hold stops idle eviction from reverting it meanwhile. It is not a dirty
+    mark: if the write fails or is declined, the hold is dropped and the env is
+    marked dirty properly, so the autosave retries it and settles that mark
+    itself. ``written`` maps the write's result to the ids it covered.
     """
+    held = getattr(handler, "held_envs", None)
     dirty = getattr(handler, "dirty_envs", None)
-    if dirty is None:
+    if held is None or dirty is None:
         return lambda future: None
     eids = list(eids)
     for eid in eids:
-        dirty[eid] += 1
+        held[eid] += 1
 
     def release(future):
-        if future.cancelled():
-            return
         try:
-            done = set(written(future.result()))
+            done = set() if future.cancelled() else set(written(future.result()))
         except Exception:
-            return
+            done = set()
         for eid in eids:
-            if eid not in done:
-                continue
-            if dirty.get(eid, 0) > 1:
-                dirty[eid] -= 1
+            if held.get(eid, 0) > 1:
+                held[eid] -= 1
             else:
-                dirty.pop(eid, None)
+                held.pop(eid, None)
+            if eid not in done:
+                dirty[eid] += 1
 
     return release
 

@@ -24,7 +24,7 @@ import pytest
 
 from visdom.server import run_server
 from visdom.server.app import Application
-from visdom.utils.server_utils import LazyEnvData, save_env_off_loop
+from visdom.utils.server_utils import LazyEnvData, hold_envs, save_env_off_loop
 
 pytestmark = pytest.mark.integration
 
@@ -252,6 +252,7 @@ class _Handler:
         self.state = app.state
         self.storage = app.storage
         self.dirty_envs = app.server_state.dirty_envs
+        self.held_envs = app.server_state.held_envs
         self.storage_executor = None
 
 
@@ -267,7 +268,8 @@ def test_direct_save_holds_the_env_dirty_until_it_lands(env_path):
     handler = _Handler(app)
     app.state["forked"] = {"jsons": {"w": {"v": 3}}, "reload": {}}
     _direct_save(handler, "forked")
-    assert "forked" not in app.server_state.dirty_envs  # written, so released
+    assert "forked" not in app.server_state.dirty_envs
+    assert "forked" not in app.server_state.held_envs
 
 
 def test_failed_direct_save_keeps_the_env_dirty_and_resident(env_path):
@@ -283,7 +285,40 @@ def test_failed_direct_save_keeps_the_env_dirty_and_resident(env_path):
     with pytest.raises(OSError):
         _direct_save(handler, "a")
 
-    assert app.server_state.dirty_envs["a"] == 1
+    assert app.server_state.dirty_envs["a"] == 1  # a real mark, for autosave
+    assert "a" not in app.server_state.held_envs
     _age(app, "a")
     assert _sweep(app.server_state) == []
     assert app.state["a"]["jsons"]["w"]["v"] == 2
+
+
+def test_held_env_is_not_evicted_until_released(env_path):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    handler = _Handler(app)
+    app.state["a"]["jsons"]
+    _age(app, "a")
+    with hold_envs(handler, ["a"]):
+        assert _sweep(app.server_state) == []
+    assert _sweep(app.server_state) == ["a"]
+
+
+def test_direct_save_never_touches_the_autosave_counter(env_path):
+    """The autosave settles its own marks; a second owner would be released twice."""
+    app = _make_app(env_path)
+    handler = _Handler(app)
+    state = app.server_state
+    seen = {}
+
+    class Storage:
+        def save_env(self, eid, env):
+            seen["dirty"] = dict(state.dirty_envs)
+            seen["held"] = dict(state.held_envs)
+            return True
+
+    handler.storage = Storage()
+    app.state["a"] = {"jsons": {"w": 1}, "reload": {}}
+    _direct_save(handler, "a")
+
+    assert seen == {"dirty": {}, "held": {"a": 1}}  # mid-write: held, not dirty
+    assert not state.dirty_envs and not state.held_envs  # settled cleanly
