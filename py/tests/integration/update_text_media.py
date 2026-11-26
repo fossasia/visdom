@@ -20,6 +20,7 @@ import unittest
 
 import pytest
 
+from visdom import _opts2layout
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args
 
@@ -222,6 +223,63 @@ class OptsOnlyUpdateTestCase(VisdomHTTPTestCase):
 
 
 class TestPlotLayoutOptions(VisdomHTTPTestCase):
+    def test_empty_axis_update_clears_existing_settings(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"xaxis": {"range": [0, 5]}, "showlegend": True},
+        )
+        response = self.update(win, None, layout={"xaxis": {}})
+        assert response.code == 200, response.body
+        assert self.get_win_data(win)["content"]["layout"] == {
+            "xaxis": {},
+            "showlegend": True,
+        }
+
+    def test_tight_layout_can_be_disabled_without_dropping_axis_range(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout=_opts2layout(
+                {
+                    "tight_layout": True,
+                    "xlabel": "epoch",
+                    "ylabel": "score",
+                    "xtickmin": 0,
+                    "xtickmax": 5,
+                }
+            ),
+        )
+        for tight in (False, True, False):
+            response = self.update(
+                win, None, layout=_opts2layout({"tight_layout": tight}, partial=True)
+            )
+            assert response.code == 200, response.body
+            layout = self.get_win_data(win)["content"]["layout"]
+            assert layout["xaxis"]["automargin"] is tight
+            assert layout["yaxis"]["automargin"] is tight
+            assert layout["xaxis"]["range"] == [0, 5]
+            assert layout["xaxis"]["title"] == {"text": "epoch"}
+            assert layout["margin"] == (
+                {"l": 0, "r": 0, "t": 30, "b": 0}
+                if tight
+                else {"l": 60, "r": 60, "t": 60, "b": 60}
+            )
+
+    def test_data_update_reaches_layout_replacement_branch(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"xaxis": {"range": [0, 5]}},
+        )
+        response = self.update(
+            win,
+            [{"type": "scatter", "x": [2, 3], "y": [3, 4]}],
+            layout={"xaxis": {"title": {"text": "epoch"}}},
+            append=False,
+        )
+        assert response.code == 200, response.body
+        content = self.get_win_data(win)["content"]
+        assert content["layout"]["xaxis"] == {"title": {"text": "epoch"}}
+        assert content["data"][0]["x"] == [2, 3]
+
     def test_axis_label_update_keeps_range_and_title_font(self):
         win = self.create_window(
             [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],

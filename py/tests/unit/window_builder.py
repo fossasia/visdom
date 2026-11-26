@@ -306,6 +306,45 @@ def test_content_update_keeps_layout_replacement_semantics(plot_pane):
     assert layout["xaxis"] == {"title": {"text": "new"}}
 
 
+@pytest.mark.parametrize(
+    "reset,expected",
+    [
+        ({"xaxis": {}}, {"xaxis": {}, "margin": {"l": 5}}),
+        (
+            {"xaxis": {"title": {}}},
+            {"xaxis": {"range": [0, 5], "title": {}}, "margin": {"l": 5}},
+        ),
+        (
+            {"margin": {}},
+            {"xaxis": {"range": [0, 5], "title": {"text": "epoch"}}, "margin": {}},
+        ),
+    ],
+)
+def test_empty_layout_dict_explicitly_resets_object(
+    capture_send, plot_pane, reset, expected
+):
+    plot_pane["content"]["layout"] = {
+        "xaxis": {"range": [0, 5], "title": {"text": "epoch"}},
+        "margin": {"l": 5},
+    }
+    sent = capture_send(
+        lambda v: v.update_window_opts("w1", {"layoutopts": {"plotly": reset}})
+    )
+    update_window(plot_pane, sent["payload"])
+    assert plot_pane["content"]["layout"] == expected
+
+
+def test_none_nested_layout_fields_do_not_clear_axis(capture_send, plot_pane):
+    plot_pane["content"]["layout"] = {"xaxis": {"range": [0, 5]}}
+    sent = capture_send(
+        lambda v: v.update_window_opts(
+            "w1", {"layoutopts": {"plotly": {"xaxis": {"range": None}}}}
+        )
+    )
+    update_window(plot_pane, sent["payload"])
+    assert plot_pane["content"]["layout"] == {"xaxis": {"range": [0, 5]}}
+
+
 @pytest.mark.parametrize("args", [{"layout": {"title": None}}, {}])
 def test_layout_is_left_alone(plot_pane, args):
     update_window(plot_pane, args)

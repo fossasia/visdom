@@ -947,7 +947,17 @@ def test_an_empty_append_leaves_the_pane_exactly_as_it_was(x, y):
     assert updated == before
 
 
-def test_options_only_layout_patch_preserves_unmentioned_fields():
+@pytest.mark.parametrize(
+    "axis_update,expected_axis",
+    [
+        ({"title": {"text": "epoch"}}, {"range": [0, 5], "title": {"text": "epoch"}}),
+        ({}, {}),
+        ({"title": {}}, {"range": [0, 5], "title": {}}),
+    ],
+)
+def test_options_only_layout_patch_preserves_unmentioned_fields(
+    axis_update, expected_axis
+):
     pane = plot_pane()
     pane["content"]["layout"].update(
         showlegend=True,
@@ -956,13 +966,10 @@ def test_options_only_layout_patch_preserves_unmentioned_fields():
     )
     before = copy.deepcopy(pane)
     updated, ops = UpdateHandler.update_packet(
-        pane, {"layout": {"xaxis": {"title": {"text": "epoch"}}}}, *CAPS
+        pane, {"layout": {"xaxis": axis_update}}, *CAPS
     )
     assert jsonpatch.apply_patch(before, ops) == updated
-    assert updated["content"]["layout"]["xaxis"] == {
-        "range": [0, 5],
-        "title": {"text": "epoch"},
-    }
+    assert updated["content"]["layout"]["xaxis"] == expected_axis
     assert updated["content"]["layout"]["showlegend"] is True
     assert (
         updated["content"]["layout"]["margin"] == before["content"]["layout"]["margin"]

@@ -534,8 +534,31 @@ def test_update_window_opts_routes_env(capture_send):
         ({"legend": ["train", "val"]}, {"showlegend": True}),
         (
             {"tight_layout": True, "marginleft": 5},
-            {"margin": {"l": 5, "r": 0, "t": 30, "b": 0}},
+            {
+                "margin": {"l": 5, "r": 0, "t": 30, "b": 0},
+                "xaxis": {"automargin": True},
+                "yaxis": {"automargin": True},
+            },
         ),
+        (
+            {"tight_layout": False},
+            {
+                "margin": {"l": 60, "r": 60, "t": 60, "b": 60},
+                "xaxis": {"automargin": False},
+                "yaxis": {"automargin": False},
+            },
+        ),
+        (
+            {"tight_layout": False, "xlabel": "epoch"},
+            {
+                "margin": {"l": 60, "r": 60, "t": 60, "b": 60},
+                "xaxis": {"title": {"text": "epoch"}, "automargin": False},
+                "yaxis": {"automargin": False},
+            },
+        ),
+        ({"layoutopts": {"plotly": {"xaxis": {}}}}, {"xaxis": {}}),
+        ({"layoutopts": {"plotly": {"xaxis": {"range": None}}}}, {}),
+        ({"xtickmin": 3}, {}),
         (
             {"layoutopts": {"plotly": {"showlegend": True, "margin": {"r": 7}}}},
             {"showlegend": True, "margin": {"r": 7}},

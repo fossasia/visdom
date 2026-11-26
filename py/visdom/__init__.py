@@ -331,6 +331,22 @@ def _scrub_dict(d):
     return d
 
 
+def _scrub_layout_update(layout):
+    """Drop unset fields without turning them into explicit empty-dict resets."""
+    if not isinstance(layout, dict):
+        return layout
+    result = {}
+    for name, value in layout.items():
+        if value is None:
+            continue
+        cleaned = _scrub_layout_update(value)
+        # A supplied {} resets an object; a dict emptied by scrubbing is omitted.
+        if isinstance(value, dict) and value and not cleaned:
+            continue
+        result[name] = cleaned
+    return result
+
+
 TICK_FIELD_SUFFIXES = (
     "type",
     "label",
@@ -443,6 +459,10 @@ def _opts2layout(opts, is3d=False, *, partial=False):
     else:
         layout["xaxis"] = _axisformat("x", opts)
         layout["yaxis"] = _axisformat("y", opts)
+        if partial and opts.get("tight_layout") is not None:
+            for axis in ("xaxis", "yaxis"):
+                layout[axis] = layout[axis] or {}
+                layout[axis]["automargin"] = bool(tight)
 
     if opts.get("stacked"):
         layout["barmode"] = "stack" if opts.get("stacked") else "group"
@@ -451,7 +471,8 @@ def _opts2layout(opts, is3d=False, *, partial=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-    return _scrub_dict(_normalize_title_strings(layout))
+    layout = _normalize_title_strings(layout)
+    return _scrub_layout_update(layout) if partial else _scrub_dict(layout)
 
 
 def _normalize_labels(Y, max_label=None):
@@ -3410,7 +3431,8 @@ class Visdom(object):
         """
         This function allows pushing new options to an existing plot window
         without updating the content. Options not supplied or set to None
-        are preserved. Upgrade the Python client and server together to obtain
+        are preserved. An empty dict in layoutopts["plotly"] explicitly resets
+        that layout object. Upgrade the Python client and server together to obtain
         this behavior; older peers may retain the previous layout resets.
         """
         opts = {key: value for key, value in opts.items() if value is not None}

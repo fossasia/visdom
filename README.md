@@ -1131,6 +1131,18 @@ only a title preserves the legend, axis ranges and custom margins:
 vis.update_window_opts("loss", {"title": "Loss: epoch 5"})
 ```
 
+To explicitly clear a layout object, pass an empty dictionary through
+`layoutopts["plotly"]`. For example, this removes the existing x-axis settings
+(including its range and title) while leaving the y-axis and margins unchanged:
+
+```python
+vis.update_window_opts("loss", {"layoutopts": {"plotly": {"xaxis": {}}}})
+```
+
+Nonempty layout dictionaries merge with existing settings; `None` fields remain
+unchanged. Setting `tight_layout=False` restores the normal margins and disables
+automatic margin expansion on both 2D axes, preserving their other settings.
+
 Upgrade the Python client and server together to obtain all layout-preservation
 behavior. With an older client or server, the previous legend/margin resets or
 replacement of nested axis settings can still occur.

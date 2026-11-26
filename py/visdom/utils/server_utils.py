@@ -599,11 +599,11 @@ def extract_eid(args):
 
 
 def _merge_layout_options(layout, updates):
-    """Apply a partial layout without dropping unmentioned nested options."""
+    """Merge supplied fields; an explicit empty dict resets that layout object."""
     for name, value in updates.items():
         if value is None:
             continue
-        if isinstance(value, dict) and isinstance(layout.get(name), dict):
+        if isinstance(value, dict) and value and isinstance(layout.get(name), dict):
             _merge_layout_options(layout[name], value)
         else:
             layout[name] = value
