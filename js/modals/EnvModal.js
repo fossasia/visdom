@@ -23,6 +23,12 @@ const TASKS = [
   { label: 'Delete', Icon: Trash2 },
 ];
 
+const TASKS = [
+  { label: 'General', Icon: Folder },
+  { label: 'Tags', Icon: Tags },
+  { label: 'Delete', Icon: Trash2 },
+];
+
 const MAX_TAG_NAME_LENGTH = 50;
 const MAX_TAGS_PER_ENV = 20;
 let nextTagRowID = 0;
