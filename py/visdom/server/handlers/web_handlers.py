@@ -1643,6 +1643,9 @@ class ExperimentLogHandler(BaseHandler):
 
     All three actions write, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
+
+    The body is decoded by the shared ``_decode_json_body``, so malformed JSON
+    and a non-object body are a 400, while an empty body is read as ``{}``.
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
@@ -1664,6 +1667,10 @@ class ExperimentLogHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="unknown action {0!r}".format(action)
             )
+
+        raw_eid = args.get("eid")
+        if raw_eid is not None and not isinstance(raw_eid, str):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
 
         eid = extract_eid(args)
 
@@ -1757,10 +1764,7 @@ class ExperimentLogHandler(BaseHandler):
         "Experiment logging is disabled while the server is in readonly mode"
     )
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        await self.wrap_func(self, args)
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentSearchHandler(BaseHandler):
