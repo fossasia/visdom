@@ -72,6 +72,7 @@ from visdom.experiments import (
     Experiment,
     ExperimentStore,
     ExperimentFinishedError,
+    METADATA_KEY,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
@@ -1517,6 +1518,49 @@ def _no_write(eid, env):
     """
 
 
+def _alert_state_of(env):
+    """``env``'s alert rules as they stand now, or ``None`` if it has no record.
+
+    A copy of each rule, because the rules are folded in place: the list on the
+    record is the same list the next write serialises, so holding a reference
+    would hold the mutated state rather than the state before it.
+
+    Only the rules are copied, not the record. The rest of it is what the
+    request carried and what a retry carries again, while a rule's streak and
+    ``fire_count`` are derived state that a retry cannot rebuild -- a firing
+    that has been spent is spent until the streak breaks.
+    """
+    blob = env.get(METADATA_KEY)
+    if not isinstance(blob, dict):
+        return None
+    alerts = blob.get("alerts")
+    if not isinstance(alerts, list):
+        return []
+    return [dict(rule) if isinstance(rule, dict) else rule for rule in alerts]
+
+
+def _restore_alert_state(env, alerts):
+    """Put ``alerts`` back on ``env``'s record, after a write of it failed.
+
+    The fold runs on the loop and the write of what it produced runs off it, so
+    a save that raises leaves behind a rule that has counted an observation
+    nobody will ever be told about: ``observe`` fires on the streak reaching
+    ``for_steps`` exactly, so a streak left standing at ``for_steps`` cannot
+    fire again until something breaks it, and the notification for that run is
+    gone rather than merely late. Putting the rules back means the retry that
+    the 500 asks for folds the observation again and fires on it.
+
+    An environment that had no record before the change is left alone: there
+    was no evaluation state to spend, and rolling back the record itself is
+    every first write's problem rather than this one's.
+    """
+    if alerts is None:
+        return
+    blob = env.get(METADATA_KEY)
+    if isinstance(blob, dict):
+        blob["alerts"] = alerts
+
+
 async def _write_experiment_metadata(handler, eid, mutate):
     """Apply one metadata change to ``eid``'s env; return it and whether it is new.
 
@@ -1538,12 +1582,19 @@ async def _write_experiment_metadata(handler, eid, mutate):
     worker in the order the loop made them. ``mutate`` runs before the env is
     filed under ``state`` and before anything is queued, so a change the store
     rejects leaves behind neither a new environment nor a write.
+
+    A write that is attempted and *fails* is the other case, and the alert
+    rules are the part of the record that cannot simply be sent again: see
+    :func:`_restore_alert_state` for what is put back and why it is only them.
     """
     is_new_env = eid not in handler.state
     await ensure_env_present(handler, eid)
     env = handler.state.get(eid)
     if env is None:
         env = {"jsons": {}, "reload": {}}
+
+    # read before the change, so a failed write has something to put back
+    alerts_before = _alert_state_of(env)
 
     # the env is handed over directly rather than through ``state.get``: it has
     # just been materialised, and a store that went looking for it again would
@@ -1560,7 +1611,11 @@ async def _write_experiment_metadata(handler, eid, mutate):
 
     if eid not in handler.state:
         handler.state[eid] = env
-    await save_env_off_loop(handler, eid)
+    try:
+        await save_env_off_loop(handler, eid)
+    except Exception:
+        _restore_alert_state(env, alerts_before)
+        raise
     return experiment, is_new_env
 
 
