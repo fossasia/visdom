@@ -900,6 +900,33 @@ def test_set_alert_decodes_the_rule_list(offline_client):
 @pytest.mark.parametrize(
     "call",
     [
+        lambda v: v.set_alert("val_loss", "> 2.0"),
+        lambda v: v.clear_alert("val_loss"),
+    ],
+    ids=["set", "clear"],
+)
+def test_alert_writes_answer_true_offline_rather_than_a_rule_list(offline_client, call):
+    # The two writes keep the convention every other experiment write keeps --
+    # an offline client posts nothing and answers True -- which is why the stubs
+    # type them as the rule list *or* a bool. A caller that iterates the reply
+    # has to narrow it first, and the fixture's transport raises if a request
+    # were made, so this also pins that nothing is posted.
+    offline_client.offline = True
+    assert call(offline_client) is True
+
+
+def test_set_alert_hands_back_the_servers_refusal(offline_client):
+    # A refused rule is a 4xx with the reason in the body, so what comes back
+    # is a mapping rather than the rule list; the client passes it through
+    # instead of trying to read a list out of it.
+    refusal = {"success": False, "error": "unsupported alert condition '>>'"}
+    with replies(offline_client, json.dumps(refusal)):
+        assert offline_client.set_alert("val_loss", ">> 2.0") == refusal
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
         lambda v: v.set_alert("", "> 2.0"),
         lambda v: v.set_alert("   ", "> 2.0"),
         lambda v: v.set_alert(7, "> 2.0"),

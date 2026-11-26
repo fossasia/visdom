@@ -43,8 +43,8 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 from visdom import (
     Tensor,
     Visdom,
-    _AlertList,
     _AlertQueryReply,
+    _AlertReply,
     _EnvIds,
     _Event,
     _EventHandler,
@@ -289,11 +289,11 @@ class AsyncVisdom:
         action: Text = ...,
         message: _OptStr = ...,
         env: _OptStr = ...,
-    ) -> _AlertList: ...
+    ) -> _AlertReply: ...
     async def list_alerts(self, env: _OptStr = ...) -> _AlertQueryReply: ...
     async def clear_alert(
         self, metric: Text, condition: _OptStr = ..., env: _OptStr = ...
-    ) -> _AlertList: ...
+    ) -> _AlertReply: ...
     async def search_experiments(
         self,
         query: _OptStr = ...,
