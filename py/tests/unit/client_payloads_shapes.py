@@ -19,6 +19,7 @@ Every test runs through the ``capture_send`` fixture, which patches ``_send``
 on an ``offline_client`` — no server, no I/O, no sockets.
 """
 
+import datetime
 import math
 
 import numpy as np
@@ -504,8 +505,227 @@ def test_dual_axis_lines_resolves_the_environment_itself(capture_send, offline_c
             dict(X=np.arange(3), Y1=np.arange(3), Y2=np.arange(2)),
             "values of X and Y2 are not in proper shape",
         ),
+        (
+            dict(X=np.zeros((3, 1)), Y1=np.zeros(3), Y2=np.zeros((3, 1))),
+            "values of X and Y1 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros(3), Y1=np.zeros((3, 1)), Y2=np.zeros(3)),
+            "values of X and Y1 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros(3), Y1=np.zeros(3), Y2=np.zeros((3, 1))),
+            "values of X and Y2 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros((3, 2)), Y1=np.zeros((3, 2)), Y2=np.zeros((3, 2))),
+            "values of X should be one-dimensional",
+        ),
+        (
+            dict(X=np.zeros((3, 2, 2)), Y1=np.zeros((3, 2, 2)), Y2=np.zeros((3, 2, 2))),
+            "values of X should be one-dimensional",
+        ),
+        (
+            dict(
+                X=np.arange(2), Y1=np.arange(2), Y2=np.arange(2), opts=dict(xtype=123)
+            ),
+            "xtype should be a string",
+        ),
     ],
 )
 def test_dual_axis_lines_rejects_malformed_input(offline_client, kwargs, message):
     with pytest.raises(AssertionError, match=message):
         offline_client.dual_axis_lines(**kwargs)
+
+
+def test_dual_axis_lines_accepts_column_vectors(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array([[10.0], [20.0]]),
+            Y1=np.array([[1.0], [2.0]]),
+            Y2=np.array([[3.0], [4.0]]),
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == [10.0, 20.0]
+    assert first["y"] == [1.0, 2.0]
+    assert second["x"] == [10.0, 20.0]
+    assert second["y"] == [3.0, 4.0]
+
+
+def test_dual_axis_lines_does_not_mutate_caller_opts(capture_send):
+    opts = {"title": "Immutable Options"}
+    capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2), Y1=np.arange(2), Y2=np.arange(2), opts=opts
+        )
+    )
+    assert opts == {"title": "Immutable Options"}
+
+
+def test_dual_axis_lines_accepts_categorical_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", "Feb"], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["Jan", "Feb"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["Jan", "Feb"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_preserves_numeric_string_labels(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["001", "002"], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["001", "002"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["001", "002"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_accepts_mixed_categorical_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", 1], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["Jan", "1"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["Jan", "1"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_explicit_xtype(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2),
+            Y1=np.arange(2),
+            Y2=np.arange(2),
+            opts={"xtype": "log"},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "log"}
+
+
+def test_dual_axis_lines_none_xtype_allows_categorical_fallback(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", "Feb"],
+            Y1=np.array([10, 20]),
+            Y2=np.array([100, 200]),
+            opts={"xtype": None},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+def test_dual_axis_lines_none_xtype_numeric_omits_xaxis(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2),
+            Y1=np.arange(2),
+            Y2=np.arange(2),
+            opts={"xtype": None},
+        )
+    )
+    assert "xaxis" not in sent["payload"]["layout"]
+
+
+def test_dual_axis_lines_accepts_datetime64_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array(["2023-01-01", "2023-01-02"], dtype="datetime64[D]"),
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["2023-01-01", "2023-01-02"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["2023-01-01", "2023-01-02"]
+    assert second["y"] == [100.0, 200.0]
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+
+def test_dual_axis_lines_accepts_python_date_and_datetime_x(capture_send):
+    sent_date = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[datetime.date(2023, 1, 1), datetime.date(2023, 1, 2)],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent_date["payload"]["data"][0]["x"] == ["2023-01-01", "2023-01-02"]
+    assert sent_date["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+    sent_dt = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[
+                datetime.datetime(2023, 1, 1, 10, 0),
+                datetime.datetime(2023, 1, 2, 12, 30),
+            ],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent_dt["payload"]["data"][0]["x"] == [
+        "2023-01-01T10:00:00",
+        "2023-01-02T12:30:00",
+    ]
+    assert sent_dt["payload"]["layout"]["xaxis"] == {"type": "date"}
+
+
+def test_dual_axis_lines_explicit_xtype_overrides_date(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=[datetime.date(2023, 1, 1), datetime.date(2023, 1, 2)],
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+            opts={"xtype": "category"},
+        )
+    )
+    assert sent["payload"]["layout"]["xaxis"] == {"type": "category"}
+
+
+@pytest.mark.parametrize(
+    "invalid_x",
+    [
+        [object(), object()],
+        [{"a": 1}, {"b": 2}],
+        [None, None],
+        [True, False],
+        [datetime.date(2023, 1, 1), object()],
+    ],
+)
+def test_dual_axis_lines_rejects_invalid_x_element_types(offline_client, invalid_x):
+    with pytest.raises(
+        TypeError,
+        match="values of X must be numeric, datetime, or string categories",
+    ):
+        offline_client.dual_axis_lines(
+            X=invalid_x,
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+
+
+def test_dual_axis_lines_accepts_object_array_of_numbers(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array([1, 2], dtype=object),
+            Y1=np.array([10.0, 20.0]),
+            Y2=np.array([100.0, 200.0]),
+        )
+    )
+    assert sent["payload"]["data"][0]["x"] == [1.0, 2.0]
+    assert "xaxis" not in sent["payload"]["layout"]
