@@ -1089,6 +1089,167 @@ def test_experiment_methods_reject_multi_value_arrays(offline_client, call):
         call(offline_client)
 
 
+@pytest.fixture
+def logging_client(offline_client, tmp_path):
+    """An offline client writing a replay log, as on a machine with no server."""
+    offline_client.offline = True
+    offline_client.log_to_filename = str(tmp_path / "run.log")
+    return offline_client
+
+
+def _logged(client):
+    try:
+        with open(client.log_to_filename) as f:
+            return [json.loads(line) for line in f]
+    except FileNotFoundError:
+        return []
+
+
+@pytest.mark.parametrize(
+    "call, endpoint",
+    [
+        (lambda v: v.experiment(name="r", params={"lr": 0.1}), "experiments/log"),
+        (lambda v: v.log_metrics({"acc": 0.9}, step=1), "experiments/log"),
+        (lambda v: v.finish_experiment(), "experiments/log"),
+        (lambda v: v.set_tags({"dataset": "cifar10"}), "experiments/tags"),
+        (lambda v: v.hparams(win="hp"), "experiments/hparams"),
+        (lambda v: v.update_hparams(win="hp"), "experiments/hparams/update"),
+    ],
+    ids=[
+        "experiment",
+        "log_metrics",
+        "finish_experiment",
+        "set_tags",
+        "hparams",
+        "update_hparams",
+    ],
+)
+def test_offline_log_keeps_experiment_writes(logging_client, call, endpoint):
+    """replay_log() can only rebuild what was written to the log."""
+    call(logging_client)
+    assert [logged[0] for logged in _logged(logging_client)] == [endpoint]
+
+
+def test_offline_log_leaves_reads_out(logging_client):
+    """Replaying a read would only ask the question again."""
+    logging_client.get_tags()
+    logging_client.search_experiments("lr < 0.1")
+    logging_client.compare_experiments(["a", "b"])
+    assert _logged(logging_client) == []
+
+
+def test_replay_log_resends_an_offline_experiment(logging_client):
+    logging_client.experiment(name="r", params={"lr": 0.1})
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.set_tags({"dataset": "cifar10"})
+    logging_client.finish_experiment()
+
+    with echoes(logging_client) as send:
+        logging_client.replay_log(logging_client.log_to_filename)
+
+    replayed = [(c.args[1], c.args[0]["action"]) for c in send.call_args_list]
+    assert replayed == [
+        ("experiments/log", "log"),
+        ("experiments/log", "metrics"),
+        ("experiments/tags", "set"),
+        ("experiments/log", "finish"),
+    ]
+
+
+def _replay_answering(client, answer):
+    """Replay the log with each experiment call answered by ``answer(msg)``."""
+    sent = []
+
+    def send(msg, endpoint="events", **_):
+        sent.append((endpoint, msg.get("action")))
+        return answer(msg) if endpoint == "experiments/log" else "ok"
+
+    client.offline = False
+    with patch.object(client, "_send", side_effect=send):
+        client.replay_log(client.log_to_filename)
+    return sent
+
+
+def _ok(msg):
+    """The server's reply: the experiment, finished if that's what was asked."""
+    status = "finished" if msg.get("action") == "finish" else "running"
+    return json.dumps({"env_id": msg["eid"], "status": status, "metrics": []})
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        False,
+        "<html><title>409: experiment is finished</title></html>",
+        '{"success": false, "error": "Experiment logging is disabled"}',
+        "",
+        "[]",
+    ],
+    ids=["no_connection", "error_page", "refused", "empty", "not_an_experiment"],
+)
+def test_replay_log_does_not_finish_a_run_with_a_failed_call(logging_client, failure):
+    """Finished, an incomplete run would look complete."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.1}, step=1)
+    logging_client.log_metrics({"acc": 0.2}, step=2)
+    logging_client.finish_experiment()
+    answer = lambda msg: failure if msg.get("step") == 1 else _ok(msg)  # noqa: E731
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, answer)
+    assert sent == [("experiments/log", a) for a in ("log", "metrics", "metrics")]
+    messages = [c.args[0] % c.args[1:] for c in warning.call_args_list]
+    assert any("not finishing the experiment for 'main'" in m for m in messages)
+    assert any("1 logged experiment call(s) for 'main' failed" in m for m in messages)
+
+
+def test_replay_log_still_finishes_the_runs_that_had_no_failure(logging_client):
+    for env, step in (("a", 1), ("b", 2)):
+        logging_client.log_metrics({"acc": 0.5}, step=step, env=env)
+        logging_client.finish_experiment(env=env)
+    answer = lambda msg: False if msg["eid"] == "a" else _ok(msg)  # noqa: E731
+    with patch("visdom.logger.warning"):
+        sent = _replay_answering(logging_client, answer)
+    assert sent.count(("experiments/log", "finish")) == 1
+
+
+def test_replay_log_finishes_a_run_whose_calls_all_went_through(logging_client):
+    logging_client.log_metrics({"acc": 0.5}, step=1)
+    logging_client.finish_experiment()
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, _ok)
+    assert sent[-1] == ("experiments/log", "finish")
+    warning.assert_not_called()
+
+
+def test_replay_log_sends_a_later_finish_after_one_that_failed(logging_client):
+    """A failed finish loses nothing, so the next one in the log is still sent."""
+    logging_client.log_metrics({"acc": 0.5}, step=1)
+    logging_client.finish_experiment()
+    logging_client.finish_experiment()
+    lost = iter([None, False])  # the metric goes through, the first finish doesn't
+
+    def answer(msg):
+        reply = next(lost, None)
+        return _ok(msg) if reply is None else reply
+
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, answer)
+    assert sent.count(("experiments/log", "finish")) == 2
+    messages = [c.args[0] % c.args[1:] for c in warning.call_args_list]
+    assert messages == [
+        "replay_log: finishing the experiment for 'main' failed; it stays running"
+    ]
+
+
+def test_offline_replay_sends_the_finish(logging_client):
+    """Offline, _send says nothing about whether a call went through."""
+    logging_client.log_metrics({"acc": 0.5}, step=1)
+    logging_client.finish_experiment()
+    with echoes(logging_client) as send:
+        logging_client.replay_log(logging_client.log_to_filename)
+    assert [c.args[0]["action"] for c in send.call_args_list] == ["metrics", "finish"]
+
+
 def test_experiment_decodes_a_json_reply(offline_client):
     with replies(offline_client, json.dumps({"name": "r1", "status": "running"})):
         assert offline_client.experiment(name="r1") == {

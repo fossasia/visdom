@@ -36,7 +36,7 @@ import logging
 import warnings
 import time
 import errno
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -199,6 +199,20 @@ def _refusal_reason(body):
 
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
+
+# Endpoints that change what the server holds, so replay_log() can rebuild it.
+# Reads (search, compare, get_tags, ...) stay out: replaying one only asks
+# the question again.
+LOGGED_ENDPOINTS = frozenset(
+    {
+        "events",
+        "update",
+        "experiments/log",
+        "experiments/tags",
+        "experiments/hparams",
+        "experiments/hparams/update",
+    }
+)
 
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
 
@@ -1036,6 +1050,24 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _experiment_reply(reply):
+    """Whether a reply to an experiment call is the experiment, as on success.
+
+    A lost connection gives False, a rejected call an error page, and a
+    refused one (a readonly server, say) ``{"success": false, ...}``.
+    """
+    if isinstance(reply, (str, bytes)):
+        try:
+            reply = json.loads(reply)
+        except ValueError:
+            return False
+    return (
+        isinstance(reply, dict)
+        and isinstance(reply.get("env_id"), str)
+        and isinstance(reply.get("status"), str)
+    )
+
+
 def _without_userinfo(url):
     """``url`` with any ``user:password@`` dropped from its host.
 
@@ -1576,19 +1608,22 @@ class Visdom(object):
 
     # Utils
     def _log(self, msg, endpoint):
-        if self.log_to_filename is not None:
-            if endpoint in ["events", "update"]:
-                with open(self.log_to_filename, "a+") as log_file:
-                    log_file.write(
-                        json.dumps(
-                            [
-                                endpoint,
-                                msg,
-                            ],
-                            cls=NanSafeEncoder,
-                        )
-                        + "\n"
-                    )
+        if self.log_to_filename is None or endpoint not in LOGGED_ENDPOINTS:
+            return
+        # get_tags shares its endpoint with set_tags; only the write is kept.
+        if endpoint == "experiments/tags" and msg.get("action") == "get":
+            return
+        with open(self.log_to_filename, "a+") as log_file:
+            log_file.write(
+                json.dumps(
+                    [
+                        endpoint,
+                        msg,
+                    ],
+                    cls=NanSafeEncoder,
+                )
+                + "\n"
+            )
 
     def _note_refusal(self, status, body):
         """Say so when the server turns a request down.
@@ -2271,12 +2306,45 @@ class Visdom(object):
         """
         This function takes the contents of a visdom log and replays them to
         the current server to restore the state or handle any missing entries.
+
+        Experiment calls are replayed too. Metrics are appended, so a log
+        replayed twice records them twice. If a metric or log call fails, the
+        experiment's logged finish is not sent and it stays running, with a
+        warning: finished, a run missing some of its calls would look complete.
         """
         with open(log_filename) as f:
             log_entries = f.readlines()
+        failed = Counter()
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
-            self._send(msg, endpoint, from_log=True)
+            if endpoint != "experiments/log":
+                self._send(msg, endpoint, from_log=True)
+                continue
+            eid = msg.get("eid")
+            if msg.get("action") == "finish" and failed[eid]:
+                logger.warning(
+                    "replay_log: not finishing the experiment for %r, since %d of"
+                    " its logged calls failed; it stays running",
+                    eid,
+                    failed[eid],
+                )
+                continue
+            reply = self._send(msg, endpoint, from_log=True)
+            if self.offline or _experiment_reply(reply):
+                continue
+            if msg.get("action") == "finish":
+                # Nothing is lost: a finish later in the log can still go through.
+                logger.warning(
+                    "replay_log: finishing the experiment for %r failed; it stays"
+                    " running",
+                    eid,
+                )
+            else:
+                failed[eid] += 1
+        for eid, count in failed.items():
+            logger.warning(
+                "replay_log: %d logged experiment call(s) for %r failed", count, eid
+            )
 
     def restore_run(self, json_path, env=None, delay=None):
         """Replay plots from a run recorded with ``record_data=True``.
