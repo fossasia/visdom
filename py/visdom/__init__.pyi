@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
 
 ### Type aliases for commonly-used types.
@@ -12,6 +13,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tupl
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
+_OptPath = Optional[Union[Text, bytes, os.PathLike[str], os.PathLike[bytes]]]
 
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
@@ -206,7 +208,7 @@ class Visdom:
     ) -> _NotebookEmbed: ...
     def text(
         self,
-        text: Text,
+        text: object,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -263,7 +265,7 @@ class Visdom:
     def audio(
         self,
         tensor: Tensor = ...,
-        audiofile: _OptStr = ...,
+        audiofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -272,7 +274,7 @@ class Visdom:
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
-        videofile: _OptStr = ...,
+        videofile: _OptPath = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
