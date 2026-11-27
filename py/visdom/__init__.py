@@ -3818,6 +3818,8 @@ class Visdom(object):
         to plot. It also takes an optional `X` tensor that specifies the
         corresponding x-axis values; `X` can be an `N` tensor (in which case all
         lines will share the same x-axis values) or have the same size as `Y`.
+        An `N x 1` column vector is accepted wherever an `N` tensor is, for
+        `X`, `Y` and `Z`.
 
         For 3D line plots, an optional `Z` tensor can be provided with the same
         size as `Y` (or as an `N` tensor shared across lines). When `Z` is
@@ -3874,9 +3876,9 @@ class Visdom(object):
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
         if X is not None and X.ndim == 2 and X.shape[1] == 1:
-            X = X.ravel()
+            X = np.asarray(X).reshape(-1)
         if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
-            Z = Z.ravel()
+            Z = np.asarray(Z).reshape(-1)
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"

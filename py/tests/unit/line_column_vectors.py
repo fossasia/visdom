@@ -88,6 +88,24 @@ def test_all_column_vectors_still_work(capture_send):
     assert actual == expected
 
 
+def test_column_matrix_x_and_z_are_flattened(capture_send):
+    """``ravel()`` keeps an ``np.matrix`` 2D, so it must be converted first."""
+    Y = np.arange(N, dtype=float)
+    X = np.arange(N, dtype=float)
+    Z = np.ones(N)
+
+    expected = _traces(capture_send, Y=Y, X=X, Z=Z, is3d=True)
+    actual = _traces(
+        capture_send,
+        Y=Y,
+        X=np.matrix(X.reshape(-1, 1)),
+        Z=np.matrix(Z.reshape(-1, 1)),
+        is3d=True,
+    )
+
+    assert actual == expected
+
+
 @pytest.mark.parametrize(
     "X_shape, message",
     [

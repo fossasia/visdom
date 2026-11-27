@@ -1186,6 +1186,7 @@ This function draws a line plot. It takes as input an `N` or `NxM` tensor
 to plot. It also takes an optional `X` tensor that specifies the
 corresponding x-axis values; `X` can be an `N` tensor (in which case all
 lines will share the same x-axis values) or have the same size as `Y`.
+An `N x 1` column vector is accepted wherever an `N` tensor is, for `X`, `Y` and `Z`.
 
 `update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
