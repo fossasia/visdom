@@ -535,6 +535,7 @@ def test_learning_curve_in_offline_mode_logs_the_defaults(tmp_path):
     assert created["layout"]["yaxis"]["title"] == {"text": "metric"}
     # Replaying the append to a missing window still builds the full layout.
     assert "title" not in appended["opts"]
+    assert appended["opts_create"]["title"] == "Learning Curve"
     assert appended["layout_create"]["title"] == {"text": "Learning Curve"}
     assert appended["layout_create"]["xaxis"]["title"] == {"text": "step"}
     assert appended["layout_create"]["yaxis"]["title"] == {"text": "metric"}
@@ -552,6 +553,7 @@ def test_learning_curve_append_without_preflight_sends_defaults_to_create_only(
 
     (msg,) = sends_to(send, "update")
     assert not {"title", "ylabel", "_create_defaults"} & set(msg["opts"])
+    assert msg["opts_create"] == {"title": "Learning Curve", "ylabel": "metric"}
     assert msg["layout"] == {}
     assert msg["layout_create"]["title"] == {"text": "Learning Curve"}
     assert msg["layout_create"]["xaxis"]["title"] == {"text": "epoch"}

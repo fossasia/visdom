@@ -156,13 +156,21 @@ def test_layout_create_only_fills_in_the_empty_layout_an_append_sends():
     assert create_args_for_append({"data": []})["layout"] == {}
 
 
-def test_append_takes_the_pane_title_from_layout_create_only_when_unset():
-    layout = {"title": {"text": "Loss"}}
-    unset = {"data": [], "opts": {}, "layout_create": layout}
-    assert create_args_for_append(unset)["opts"]["title"] == "Loss"
+def test_append_takes_opts_create_under_the_opts_it_sends():
+    args = {"data": [], "opts": {"xlabel": "epoch"}, "opts_create": {"title": "Loss"}}
+    assert create_args_for_append(args)["opts"] == {"xlabel": "epoch", "title": "Loss"}
 
-    empty = {"data": [], "opts": {"title": ""}, "layout_create": layout}
+    empty = {"data": [], "opts": {"title": ""}, "opts_create": {"title": "Loss"}}
     assert create_args_for_append(empty)["opts"]["title"] == ""
+
+    no_opts = {"data": [], "opts_create": {"title": "Loss"}}
+    assert create_args_for_append(no_opts)["opts"] == {"title": "Loss"}
+
+
+def test_append_doesnt_name_the_pane_after_the_layout():
+    """As on a create: the layout's title isn't the pane's, which comes from opts."""
+    args = {"data": [], "opts": {}, "layout_create": {"title": {"text": "Inner"}}}
+    assert create_args_for_append(args)["opts"] == {}
 
 
 # --------------------------------------------------------------- stringify ----

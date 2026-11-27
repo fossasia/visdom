@@ -3806,6 +3806,9 @@ class Visdom(object):
             if send_layout_create:
                 create_opts = dict(create_defaults, **opts)
                 data_to_send["layout_create"] = _opts2layout(create_opts, is3d)
+                if create_defaults:
+                    # The pane title too, as if the window were created first.
+                    data_to_send["opts_create"] = create_defaults
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)

@@ -250,20 +250,32 @@ class TestCreateOnAppendLayout(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 200, resp.body)
         self.assertEqual(self.layout_of(win), {"title": "original"})
 
-    def test_layout_create_title_names_the_created_pane(self):
-        self.append_scatter("named", layout={}, layout_create={"title": {"text": "t"}})
+    def test_opts_create_names_the_created_pane(self):
+        self.update(
+            "named",
+            self.SCATTER,
+            append=True,
+            layout={},
+            layout_create={"title": {"text": "inner"}},
+            opts_create={"title": "t"},
+        )
         self.assertEqual(self.get_win_data("named")["title"], "t")
 
-    def test_opts_title_wins_over_the_layout_create_title(self):
+    def test_opts_title_wins_over_opts_create(self):
         self.update(
             "both",
             self.SCATTER,
             append=True,
             layout={},
-            layout_create={"title": "layout"},
             opts={"title": "opts"},
+            opts_create={"title": "default"},
         )
         self.assertEqual(self.get_win_data("both")["title"], "opts")
+
+    def test_opts_create_must_be_an_object(self):
+        resp = self.update("bad", self.SCATTER, append=True, opts_create="t")
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(resp.reason, "opts_create must be an object")
 
     def test_a_non_object_layout_create_is_rejected(self):
         resp = self.append_scatter("made", layout={}, layout_create="title")
@@ -335,6 +347,20 @@ class TestClientCreatesWithoutPreflight(VisdomHTTPTestCase):
         layout = direct["content"]["layout"]
         self.assertEqual(layout["title"], {"text": "Learning Curve"})
         self.assertEqual(layout["yaxis"]["title"], {"text": "metric"})
+        self.assertSamePane(probed, direct)
+
+    def test_learning_curve_append_with_a_plotly_title_creates_the_same_pane(self):
+        """The layout is titled by layoutopts, the pane by opts, either way."""
+        opts = {"layoutopts": {"plotly": {"title": {"text": "Inner plot"}}}}
+        probed, direct = self.created_by(
+            lambda vis, win: vis.learning_curve(
+                {"loss": [0.9]}, step=[1], win=win, update="append", opts=opts
+            ),
+            "lc_inner",
+        )
+        self.assertEqual(probed["title"], "Learning Curve")
+        self.assertEqual(direct["title"], "Learning Curve")
+        self.assertEqual(direct["content"]["layout"]["title"], {"text": "Inner plot"})
         self.assertSamePane(probed, direct)
 
     def test_image_store_history_creates_an_image_history_pane(self):

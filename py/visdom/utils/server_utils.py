@@ -668,17 +668,18 @@ def create_args_for_append(args):
     it. Clients that don't send the key are unaffected -- the layout stays
     whatever ``layout`` held, defaulting to ``{}`` rather than raising when the
     request omits it entirely.
+
+    ``opts_create`` does the same for opts: defaults such as a pane title,
+    which the client leaves out of ``opts`` so that an append doesn't change
+    an existing window. ``opts`` wins over them, as on the call that creates a
+    window.
     """
     layout = args.get("layout")
     if not layout:
         layout = args.get("layout_create")
     created = dict(args, layout=layout if isinstance(layout, dict) else {})
-    # The pane title comes from opts; fall back to the title being laid out.
-    title = created["layout"].get("title")
-    title = title.get("text") if isinstance(title, dict) else title
-    opts = args.get("opts") if isinstance(args.get("opts"), dict) else {}
-    if title and opts.get("title") is None:
-        created["opts"] = dict(opts, title=title)
+    if isinstance(args.get("opts_create"), dict):
+        created["opts"] = dict(args["opts_create"], **(args.get("opts") or {}))
     return created
 
 
