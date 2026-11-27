@@ -20,6 +20,7 @@ import heapq
 import math
 
 from visdom.data_model.base import DataStore
+from visdom.experiments import alerts as alert_rules
 from visdom.experiments.compare import build_comparison
 from visdom.experiments.models import (
     Experiment,
@@ -300,11 +301,14 @@ class ExperimentStore:
             experiment.set_tag(key, value)
         return self._write(env_id, env, experiment)
 
-    def log_metric(self, env_id, key, value, step=None):
-        """Append a metric to ``env_id``'s experiment, creating it if needed."""
-        return self.log_metrics(env_id, ((key, value),), step=step)
+    def log_metric(self, env_id, key, value, step=None, fired=None):
+        """Append a metric to ``env_id``'s experiment, creating it if needed.
 
-    def log_metrics(self, env_id, observations, step=None):
+        ``fired`` is handed to :meth:`log_metrics` and means the same there.
+        """
+        return self.log_metrics(env_id, ((key, value),), step=step, fired=fired)
+
+    def log_metrics(self, env_id, observations, step=None, fired=None):
         """Append several observations in one read-append-write, creating as needed.
 
         ``observations`` is a mapping or an iterable of ``(key, value)`` pairs,
@@ -327,6 +331,22 @@ class ExperimentStore:
         and a run that was never logged to has no business appearing in a
         search. A terminal experiment still refuses the call, because what is
         being refused is the attempt, not the observations it carried.
+
+        ``fired`` is where the alert rules that these observations set off are
+        collected, as :class:`~visdom.experiments.alerts.AlertEvent` objects.
+        The rules are folded here, between the append and the write, for two
+        reasons: a rule's running state is part of the record, so it has to be
+        updated before the record is serialised or the state is lost on the
+        next read; and the fold reads nothing but the rules themselves, so the
+        one write this call already makes carries it for free.
+
+        The fold happens whether or not a list was passed. It is the record's
+        rules being brought up to date with the record's own observations
+        rather than a service to this caller: a streak that skipped whatever
+        was logged through a path asking no questions would be counting a
+        series the run never had, and would fire late or not at all.
+        ``fired`` only says where the notifications go, and an experiment with
+        no rules skips the fold outright either way.
         """
         items = list(
             observations.items() if hasattr(observations, "items") else observations
@@ -340,6 +360,9 @@ class ExperimentStore:
             experiment = Experiment(env_id=env_id, name=env_id)
         for key, value in items:
             experiment.add_metric(key, value, step)
+        events = alert_rules.evaluate(experiment, items, step)
+        if fired is not None:
+            fired.extend(events)
         return self._write(env_id, env, experiment)
 
     def update_tags(self, env_id, tags, append=False, env_data=None):
@@ -396,6 +419,54 @@ class ExperimentStore:
         self._reject_if_terminal(env_id, experiment, "finish")
         experiment.finish(status)
         return self._write(env_id, env, experiment)
+
+    def set_alert(self, env_id, alert):
+        """Attach one alert rule to ``env_id``'s experiment and persist it.
+
+        The experiment is created if the environment has none: rules are
+        normally set before the run logs its first observation, which is the
+        order that makes them useful, and refusing that order would mean
+        logging a throwaway metric to have something to attach a rule to.
+
+        A terminal experiment refuses the rule. It will never record another
+        observation, so the rule could not fire -- and a run that has stopped
+        is exactly where a rule added afterwards would look like it had been
+        watching all along.
+        """
+        env, experiment = self._read(env_id)
+        if experiment is not None:
+            self._reject_if_terminal(env_id, experiment, "set an alert on")
+        else:
+            experiment = Experiment(env_id=env_id, name=env_id)
+        experiment.set_alert(alert)
+        return self._write(env_id, env, experiment)
+
+    def clear_alerts(self, env_id, key, condition=None):
+        """Drop ``key``'s alert rules from ``env_id``; raise if it has none.
+
+        Allowed on a terminal experiment, unlike setting one: a rule that can
+        no longer fire is exactly the kind a caller tidies up afterwards, and
+        removing it changes nothing about what the run recorded.
+
+        Nothing is written when nothing matched, so clearing a rule that was
+        never set leaves the environment untouched rather than queueing a
+        write of an unchanged record.
+        """
+        env, experiment = self._read(env_id)
+        if experiment is None:
+            raise KeyError("no experiment logged for env {0!r}".format(env_id))
+        if not experiment.clear_alerts(key, condition):
+            return experiment
+        return self._write(env_id, env, experiment)
+
+    def get_alerts(self, env_id):
+        """Return ``env_id``'s alert rules, or ``[]`` if it has no experiment.
+
+        A pure read, so it answers from the env the provider serves and leaves
+        one that is not already in memory out of it.
+        """
+        experiment = self._read_metadata(env_id)
+        return [] if experiment is None else experiment.get_alerts()
 
     def get_experiment(self, env_id):
         """Return ``env_id``'s :class:`Experiment`, or ``None`` if it has none.
