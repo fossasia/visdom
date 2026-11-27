@@ -2256,6 +2256,38 @@ class AlertsHandler(BaseHandler):
 
     VALID_ACTIONS = ("get", "set", "clear")
 
+    # The actions that only read. Named apart from ``VALID_ACTIONS`` because
+    # ``prepare`` has to tell a read from a write before the handler runs.
+    READ_ACTIONS = ("get",)
+
+    def body_writes(self):
+        """Whether this POST changes anything, which is its ``action`` and nothing else.
+
+        The endpoint is in ``WRITE_ENDPOINTS`` because two of its three actions
+        write, which is what denies a viewer and a workspace that is out of
+        storage the rules they must not change. Read off the path alone that
+        also denies them ``action: get`` -- the read this very handler answers
+        over GET, for the same caller, from the same state. A viewer reading the
+        rules on a run they are watching is the whole point of their role.
+
+        The body is decoded the same way :meth:`post` decodes it, and a body
+        that cannot be decoded is treated as a write: ``post`` is about to
+        refuse it with a 400, and a request nobody can read is not one to
+        exempt from the role check on the strength of a guess. An action that
+        is not one of :data:`READ_ACTIONS` -- including an unknown one -- is a
+        write for the same reason.
+
+        ``clear`` stays a write even though it only removes: it queues a write
+        of the environment exactly as ``set`` does, and twenty bounded rules
+        are not what fills a workspace, so there is nothing here to match the
+        exemption ``close`` and ``delete_env`` have from ``FILL_ENDPOINTS``.
+        """
+        try:
+            args = _decode_json_body(self.request.body)
+        except tornado.web.HTTPError:
+            return True
+        return args.get("action", "get") not in AlertsHandler.READ_ACTIONS
+
     @staticmethod
     def _as_list(alerts):
         return [alert.to_dict() for alert in alerts]

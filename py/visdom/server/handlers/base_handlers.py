@@ -308,7 +308,26 @@ class BaseHandler(
             self.request.method == "POST"
             and not self.path_args
             and endpoint in endpoints
+            and self.body_writes()
         )
+
+    def body_writes(self):
+        """Whether this POST's body asks for a change, for a handler whose path cannot say.
+
+        Every other endpoint in :data:`WRITE_ENDPOINTS` is a write by virtue of
+        being posted to at all, so the default answer is yes and the question
+        never comes up. An endpoint that carries the operation in its body --
+        ``/experiments/alerts`` reads with ``action: get`` and writes with the
+        other two -- would otherwise have its reads refused for a viewer and for
+        a workspace that is out of storage, which is the same read that answers
+        from GET on the same handler.
+
+        A handler overriding this answers for the body it is about to be given,
+        before it has been given it, so it must decide on the request body alone
+        and must not raise: a body it cannot read is not a read it can vouch
+        for, and the safe answer there is the default one.
+        """
+        return True
 
     def get_current_user(self):
         """
