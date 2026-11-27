@@ -250,10 +250,7 @@ class JSONStore(DataStore):
 
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""
-        if self.env_path is None:
-            return False
-        os.makedirs(os.path.abspath(self.env_path), exist_ok=True)
-        return bool(self.serialize_env(eid, env_data))
+        return bool(self.save_envs({eid: env_data}, [eid]))
 
     def save_envs(self, state, eids):
         """Persist the named subset of ``state``; return the ids actually written.
@@ -266,18 +263,21 @@ class JSONStore(DataStore):
             return []
         os.makedirs(os.path.abspath(self.env_path), exist_ok=True)
         written = []
+        failure = None
         for eid in eids:
             if eid not in state:
                 continue
             try:
                 saved = self.serialize_env(eid, state[eid])
-            except Exception:
-                logging.exception(
-                    "Could not save environment %r; saving the others", eid
-                )
+            except Exception as error:
+                logging.exception("Could not save environment %r", eid)
+                if failure is None:
+                    failure = error
                 continue
             if saved:
                 written.append(eid)
+        if failure is not None and not written:
+            raise failure
         return written
 
     def _atomic_write(self, path, payload):

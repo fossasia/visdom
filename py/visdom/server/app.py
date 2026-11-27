@@ -698,7 +698,7 @@ class Application(tornado.web.Application):
             for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
                 try:
                     if state.env_path is not None:
-                        state.storage.save_all(state.state)
+                        state.check_final_save(state.storage.save_all(state.state))
                 except Exception as error:
                     failures.append(error)
                     continue

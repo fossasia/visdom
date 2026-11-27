@@ -115,7 +115,10 @@ def test_save_envs_keeps_going_past_an_env_it_cannot_write(store):
     assert store.save_envs(state, ["alpha", bad, "zeta"]) == ["alpha", "zeta"]
     assert store.load_env("alpha") == _env("a")
     assert store.load_env("zeta") == _env("z")
+    state = {"alpha": _env("a2"), bad: _env("b"), "zeta": _env("z2")}
     assert store.save_all(state) == ["alpha", "zeta"]
+    assert store.load_env("alpha") == _env("a2")
+    assert store.load_env("zeta") == _env("z2")
     with pytest.raises(ValueError):
         store.save_env(bad, _env("b"))
 

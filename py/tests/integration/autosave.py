@@ -349,14 +349,46 @@ class TestShutdown(AutosaveTestCase):
         self.assertEqual(self.dirty_count("unsaved"), 0)
 
     def test_an_unwritable_environment_does_not_stop_the_final_save(self):
-        for eid in ("alpha", "bad\x00name", "zeta"):
+        bad = "bad\x00name"
+        for eid in ("alpha", bad, "zeta"):
             self.app.state[eid] = {"jsons": {}, "reload": {}}
             self.app.mark_dirty(eid)
 
-        self.app.shutdown_storage()
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
 
         self.assertIn("alpha", self.app.storage.list_envs())
         self.assertIn("zeta", self.app.storage.list_envs())
+        self.assertEqual(self.dirty_count("zeta"), 0)
+        self.assertEqual(self.dirty_count(bad), 1)
+
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
+
+    def test_an_environment_that_failed_is_saved_by_the_next_shutdown(self):
+        for eid in ("alpha", "zeta"):
+            self.app.state[eid] = {"jsons": {}, "reload": {}}
+            self.app.mark_dirty(eid)
+        serialize_env = self.app.storage.serialize_env
+        failed = []
+
+        def fail_zeta_once(eid, env_data):
+            if eid == "zeta" and not failed:
+                failed.append(eid)
+                raise OSError("disk busy")
+            return serialize_env(eid, env_data)
+
+        with mock.patch.object(
+            self.app.storage, "serialize_env", side_effect=fail_zeta_once
+        ):
+            with self.assertRaises(OSError):
+                self.app.shutdown_storage()
+            self.assertNotIn("zeta", self.app.storage.list_envs())
+
+            self.app.shutdown_storage()
+
+        self.assertIn("zeta", self.app.storage.list_envs())
+        self.assertEqual(self.dirty_count("zeta"), 0)
 
 
 class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
