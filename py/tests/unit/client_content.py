@@ -33,6 +33,7 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+import math
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -122,6 +123,14 @@ def test_text_defaults_opts_to_an_empty_dict(capture_send):
     assert sent["payload"]["eid"] is None
 
 
+def test_text_leaves_the_callers_opts_untouched(capture_send):
+    """A numeric title is cast to a string; that must not rewrite the caller's dict."""
+    opts = {"title": 5}
+    sent = capture_send(lambda v: v.text("hi", opts=opts))
+    assert opts == {"title": 5}
+    assert sent["payload"]["opts"]["title"] == "5"
+
+
 def test_text_passes_an_unrecognized_opt_through(capture_send):
     """``_assert_opts`` type-checks the opts it knows; it does not gate keys."""
     sent = capture_send(lambda v: v.text("hi", opts={"not_an_opt": 1}))
@@ -132,6 +141,68 @@ def test_text_passes_an_unrecognized_opt_through(capture_send):
 def test_text_rejects_a_mistyped_known_opt(capture_send):
     with pytest.raises(AssertionError):
         capture_send(lambda v: v.text("hi", opts={"colormap": 7}))
+
+
+@pytest.mark.parametrize("wrap", [bytes, bytearray, memoryview])
+def test_text_decodes_utf8_buffers_to_a_string(capture_send, wrap):
+    """bytes, bytearray and memoryview all decode, none renders as its repr."""
+    sent = capture_send(lambda v: v.text(wrap("café".encode("utf-8"))))
+    assert block(sent) == {"content": "café", "type": "text"}
+
+
+def test_text_decodes_a_strided_byte_memoryview(capture_send):
+    """A non-contiguous one-dimensional byte view still decodes its content."""
+    view = memoryview(np.frombuffer(b"h.i.", dtype=np.uint8))[::2]
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_cast_to_bytes(capture_send):
+    view = memoryview(np.array([104, 105], dtype=np.uint8)).cast("B")
+    sent = capture_send(lambda v: v.text(view))
+    assert block(sent)["content"] == "hi"
+
+
+def test_text_decodes_a_memoryview_over_a_bytearray(capture_send):
+    sent = capture_send(lambda v: v.text(memoryview(bytearray(b"hi"))))
+    assert block(sent)["content"] == "hi"
+
+
+@pytest.mark.parametrize(
+    "make_view",
+    [
+        pytest.param(lambda: memoryview(np.arange(3)), id="int64"),
+        pytest.param(lambda: memoryview(np.array([1.5])), id="float64"),
+        pytest.param(lambda: memoryview(np.array([1, 2], dtype=np.int16)), id="int16"),
+        pytest.param(lambda: memoryview(np.zeros((2, 3), np.uint8)), id="two_d_bytes"),
+    ],
+)
+def test_text_rejects_a_memoryview_over_non_byte_data(offline_client, make_view):
+    """Decoding raw memory would print control characters, so it is refused."""
+    with pytest.raises(TypeError, match="memoryview"):
+        offline_client.text(make_view())
+
+
+def test_text_coerces_a_numpy_array_to_its_str_form(capture_send):
+    sent = capture_send(lambda v: v.text(np.array([1, 2, 3])))
+    assert block(sent)["content"] == "[1 2 3]"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        pytest.param(42, "42", id="int"),
+        pytest.param(3.5, "3.5", id="float"),
+        pytest.param(True, "True", id="bool"),
+        pytest.param(None, "None", id="none"),
+        pytest.param([1, 2, 3], "[1, 2, 3]", id="list"),
+    ],
+)
+def test_text_coerces_non_string_input_to_str(capture_send, value, expected):
+    """Values that happen to JSON-serialize still go through str() for a
+    stable content type on the wire."""
+    sent = capture_send(lambda v: v.text(value))
+    assert block(sent)["content"] == expected
 
 
 # ------------------------------------------------------------ properties ----
@@ -564,7 +635,14 @@ def test_register_embeddings_entity_selected_without_a_getter(offline_client):
 def test_register_embeddings_region_selected_reruns_tsne_on_the_subset(offline_client):
     offline_client.use_socket = True
     offline_client._register_embeddings(
-        FEATURES, LABELS, [], None, None, "w1", None, {}
+        FEATURES,
+        LABELS,
+        [{"group": group} for group in [0, 1, 0]],
+        None,
+        None,
+        "w1",
+        None,
+        {},
     )
     handler = offline_client.event_handlers[(None, "w1")][0]
 
@@ -737,10 +815,29 @@ def test_delete_envs_rejects_a_non_list(offline_client, bad):
         offline_client.delete_envs(bad)
 
 
-def test_delete_envs_rejects_a_non_string_entry(offline_client):
-    with patch.object(offline_client, "delete_env"):
+@pytest.mark.parametrize("bad", [7, None, {}])
+@pytest.mark.parametrize("prefix", [["keep"], ["first", "second"]])
+def test_delete_envs_rejects_a_non_string_entry(offline_client, bad, prefix):
+    with patch.object(offline_client, "delete_env") as delete:
         with pytest.raises(TypeError):
-            offline_client.delete_envs(["ok", 7])
+            offline_client.delete_envs(prefix + [bad])
+        delete.assert_not_called()
+
+
+def test_delete_envs_uses_validated_ids_when_caller_mutates_list(offline_client):
+    ids = ["first", "second"]
+
+    def delete_and_mutate(env):
+        if env == "first":
+            ids[1] = None
+            ids.append("third")
+        return "ok"
+
+    with patch.object(
+        offline_client, "delete_env", side_effect=delete_and_mutate
+    ) as delete:
+        assert offline_client.delete_envs(ids) == ["ok", "ok"]
+    assert [call.args[0] for call in delete.call_args_list] == ["first", "second"]
 
 
 # -------------------------------------------------- experiment messages ----
@@ -804,6 +901,194 @@ def test_experiment_methods_reject_malformed_input(offline_client, call):
         call(offline_client)
 
 
+def test_log_metrics_accepts_torch_tensors(offline_client):
+    """A loss tensor is what a PyTorch loop has at hand; send it as a number."""
+    torch = pytest.importorskip("torch")
+    weight = torch.ones(2, requires_grad=True)
+    loss = (weight * 0.25).sum()
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {
+                "loss": loss,
+                "correct": torch.tensor(7),
+                "lr": torch.tensor(0.5, dtype=torch.bfloat16),
+            },
+            step=torch.tensor(3),
+        )
+    assert msg["metrics"] == {"loss": 0.5, "correct": 7, "lr": 0.5}
+    assert type(msg["metrics"]["correct"]) is int
+    assert msg["step"] == 3 and type(msg["step"]) is int
+    json.dumps(msg)
+
+
+def test_log_metrics_accepts_numpy_values(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"acc": np.array(0.75), "top1": np.array([0.5]), "n": np.int64(4)},
+            step=np.int64(2),
+        )
+    assert msg["metrics"] == {"acc": 0.75, "top1": 0.5, "n": 4}
+    assert msg["step"] == 2
+    json.dumps(msg)
+
+
+def test_log_metrics_sends_a_longdouble_as_a_float(offline_client):
+    """np.longdouble(...).item() is still a numpy scalar."""
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"loss": np.longdouble(0.5), "acc": np.array([0.25], dtype=np.longdouble)}
+        )
+    assert msg["metrics"] == {"loss": 0.5, "acc": 0.25}
+    assert all(type(v) is float for v in msg["metrics"].values())
+    json.dumps(msg)
+
+
+@pytest.mark.parametrize(
+    "masked",
+    [
+        np.ma.masked_array([3.5], mask=[True]),
+        np.ma.masked_array(2.0, mask=True),
+        np.ma.masked,
+    ],
+    ids=["one_element", "zero_dim", "constant"],
+)
+def test_a_masked_value_is_sent_as_missing(offline_client, masked):
+    """Masking means no value; its hidden fill must not be logged."""
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics({"loss": masked})
+        params, _ = offline_client.experiment(params={"lr": masked})
+    assert msg["metrics"] == {"loss": None}
+    assert params["params"] == {"lr": None}
+
+
+def test_an_unmasked_value_is_kept(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {"loss": np.ma.masked_array([3.5], mask=[False])}
+        )
+    assert msg["metrics"] == {"loss": 3.5}
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).max <= np.finfo(np.float64).max,
+    reason="longdouble is no wider than float64 on this platform",
+)
+def test_a_longdouble_too_large_for_a_float_is_refused(offline_client):
+    """It would become inf and then be sent as null, losing the value."""
+    with pytest.raises(ValueError, match=r"'loss' is too large to send: 1e\+400$"):
+        offline_client.log_metrics({"loss": np.longdouble("1e400")})
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).tiny >= np.finfo(np.float64).tiny,
+    reason="longdouble is no wider than float64 on this platform",
+)
+@pytest.mark.parametrize("text", ["1e-400", "-1e-400"], ids=["positive", "negative"])
+def test_a_longdouble_too_small_for_a_float_is_refused(offline_client, text):
+    """It would become 0 and be sent as a different value."""
+    with pytest.raises(
+        ValueError, match="'loss' is too small to send: {}$".format(text)
+    ):
+        offline_client.log_metrics({"loss": np.longdouble(text)})
+
+
+def test_a_zero_or_tiny_longdouble_a_float_can_hold_is_sent(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics(
+            {
+                "zero": np.longdouble(0),
+                "neg_zero": np.longdouble("-0.0"),
+                "tiny": np.longdouble("1e-310"),
+            }
+        )
+    assert msg["metrics"] == {"zero": 0.0, "neg_zero": 0.0, "tiny": 1e-310}
+    assert math.copysign(1, msg["metrics"]["neg_zero"]) == -1
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        np.complex128(1 + 2j),
+        np.array([1j]),
+        np.array(0j),
+        np.clongdouble(1j),
+        complex(1, 0),
+    ],
+    ids=["numpy", "one_element", "zero_dim", "clongdouble", "python"],
+)
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v, x: v.log_metrics({"loss": x}),
+        lambda v, x: v.log_metrics({"loss": 0.1}, step=x),
+        lambda v, x: v.experiment(params={"lr": x}),
+        lambda v, x: v.experiment(tags={"seed": x}),
+    ],
+    ids=["metric", "step", "param", "tag"],
+)
+def test_a_complex_value_is_refused_before_sending(offline_client, call, value):
+    """JSON has no complex numbers; say so instead of failing to encode."""
+    with replies(offline_client, "{}") as sent:
+        with pytest.raises(TypeError, match="must be a real number"):
+            call(offline_client, value)
+    sent.assert_not_called()
+
+
+def test_a_complex_tensor_is_refused(offline_client):
+    torch = pytest.importorskip("torch")
+    with pytest.raises(TypeError, match="metric 'loss' must be a real number"):
+        offline_client.log_metrics({"loss": torch.tensor(1 + 2j)})
+
+
+def test_an_infinite_longdouble_is_not_mistaken_for_an_overflow(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.log_metrics({"loss": np.longdouble("inf")})
+    assert msg["metrics"] == {"loss": float("inf")}
+
+
+def test_experiment_accepts_tensor_params(offline_client):
+    torch = pytest.importorskip("torch")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(
+            params={"lr": torch.tensor(0.25), "seed": np.int64(1), "opt": "adam"}
+        )
+    assert msg["params"] == {"lr": 0.25, "seed": 1, "opt": "adam"}
+    json.dumps(msg)
+
+
+def test_experiment_accepts_tensor_and_numpy_tags(offline_client):
+    """Tags get the same scalar conversion as params."""
+    torch = pytest.importorskip("torch")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(
+            tags={
+                "seed": torch.tensor(3),
+                "lr": np.float32(0.5),
+                "epochs": np.array(10),
+                "ds": "mnist",
+            }
+        )
+    assert msg["tags"] == {"seed": 3, "lr": 0.5, "epochs": 10, "ds": "mnist"}
+    assert type(msg["tags"]["seed"]) is int and type(msg["tags"]["lr"]) is float
+    json.dumps(msg)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.log_metrics({"loss": np.array([0.1, 0.2])}),
+        lambda v: v.log_metrics({"loss": 0.1}, step=np.arange(3)),
+        lambda v: v.experiment(params={"lr": np.zeros((2, 2))}),
+        lambda v: v.experiment(tags={"seed": np.arange(3)}),
+    ],
+    ids=["metric", "step", "param", "tag"],
+)
+def test_experiment_methods_reject_multi_value_arrays(offline_client, call):
+    """Several values are not one observation; say so instead of a JSON error."""
+    with pytest.raises(TypeError, match="must be a single value"):
+        call(offline_client)
+
+
 def test_experiment_decodes_a_json_reply(offline_client):
     with replies(offline_client, json.dumps({"name": "r1", "status": "running"})):
         assert offline_client.experiment(name="r1") == {
@@ -815,3 +1100,102 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+@pytest.mark.parametrize(
+    "labels, groups",
+    [
+        ([1, 3, 1], [0, 1, 0]),
+        ([10**9, 1, 10**9], [1, 0, 1]),
+        ([2.5, -1.5, 2.5], [1, 0, 1]),
+        (["zebra", "ant", "zebra"], [1, 0, 1]),
+        ([1, 2, 1], [0, 1, 0]),
+        ([0, 0, 0], [0, 0, 0]),
+    ],
+)
+def test_embedding_lasso_preserves_original_groups(offline_client, labels, groups):
+    offline_client.use_socket = True
+    calls = []
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client,
+        "_send",
+        side_effect=lambda message, **kwargs: calls.append(message) or "w",
+    ):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    original = calls[1]["data"][0]["content"]["data"]
+    assert [point["group"] for point in original] == groups
+    assert offline_client.win_data["w"]["points"] == original
+    handler = offline_client.event_handlers[("e", "w")][0]
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            original[i]["group"] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+        np.testing.assert_array_equal(
+            [point["position"] for point in selected], TSNE_XY[:2]
+        )
+
+
+@pytest.mark.parametrize(
+    "points", [[], None, [{"group": 9}], [{"group": 2}, {"group": 1}, {"group": 0}]]
+)
+def test_register_embeddings_lasso_groups_do_not_depend_on_points(
+    offline_client, points
+):
+    offline_client.use_socket = True
+    labels = ["zebra", "ant", "zebra"]
+    offline_client._register_embeddings(
+        FEATURES, labels, points, None, None, "w1", "e1", {}
+    )
+    assert offline_client.win_data["w1"]["points"] is points
+    handler = offline_client.event_handlers[("e1", "w1")][0]
+
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send, patch(
+            "visdom._normalize_labels", side_effect=AssertionError("mapping recomputed")
+        ):
+            handler(
+                {
+                    "target": "w1",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            [1, 0, 1][i] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+
+
+@pytest.mark.parametrize(
+    "labels", [[1, 3, 1], [2.5, -1.5, 2.5], ["zebra", "ant", "zebra"]]
+)
+def test_embeddings_reuses_groups_when_registering_events(offline_client, labels):
+    from visdom import _normalize_labels
+
+    offline_client.use_socket = True
+    with patch("visdom._normalize_labels", wraps=_normalize_labels) as normalize, patch(
+        "visdom.do_tsne", return_value=TSNE_XY
+    ), patch.object(offline_client, "_send", return_value="w"):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    normalize.assert_called_once_with(labels)
