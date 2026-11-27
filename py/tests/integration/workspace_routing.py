@@ -210,6 +210,81 @@ class TestRequestsAreRefusedAtTheDoor(WorkspaceRoutingCase):
                 self.assertNotIn("experiment", self.space("ws-a").state["main"])
                 self.assertEqual(windows(self.space("ws-a")), {})
 
+    def test_a_viewer_cannot_change_alert_rules(self):
+        for body in [
+            {
+                "action": "set",
+                "eid": "main",
+                "alert": {"metric": "loss", "condition": "> 2"},
+            },
+            {"action": "clear", "eid": "main", "metric": "loss"},
+        ]:
+            with self.subTest(action=body["action"]):
+                response = self.post_as("key-v", "/experiments/alerts", body)
+
+                self.assertEqual(response.code, 403)
+
+    def test_a_viewer_can_read_alert_rules_over_post(self):
+        # The endpoint carries its operation in its body, so the path alone
+        # says "write" for the read this same handler answers over GET. A
+        # viewer watching a run is exactly who reads the rules on it.
+        for body in [{"action": "get", "eid": "main"}, {"eid": "main"}]:
+            with self.subTest(body=body):
+                response = self.post_as("key-v", "/experiments/alerts", body)
+
+                self.assertEqual(response.code, 200)
+                self.assertEqual(json.loads(response.body), [])
+
+    def test_an_unreadable_alert_body_is_not_taken_for_a_read(self):
+        # A body nobody can decode is not a read anybody can vouch for, so the
+        # role check stands rather than being skipped on a guess.
+        response = self.fetch(
+            "/experiments/alerts",
+            method="POST",
+            body="{",
+            headers={
+                "Content-Type": "application/json",
+                "X-Visdom-Workspace": "alpha",
+                "X-API-KEY": "key-v",
+            },
+        )
+
+        self.assertEqual(response.code, 403)
+
+    def test_a_full_workspace_refuses_a_new_alert_rule(self):
+        self.gateway.full["ws-a"] = "out of storage"
+
+        response = self.post_as(
+            "key-a",
+            "/experiments/alerts",
+            {
+                "action": "set",
+                "eid": "main",
+                "alert": {"metric": "loss", "condition": "> 2"},
+            },
+        )
+
+        self.assertEqual(response.code, 402)
+        self.assertEqual(json.loads(response.body), {"error": "out of storage"})
+
+    def test_a_full_workspace_can_still_read_its_alert_rules(self):
+        # Only the read. Clearing a rule queues a write of the environment
+        # like setting one does, and twenty bounded rules are not what filled
+        # the workspace, so it stays behind the same refusal rather than
+        # joining close and delete_env in the cleanup exemption.
+        self.gateway.full["ws-a"] = "out of storage"
+
+        read = self.post_as("key-a", "/experiments/alerts", {"eid": "main"})
+        cleared = self.post_as(
+            "key-a",
+            "/experiments/alerts",
+            {"action": "clear", "eid": "main", "metric": "loss"},
+        )
+
+        self.assertEqual(read.code, 200)
+        self.assertEqual(json.loads(read.body), [])
+        self.assertEqual(cleared.code, 402)
+
     def test_a_viewer_can_open_an_environment_named_like_a_write(self):
         self.space("ws-a").state["save"] = {"jsons": {}, "reload": {}}
 

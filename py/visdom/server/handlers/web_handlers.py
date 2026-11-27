@@ -66,11 +66,13 @@ from visdom.utils.server_utils import (
 )
 from visdom.server import internal, metrics
 from visdom.server.handlers.base_handlers import BaseHandler
+from visdom.experiments import alerts as alert_rules
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
     Experiment,
     ExperimentStore,
     ExperimentFinishedError,
+    METADATA_KEY,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
@@ -1516,6 +1518,63 @@ def _no_write(eid, env):
     """
 
 
+def _alert_state_of(env):
+    """``env``'s alert rules as they stand, in the shape they go back in.
+
+    A copy of each rule, because the rules are folded in place: the list on the
+    record is the same list the next write serialises, so holding a reference
+    would hold the state after the change rather than the state before it.
+
+    Only the rules are copied, not the record. The rest of it is what the
+    request carried and what a retry carries again, while a rule's streak and
+    ``fire_count`` are derived state a retry cannot rebuild -- a firing that
+    has been spent is spent until the streak breaks.
+
+    An environment with no record yet answers with no rules rather than with
+    "nothing to go back to". Its first write creating the record is somebody
+    else's problem, but a rule *inside* that record is this one's: left there
+    by a write that failed, it would be read back by the next GET and folded
+    by the next metric, while nothing on disk has ever heard of it.
+    """
+    blob = env.get(METADATA_KEY)
+    if not isinstance(blob, dict):
+        return []
+    alerts = blob.get("alerts")
+    if not isinstance(alerts, list):
+        return []
+    return [dict(rule) if isinstance(rule, dict) else rule for rule in alerts]
+
+
+def _restore_alert_state(env, before, after):
+    """Put ``before`` back on ``env``'s record, after a write of it failed.
+
+    The fold runs on the loop and the write of what it produced runs off it, so
+    a save that raises leaves behind a rule that has counted an observation
+    nobody will ever be told about: ``observe`` fires on the streak reaching
+    ``for_steps`` exactly, so a streak left standing at ``for_steps`` cannot
+    fire again until something breaks it, and the notification for that run is
+    gone rather than merely late. Putting the rules back means the retry the
+    500 asks for folds the observation again and fires on it.
+
+    ``after`` is the rules as this request left them, and the rollback happens
+    only while they are still that. The await the write happens in is a window
+    the loop spends on other requests, and a rule another one set or cleared in
+    it has already been answered for with a 200. Writing ``before`` over that
+    would take a stored rule back out of the environment the server is serving
+    and let the next write of it persist the version without that rule --
+    losing somebody else's rule to put this request's streak back. A spent
+    streak is the smaller loss of the two, so where the list has moved on the
+    rollback stands down and leaves it alone.
+    """
+    blob = env.get(METADATA_KEY)
+    if not isinstance(blob, dict):
+        return
+    live = blob.get("alerts")
+    if not isinstance(live, list) or live != after:
+        return
+    blob["alerts"] = before
+
+
 async def _write_experiment_metadata(handler, eid, mutate):
     """Apply one metadata change to ``eid``'s env; return it and whether it is new.
 
@@ -1537,12 +1596,20 @@ async def _write_experiment_metadata(handler, eid, mutate):
     worker in the order the loop made them. ``mutate`` runs before the env is
     filed under ``state`` and before anything is queued, so a change the store
     rejects leaves behind neither a new environment nor a write.
+
+    A write that is attempted and *fails* is the other case, and the alert
+    rules are the part of the record a retry cannot simply send again: see
+    :func:`_restore_alert_state` for what is put back, when it is not, and
+    why it is only them.
     """
     is_new_env = eid not in handler.state
     await ensure_env_present(handler, eid)
     env = handler.state.get(eid)
     if env is None:
         env = {"jsons": {}, "reload": {}}
+
+    # read before the change, so a failed write has something to put back
+    alerts_before = _alert_state_of(env)
 
     # the env is handed over directly rather than through ``state.get``: it has
     # just been materialised, and a store that went looking for it again would
@@ -1557,9 +1624,17 @@ async def _write_experiment_metadata(handler, eid, mutate):
     if experiment is None:
         return None, is_new_env
 
+    # and read again after it, so the rollback can tell its own change from one
+    # another request made while this one was off the loop
+    alerts_after = _alert_state_of(env)
+
     if eid not in handler.state:
         handler.state[eid] = env
-    await save_env_off_loop(handler, eid)
+    try:
+        await save_env_off_loop(handler, eid)
+    except Exception:
+        _restore_alert_state(env, alerts_before, alerts_after)
+        raise
     return experiment, is_new_env
 
 
@@ -1667,6 +1742,11 @@ class ExperimentLogHandler(BaseHandler):
 
         eid = extract_eid(args)
 
+        # The alert rules these observations set off, collected by the mutation
+        # below and dispatched once the record carrying their new state is on
+        # its way to disk.
+        fired = []
+
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
             if not metrics:
@@ -1706,9 +1786,18 @@ class ExperimentLogHandler(BaseHandler):
                     so that a refused request leaves the environment exactly
                     as every other refused write leaves it: unfiled, unqueued,
                     and answered from the one place that chooses a status.
+
+                    The alert rules watching these metrics are folded in by
+                    the same call, which is what keeps their state in the
+                    write this request was already making. ``fired`` collects
+                    what went off; nothing is dispatched from in here, because
+                    a notification sent from inside the mutation would have
+                    announced a record that a later rejection never stored.
                     """
                     try:
-                        return store.log_metrics(eid, metrics, args.get("step"))
+                        return store.log_metrics(
+                            eid, metrics, args.get("step"), fired=fired
+                        )
                     except (
                         ExperimentFinishedError,
                         TypeError,
@@ -1750,7 +1839,37 @@ class ExperimentLogHandler(BaseHandler):
         if live_updates is not None:
             live_updates.mark(eid)
 
+        ExperimentLogHandler._dispatch_alerts(handler, eid, fired)
+
         handler.write_json(experiment.to_dict())
+
+    @staticmethod
+    def _dispatch_alerts(handler, eid, fired):
+        """Deliver the notifications for the rules that just fired.
+
+        Dispatched here rather than from inside the mutation so that a toast
+        is only ever sent for a record the server has committed to writing: a
+        request that is refused after a rule matched sends nothing, and the
+        rule's streak goes unwritten with the rest of the refused record.
+
+        ``notify`` already reaches both WebSocket and polling clients, and
+        scoping the broadcast to ``eid`` means the people watching this run
+        hear about it rather than everyone with a browser open. A socket that
+        has gone away between the append and here must not take the request
+        down with it -- the observation is already recorded, and the caller
+        asked for a metric to be logged, not for an audience.
+        """
+        for event in fired:
+            message = alert_rules.describe(event, env_id=eid)
+            try:
+                notify(handler, message, type="warning", eid=eid)
+            except Exception:
+                logger.warning(
+                    "could not deliver the alert %r for env %r",
+                    message,
+                    eid,
+                    exc_info=True,
+                )
 
     @check_auth
     @check_readonly_message(
@@ -2055,38 +2174,42 @@ class ExperimentSuggestHandler(BaseHandler):
         self.wrap_func(self, _decode_json_body(self.request.body))
 
 
+def _experiment_from_env(eid, env):
+    """Return an experiment from one materialized in-memory environment."""
+    blob = env.get("experiment")
+    if not isinstance(blob, Mapping):
+        return None
+    experiment = Experiment.from_dict(blob)
+    experiment.env_id = eid
+    return experiment
+
+
+async def _read_one_experiment(handler, eid):
+    """Read one experiment without materializing unrelated environments.
+
+    An env the server is already holding answers from memory, on the loop,
+    for nothing. Only the fall-through goes to disk, and it goes there on
+    the storage worker: reading it here would park the loop behind a file
+    read for the whole of every other request the server has in flight.
+
+    Shared by the two endpoints that read one environment's metadata without
+    writing it -- its tags and its alert rules -- because both want exactly
+    this: the live env when there is one, and the worker otherwise.
+    """
+    env = handler.state.get(eid)
+    if env is not None and not (isinstance(env, LazyEnvData) and not env.is_loaded):
+        experiment = _experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+    return await run_on_storage_executor(
+        handler, _read_stored_experiment, handler.storage, eid
+    )
+
+
 class TagsHandler(BaseHandler):
     """Read and update environment tags backed by experiment metadata."""
 
     VALID_ACTIONS = ("get", "set")
-
-    @staticmethod
-    def _experiment_from_env(eid, env):
-        """Return an experiment from one materialized in-memory environment."""
-        blob = env.get("experiment")
-        if not isinstance(blob, Mapping):
-            return None
-        experiment = Experiment.from_dict(blob)
-        experiment.env_id = eid
-        return experiment
-
-    @staticmethod
-    async def _read_experiment(handler, eid):
-        """Read one experiment without materializing unrelated environments.
-
-        An env the server is already holding answers from memory, on the loop,
-        for nothing. Only the fall-through goes to disk, and it goes there on
-        the storage worker: reading it here would park the loop behind a file
-        read for the whole of every other request the server has in flight.
-        """
-        env = handler.state.get(eid)
-        if env is not None and not (isinstance(env, LazyEnvData) and not env.is_loaded):
-            experiment = TagsHandler._experiment_from_env(eid, env)
-            if experiment is not None:
-                return experiment
-        return await run_on_storage_executor(
-            handler, _read_stored_experiment, handler.storage, eid
-        )
 
     @staticmethod
     async def _experiment_map(handler):
@@ -2103,7 +2226,7 @@ class TagsHandler(BaseHandler):
         for eid, env in handler.state.items():
             if isinstance(env, LazyEnvData) and not env.is_loaded:
                 continue
-            experiment = TagsHandler._experiment_from_env(eid, env)
+            experiment = _experiment_from_env(eid, env)
             if experiment is not None:
                 experiments[eid] = experiment
         return experiments
@@ -2111,7 +2234,7 @@ class TagsHandler(BaseHandler):
     @staticmethod
     async def _write_tags(handler, eid=None):
         if eid is not None:
-            experiment = await TagsHandler._read_experiment(handler, eid)
+            experiment = await _read_one_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
             handler.write_json(tags)
             return
@@ -2170,6 +2293,245 @@ class TagsHandler(BaseHandler):
             broadcast_envs(handler)
         broadcast_tags(handler, eid, tags)
         handler.write_json(tags)
+
+    @check_auth
+    async def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        await self.wrap_func(self, {"action": "get", "eid": eid})
+
+    @check_auth
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class AlertsHandler(BaseHandler):
+    """Read, set and clear the metric alert rules attached to an environment.
+
+    The JSON body carries an ``action``:
+
+    * ``"get"`` (the default) -- this environment's rules, as a list. An
+      unnamed environment is ``main``, as it is everywhere else; there is no
+      read of every environment's rules, because a rule is something you set
+      on the run you are watching rather than something you browse.
+    * ``"set"`` -- define one rule, given as the ``alert`` object. A repeat of
+      the same metric and condition replaces that rule rather than adding a
+      second one.
+    * ``"clear"`` -- drop the rules watching ``metric``, or only the one whose
+      ``condition`` is named.
+
+    Rules live on the experiment record, so they are written through the same
+    single writer as every other change to an environment and are persisted,
+    forked and restored with it. Reading them is allowed on a readonly server
+    -- it is a read -- while defining and dropping them are not.
+
+    A rule is evaluated where the metrics it watches arrive, in
+    :class:`ExperimentLogHandler`; nothing here fires one.
+    """
+
+    VALID_ACTIONS = ("get", "set", "clear")
+
+    # The actions that only read. Named apart from ``VALID_ACTIONS`` because
+    # ``prepare`` has to tell a read from a write before the handler runs.
+    READ_ACTIONS = ("get",)
+
+    def body_writes(self):
+        """Whether this POST changes anything, which is its ``action`` and nothing else.
+
+        The endpoint is in ``WRITE_ENDPOINTS`` because two of its three actions
+        write, which is what denies a viewer and a workspace that is out of
+        storage the rules they must not change. Read off the path alone that
+        also denies them ``action: get`` -- the read this very handler answers
+        over GET, for the same caller, from the same state. A viewer reading the
+        rules on a run they are watching is the whole point of their role.
+
+        The body is decoded the same way :meth:`post` decodes it, and a body
+        that cannot be decoded is treated as a write: ``post`` is about to
+        refuse it with a 400, and a request nobody can read is not one to
+        exempt from the role check on the strength of a guess. An action that
+        is not one of :data:`READ_ACTIONS` -- including an unknown one -- is a
+        write for the same reason.
+
+        ``clear`` stays a write even though it only removes: it queues a write
+        of the environment exactly as ``set`` does, and twenty bounded rules
+        are not what fills a workspace, so there is nothing here to match the
+        exemption ``close`` and ``delete_env`` have from ``FILL_ENDPOINTS``.
+        """
+        try:
+            args = _decode_json_body(self.request.body)
+        except tornado.web.HTTPError:
+            return True
+        return args.get("action", "get") not in AlertsHandler.READ_ACTIONS
+
+    @staticmethod
+    def _as_list(alerts):
+        return [alert.to_dict() for alert in alerts]
+
+    @staticmethod
+    def _refuse(handler, status, error):
+        """Answer ``status`` with the explanation in the body, not the reason.
+
+        Every refusal here names what the caller sent -- the condition it
+        could not read, the metric it asked to clear, the environment holding
+        a finished run -- and all three are free-form unicode. Tornado puts
+        ``HTTPError(reason=...)`` on the HTTP status line, which is latin-1
+        and cannot carry a newline, so a condition written with a degree sign
+        in it would turn a clean 400 into an encoding failure. The body has
+        no such limit, and ``reject_readonly`` already answers in this shape.
+        """
+        handler.set_status(status)
+        handler.write_json({"success": False, "error": str(error)})
+
+    @staticmethod
+    async def _write_alerts(handler, eid):
+        """Answer with ``eid``'s rules, reading no environment it need not."""
+        experiment = await _read_one_experiment(handler, eid)
+        alerts = [] if experiment is None else experiment.get_alerts()
+        handler.write_json(AlertsHandler._as_list(alerts))
+
+    @staticmethod
+    def _build(args):
+        """The rule the request describes, as ``(alert, error)``."""
+        spec = args.get("alert")
+        if not isinstance(spec, Mapping):
+            return None, "'alert' must be an object describing the rule"
+        try:
+            return (
+                alert_rules.build_alert(
+                    key=spec.get("metric"),
+                    condition=spec.get("condition"),
+                    for_steps=spec.get("for_steps"),
+                    patience=spec.get("patience"),
+                    goal=spec.get("goal"),
+                    action=spec.get("action"),
+                    message=spec.get("message"),
+                ),
+                None,
+            )
+        except (TypeError, ValueError) as error:
+            return None, str(error)
+
+    @staticmethod
+    def _target(args):
+        """What a clear names, as ``((metric, condition), error)``.
+
+        The condition may be absent, which names every rule on the metric.
+
+        The metric is passed through exactly as sent, because that is what
+        :class:`Alert` does with its own ``key`` and ``clear_alerts`` matches
+        the two with ``==``: a rule that can be set is a rule that has to be
+        clearable by the name it was set under. Trimming here while the rule
+        keeps its name verbatim is what turns a padded metric name into a
+        rule nobody can remove. A name that is only whitespace is still
+        refused -- it names no series either way. The two halves are kept
+        honest by ``test_set_and_clear_agree_on_a_metric_with_whitespace_
+        around_it`` rather than by this comment.
+        """
+        metric = args.get("metric")
+        if not isinstance(metric, str) or not metric.strip():
+            return None, "'metric' is required to clear an alert"
+        condition = args.get("condition")
+        if condition is None:
+            return (metric, None), None
+        try:
+            return (metric, alert_rules.condition_name(condition)), None
+        except ValueError as error:
+            return None, str(error)
+
+    @staticmethod
+    async def wrap_func(handler, args):
+        action = args.get("action", "get")
+        if action not in AlertsHandler.VALID_ACTIONS:
+            AlertsHandler._refuse(handler, 400, "unknown action {0!r}".format(action))
+            return
+
+        # Checked before ``extract_eid``, which escapes the value and would
+        # raise ``AttributeError`` on anything without ``strip`` -- answering
+        # a request that named its environment as a number with a 500 rather
+        # than telling its sender what was wrong with it.
+        if args.get("eid") is not None and not isinstance(args.get("eid"), str):
+            AlertsHandler._refuse(
+                handler, 400, "'eid' must be a string naming an environment"
+            )
+            return
+        eid = extract_eid(args)
+
+        if action == "get":
+            await AlertsHandler._write_alerts(handler, eid)
+            return
+
+        if handler.readonly:
+            reject_readonly(
+                handler,
+                "Alert rules are disabled while the server is in readonly mode",
+            )
+            return
+
+        if action == "set":
+            alert, error = AlertsHandler._build(args)
+            if error is not None:
+                AlertsHandler._refuse(handler, 400, error)
+                return
+
+            def mutate(store):
+                return store.set_alert(eid, alert)
+
+        else:
+            target, error = AlertsHandler._target(args)
+            if error is not None:
+                AlertsHandler._refuse(handler, 400, error)
+                return
+            metric, condition = target
+
+            def mutate(store):
+                # ``None`` is how a mutation says it changed nothing, and a
+                # clear that matched no rule is the one metadata change that
+                # routinely does. The store already declines to write an
+                # unchanged record, but it answers with the experiment either
+                # way, and ``_write_experiment_metadata`` cannot tell that
+                # from a change -- so it would queue a whole environment file
+                # for a request that removed nothing, and the handler would
+                # mark it dirty for the autosave to write again. Counted
+                # rather than compared: clearing only ever removes, so the
+                # list shrinking is the change.
+                before = len(store.get_alerts(eid))
+                experiment = store.clear_alerts(eid, metric, condition)
+                if len(experiment.get_alerts()) == before:
+                    return None
+                return experiment
+
+        try:
+            # A rule shares the environment file with the experiment it watches
+            # and with every window in it, so it goes through the same single
+            # writer as the rest: applied to the live env on the loop, with the
+            # file write queued onto the storage worker behind it.
+            experiment, is_new_env = await _write_experiment_metadata(
+                handler, eid, mutate
+            )
+        except ExperimentFinishedError as error:
+            AlertsHandler._refuse(handler, 409, error)
+            return
+        except KeyError:
+            AlertsHandler._refuse(
+                handler, 404, "no experiment is logged for this environment"
+            )
+            return
+        except (TypeError, ValueError) as error:
+            AlertsHandler._refuse(handler, 400, error)
+            return
+
+        if experiment is None:
+            # A clear that matched nothing. Nothing was written and nothing
+            # is dirty, so the answer is simply the list as it stands -- the
+            # same answer ``get`` gives, and the same 200 a clear that did
+            # remove a rule gives, because asking for a rule to be gone and
+            # finding it already gone is not an error.
+            await AlertsHandler._write_alerts(handler, eid)
+            return
+
+        handler.mark_dirty(eid)
+        if is_new_env:
+            broadcast_envs(handler)
+        handler.write_json(AlertsHandler._as_list(experiment.get_alerts()))
 
     @check_auth
     async def get(self):

@@ -24,9 +24,24 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 _ExperimentReply = Mapping[Text, Any]
 _TagMap = Mapping[Text, Text]
 
+# The alert endpoint answers with the environment's rules, one mapping each,
+# rather than with an experiment.
+_AlertList = List[Mapping[Text, Any]]
+
+# What an alert call hands back, which is the rule list and two things that are
+# not it: the ``True`` an offline client answers without posting anything (or
+# the ``False`` of a connection failure this client was told to swallow), and
+# the ``{"success": false, "error": ...}`` the server writes into the body of a
+# refusal. Spelled out rather than narrowed to ``_AlertList`` the way
+# ``_SendReturn`` below is narrowed to ``Text``: a window id a caller mostly
+# drops is not a list they iterate, and a checker that blesses iterating this
+# reply is blessing a ``TypeError``.
+_AlertReply = Union[_AlertList, _ExperimentReply, bool]
+
 # The reply of the experiment endpoints that only answer questions. An offline
 # client has no server to ask, so those hand back None rather than a reply.
 _ExperimentQueryReply = Optional[_ExperimentReply]
+_AlertQueryReply = Optional[_AlertReply]
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -151,6 +166,21 @@ class Visdom:
         append: bool = ...,
     ) -> _TagMap: ...
     def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
+    def set_alert(
+        self,
+        metric: Text,
+        condition: Text,
+        for_steps: int = ...,
+        patience: Optional[int] = ...,
+        goal: _OptStr = ...,
+        action: Text = ...,
+        message: _OptStr = ...,
+        env: _OptStr = ...,
+    ) -> _AlertReply: ...
+    def list_alerts(self, env: _OptStr = ...) -> _AlertQueryReply: ...
+    def clear_alert(
+        self, metric: Text, condition: _OptStr = ..., env: _OptStr = ...
+    ) -> _AlertReply: ...
     def search_experiments(
         self,
         query: _OptStr = ...,

@@ -1199,3 +1199,161 @@ def test_embeddings_reuses_groups_when_registering_events(offline_client, labels
     ), patch.object(offline_client, "_send", return_value="w"):
         offline_client.embeddings(FEATURES, labels, env="e")
     normalize.assert_called_once_with(labels)
+
+
+# ------------------------------------------------------- alert messages ----
+#
+# The alert endpoint takes the written condition through unparsed: the server
+# is the only thing that reads an operand, so what these assert is the message
+# the client builds and the refusals it makes before building one.
+
+
+def test_set_alert_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.set_alert(
+            "val_loss", "> 2.0", for_steps=3, message="too high"
+        )
+    assert endpoint == "experiments/alerts"
+    assert msg["action"] == "set"
+    assert msg["eid"] == "run-7"
+    assert msg["alert"] == {
+        "metric": "val_loss",
+        "condition": "> 2.0",
+        "for_steps": 3,
+        "patience": None,
+        "goal": None,
+        "action": "toast",
+        "message": "too high",
+    }
+
+
+def test_set_alert_carries_the_stall_knobs_only_when_given(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.set_alert("acc", "stalled", patience=4, goal="max")
+    assert (msg["alert"]["patience"], msg["alert"]["goal"]) == (4, "max")
+
+
+def test_set_alert_env_override(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, _ = offline_client.set_alert("loss", "nan", env="other")
+    assert msg["eid"] == "other"
+
+
+def test_list_alerts_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.list_alerts()
+    assert endpoint == "experiments/alerts"
+    assert msg == {"action": "get", "eid": "run-7"}
+
+
+def test_list_alerts_is_a_question_an_offline_client_cannot_ask(offline_client):
+    # The read methods answer None offline rather than falling through to
+    # _send's short circuit and handing back True, which a caller expecting a
+    # list cannot tell from an answer.
+    offline_client.offline = True
+    assert offline_client.list_alerts() is None
+
+
+def test_clear_alert_message(offline_client):
+    offline_client.env = "run-7"
+    with echoes(offline_client):
+        msg, endpoint = offline_client.clear_alert("val_loss", condition="> 2.0")
+    assert endpoint == "experiments/alerts"
+    assert msg["action"] == "clear"
+    assert msg["metric"] == "val_loss"
+    assert msg["condition"] == "> 2.0"
+
+
+def test_clear_alert_without_a_condition_names_every_rule_on_the_metric(
+    offline_client,
+):
+    with echoes(offline_client):
+        msg, _ = offline_client.clear_alert("val_loss")
+    assert msg["condition"] is None
+
+
+def test_set_alert_decodes_the_rule_list(offline_client):
+    rules = [{"key": "val_loss", "condition": ">", "fire_count": 0}]
+    with replies(offline_client, json.dumps(rules)):
+        assert offline_client.set_alert("val_loss", "> 2.0") == rules
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.set_alert("val_loss", "> 2.0"),
+        lambda v: v.clear_alert("val_loss"),
+    ],
+    ids=["set", "clear"],
+)
+def test_alert_writes_answer_true_offline_rather_than_a_rule_list(offline_client, call):
+    # The two writes keep the convention every other experiment write keeps --
+    # an offline client posts nothing and answers True -- which is why the stubs
+    # type them as the rule list *or* a bool. A caller that iterates the reply
+    # has to narrow it first, and the fixture's transport raises if a request
+    # were made, so this also pins that nothing is posted.
+    offline_client.offline = True
+    assert call(offline_client) is True
+
+
+def test_set_alert_hands_back_the_servers_refusal(offline_client):
+    # A refused rule is a 4xx with the reason in the body, so what comes back
+    # is a mapping rather than the rule list; the client passes it through
+    # instead of trying to read a list out of it.
+    refusal = {"success": False, "error": "unsupported alert condition '>>'"}
+    with replies(offline_client, json.dumps(refusal)):
+        assert offline_client.set_alert("val_loss", ">> 2.0") == refusal
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.set_alert("", "> 2.0"),
+        lambda v: v.set_alert("   ", "> 2.0"),
+        lambda v: v.set_alert(7, "> 2.0"),
+        lambda v: v.set_alert("loss", ""),
+        lambda v: v.set_alert("loss", None),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps="3"),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=True),
+        lambda v: v.set_alert("loss", "stalled", patience=1.5),
+        lambda v: v.set_alert("loss", "nan", message=7),
+        lambda v: v.clear_alert(""),
+        lambda v: v.clear_alert("loss", condition=7),
+    ],
+    ids=[
+        "empty_metric",
+        "blank_metric",
+        "metric_not_a_string",
+        "empty_condition",
+        "condition_not_a_string",
+        "for_steps_not_an_int",
+        "for_steps_a_bool",
+        "patience_not_an_int",
+        "message_not_a_string",
+        "clear_empty_metric",
+        "clear_condition_not_a_string",
+    ],
+)
+def test_alert_methods_reject_malformed_input(offline_client, call):
+    # Refused before a request is built: the fixture's transport raises if one
+    # is, so a call that slipped through would fail here rather than quietly
+    # ask the server to validate it.
+    with pytest.raises(TypeError):
+        call(offline_client)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=0),
+        lambda v: v.set_alert("loss", "> 2.0", for_steps=-1),
+        lambda v: v.set_alert("loss", "stalled", patience=0),
+    ],
+    ids=["for_steps_zero", "for_steps_negative", "patience_zero"],
+)
+def test_alert_counts_must_be_at_least_one(offline_client, call):
+    with pytest.raises(ValueError):
+        call(offline_client)

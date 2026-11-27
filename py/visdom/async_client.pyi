@@ -44,6 +44,8 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 from visdom import (
     Tensor,
     Visdom,
+    _AlertQueryReply,
+    _AlertReply,
     _EnvIds,
     _Event,
     _EventHandler,
@@ -279,6 +281,21 @@ class AsyncVisdom:
         append: bool = ...,
     ) -> _TagMap: ...
     async def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
+    async def set_alert(
+        self,
+        metric: Text,
+        condition: Text,
+        for_steps: int = ...,
+        patience: Optional[int] = ...,
+        goal: _OptStr = ...,
+        action: Text = ...,
+        message: _OptStr = ...,
+        env: _OptStr = ...,
+    ) -> _AlertReply: ...
+    async def list_alerts(self, env: _OptStr = ...) -> _AlertQueryReply: ...
+    async def clear_alert(
+        self, metric: Text, condition: _OptStr = ..., env: _OptStr = ...
+    ) -> _AlertReply: ...
     async def search_experiments(
         self,
         query: _OptStr = ...,
