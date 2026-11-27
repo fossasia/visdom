@@ -12,14 +12,17 @@ Once ``UpdateHandler.update`` is past the content panes it works on
 ``p["content"]["data"]``, and which branch runs depends on how many traces the
 ``name`` argument selects: none injects a trace, exactly one heatmap takes the
 ``updateDir`` path, and anything else falls through to the trace update, which
-pairs an unnamed update's entries with traces by name when it can and by
-position otherwise. Every one of those branches is driven here over HTTP.
+matches a labelled scatter's traces by label and any other update's by
+position. Every one of those branches is driven here over HTTP.
 """
 
 import unittest
+from unittest import mock
 
+import numpy as np
 import pytest
 
+import visdom
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -235,196 +238,185 @@ class TestTraceUpdates(PlotUpdateTestCase):
         self.assertEqual(resp.code, 400)
 
 
-class TestUnnamedTraceMatching(PlotUpdateTestCase):
-    """An unnamed append pairs its entries with traces by name.
+class TestAppendByLabel(PlotUpdateTestCase):
+    """A labelled scatter append, sent by the real client.
 
-    A labelled scatter append only carries the labels present in that batch,
-    so pairing by position sent a batch holding only "dog" into "cat".
+    A batch only carries the labels in it, so pairing its traces with the
+    plot's by position sent a batch holding only "dog" into "cat".
     """
 
-    def create_classes(self):
-        return self.create_window(
-            [
-                {"type": "scatter", "x": [1], "y": [1], "name": "cat"},
-                {"type": "scatter", "x": [2], "y": [2], "name": "dog"},
-            ],
-            layout={"title": "classes"},
-        )
+    def client(self, use_preflight_checks=True):
+        with (
+            mock.patch.object(visdom.Visdom, "_handle_post", return_value=True),
+            mock.patch.object(visdom.Visdom, "_start_session_reaper"),
+            mock.patch.object(visdom.logger, "warning"),
+        ):
+            vis = visdom.Visdom(
+                use_incoming_socket=False,
+                raise_exceptions=True,
+                use_preflight_checks=use_preflight_checks,
+            )
 
-    def append(self, win, *entries):
-        data = [{"type": "scatter", "x": [x], "y": [x], "name": n} for n, x in entries]
-        return self.update(win, data, append=True)
+        def post(url, data=None):
+            resp = self.fetch("/" + url.rsplit("/", 1)[1], method="POST", body=data)
+            self.assertEqual(resp.code, 200, resp.body)
+            return resp.body.decode()
+
+        vis._handle_post = post
+        return vis
+
+    def scatter(self, vis, win, labels, x0=0, **kwargs):
+        X = np.array([[x0 + i, x0 + i] for i in range(len(labels))], dtype=float)
+        return vis.scatter(X, Y=labels, win=win, env="main", **kwargs)
 
     def xs(self, win):
-        return {t["name"]: t["x"] for t in self.traces(win)}
+        return [(t["name"], t["x"]) for t in self.traces(win)]
+
+    def test_a_label_joins_its_trace_whatever_the_legend_named_it(self):
+        """With a legend of ["2", "1"], class 1 is the trace named "2"."""
+        for preflight in (True, False):
+            with self.subTest(preflight=preflight):
+                vis, win = self.client(preflight), "swapped_%s" % preflight
+                legend = {"legend": ["2", "1"]}
+                self.scatter(vis, win, [1, 2], opts=legend)
+                self.scatter(vis, win, [1], x0=9, update="append")
+                self.scatter(vis, win, [2, 1], x0=7, update="append", opts=legend)
+                self.assertEqual(
+                    self.xs(win), [("2", [0.0, 9.0, 8.0]), ("1", [1.0, 7.0])]
+                )
 
     def test_a_batch_with_one_class_joins_that_class(self):
-        win = self.create_classes()
-        self.append(win, ("dog", 9))
-        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2, 9]})
-
-    def test_entries_out_of_order_still_join_their_own_classes(self):
-        win = self.create_classes()
-        self.append(win, ("dog", 9), ("cat", 8))
-        self.assertEqual(self.xs(win), {"cat": [1, 8], "dog": [2, 9]})
+        vis = self.client()
+        self.scatter(vis, "one", ["cat", "dog"])
+        self.scatter(vis, "one", ["dog"], x0=9, update="append")
+        self.assertEqual(self.xs("one"), [("cat", [0.0]), ("dog", [1.0, 9.0])])
 
     def test_a_new_class_becomes_its_own_trace(self):
-        win = self.create_classes()
-        self.append(win, ("bird", 7), ("dog", 9))
-        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2, 9], "bird": [7]})
+        vis = self.client()
+        self.scatter(vis, "new", ["cat", "dog"])
+        self.scatter(vis, "new", ["dog", "bird"], x0=8, update="append")
+        self.assertEqual(
+            self.xs("new"),
+            [("cat", [0.0]), ("dog", [1.0, 8.0]), ("bird", [9.0])],
+        )
+        self.scatter(vis, "new", ["bird"], x0=5, update="append")
+        self.assertEqual(self.xs("new")[2], ("bird", [9.0, 5.0]))
 
-    def test_a_batch_of_only_a_new_class_becomes_its_own_trace(self):
-        win = self.create_classes()
-        self.append(win, ("bird", 7))
-        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2], "bird": [7]})
+    def test_a_plot_made_with_a_legend_takes_appends_without_it(self):
+        vis = self.client()
+        self.scatter(vis, "legend", [1, 2], opts={"legend": ["cat", "dog"]})
+        self.scatter(vis, "legend", [2], x0=9, update="append")
+        self.assertEqual(self.xs("legend"), [("cat", [0.0]), ("dog", [1.0, 9.0])])
 
-    def test_no_matching_name_keeps_positional_pairing(self):
-        """A line whose legend renamed its traces appends with the default
-        names, so with nothing to match the pairing stays positional."""
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [1], "y": [1], "name": "train"},
-                {"type": "scatter", "x": [1], "y": [10], "name": "val"},
+    def test_a_legend_sent_with_an_append_names_each_trace_by_its_label(self):
+        vis = self.client()
+        self.scatter(vis, "sparse", [2, 3])
+        self.scatter(
+            vis, "sparse", [3], x0=9, update="append", opts={"legend": ["a", "b", "c"]}
+        )
+        self.assertEqual(self.xs("sparse"), [("b", [0.0]), ("c", [1.0, 9.0])])
+
+    def test_0_based_class_ids_keep_their_traces_in_a_batch_without_0(self):
+        vis = self.client()
+        self.scatter(vis, "zero", [0, 1, 2])
+        self.scatter(vis, "zero", [2], x0=9, update="append")
+        self.assertEqual(
+            self.xs("zero"), [("0", [0.0]), ("1", [1.0]), ("2", [2.0, 9.0])]
+        )
+
+    def test_an_append_that_creates_the_plot_keeps_its_labels(self):
+        vis = self.client(use_preflight_checks=False)
+        self.scatter(vis, "created", [2], update="append")
+        self.scatter(vis, "created", [1, 2], x0=8, update="append")
+        self.assertEqual(self.xs("created"), [("2", [0.0, 9.0]), ("1", [8.0])])
+
+    def test_a_removed_trace_takes_its_label_with_it(self):
+        vis = self.client()
+        self.scatter(vis, "removed", [1, 2, 3])
+        vis.scatter(None, win="removed", env="main", update="remove", name="2")
+        self.scatter(vis, "removed", [3], x0=9, update="append")
+        self.assertEqual(self.xs("removed"), [("1", [0.0]), ("3", [2.0, 9.0])])
+        self.assertEqual(self.get_win_data("removed")["trace_labels"], [1, 3])
+
+    def test_a_trace_added_by_name_is_not_taken_for_a_label(self):
+        vis = self.client()
+        self.scatter(vis, "named", [1])
+        vis.scatter(
+            np.array([[5.0, 5.0]]), win="named", env="main", update="append", name="2"
+        )
+        self.scatter(vis, "named", [2], x0=9, update="append")
+        self.assertEqual(self.xs("named"), [("1", [0.0]), ("2", [5.0]), ("2", [9.0])])
+
+    def test_a_line_appends_to_its_lines(self):
+        vis = self.client()
+        opts = {"legend": ["train", "val"]}
+        vis.line(Y=np.array([[1, 10]]), X=[0], win="line", env="main", opts=opts)
+        vis.line(Y=np.array([[2, 20]]), X=[1], win="line", env="main", update="append")
+        traces = self.traces("line")
+        self.assertEqual([t["name"] for t in traces], ["train", "val"])
+        self.assertEqual([t["y"] for t in traces], [[1, 2], [10, 20]])
+
+
+class TestAppendWithoutLabels(PlotUpdateTestCase):
+    """Updates without labels, or to a plot made without them, go by position."""
+
+    def create_pane(self, names, trace_labels=None):
+        payload = {
+            "eid": "main",
+            "win": "w",
+            "layout": {},
+            "data": [
+                {"type": "scatter", "x": [i], "y": [i], "name": n}
+                for i, n in enumerate(names)
             ],
-            layout={"title": "line"},
-        )
-        self.append(win, ("1", 5), ("2", 50))
-        self.assertEqual(self.xs(win), {"train": [1, 5], "val": [1, 50]})
+        }
+        if trace_labels is not None:
+            payload["trace_labels"] = trace_labels
+        return self.post_json("/events", payload)
 
-    def test_a_partly_renamed_line_keeps_positional_pairing(self):
-        """Only the second trace was renamed, so "1" still matches in place."""
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [1], "y": [1], "name": "1"},
-                {"type": "scatter", "x": [1], "y": [10], "name": "val"},
-            ],
-            layout={"title": "line"},
-        )
-        self.append(win, ("1", 5), ("2", 50))
-        self.assertEqual(self.xs(win), {"1": [1, 5], "val": [1, 50]})
-
-    def test_a_numeric_label_on_traces_named_otherwise_stays_positional(self):
-        """Nothing says which trace label 1 is, so it isn't made a new one."""
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [1], "y": [1], "name": n, "mode": "markers"}
-                for n in ("cat", "dog")
-            ],
-            layout={"title": "classes"},
-        )
-        self.append(win, ("1", 9))
-        self.assertEqual(self.xs(win), {"cat": [1, 9], "dog": [1]})
-
-    def test_a_numeric_label_joins_the_trace_its_creation_legend_named(self):
-        """A scatter created with a legend, appended to without it."""
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [x], "y": [x], "name": n, "mode": "markers"}
-                for n, x in (("cat", 1), ("dog", 2))
-            ],
-            opts={"legend": ["cat", "dog"]},
-            layout={"title": "classes"},
-        )
-        self.append(win, ("2", 9))
-        self.append(win, ("1", 8), ("2", 7))
-        self.assertEqual(self.xs(win), {"cat": [1, 8], "dog": [2, 9, 7]})
-
-    def test_numeric_labels_on_unnamed_traces_stay_positional(self):
-        win = self.create_window(
-            [{"type": "scatter", "x": [x], "y": [x]} for x in (1, 2)],
-            layout={"title": "unnamed"},
-        )
-        self.append(win, ("1", 8), ("2", 9))
-        self.append(win, ("2", 7))
-        self.assertEqual([t["x"] for t in self.traces(win)], [[1, 8, 7], [2, 9]])
-
-    def test_a_new_numeric_label_becomes_its_own_trace(self):
-        """Traces named "2" and "3" were never renamed, so "1" is new."""
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [1], "y": [1], "name": "2"},
-                {"type": "scatter", "x": [2], "y": [2], "name": "3"},
-            ],
-            layout={"title": "numeric labels"},
-        )
-        self.append(win, ("1", 9))
-        self.assertEqual(self.xs(win), {"2": [1], "3": [2], "1": [9]})
-
-
-class TestLegendOnAppend(PlotUpdateTestCase):
-    """An append with a legend onto traces that still have their number names."""
-
-    def create_numbered(self, *labels):
-        return self.create_window(
-            [
-                {"type": "scatter", "x": [10 * n], "y": [n], "name": str(n)}
-                for n in labels
-            ],
-            layout={"title": "numbered"},
-        )
-
-    def append(self, win, legend, *labels):
+    def append(self, *names, **extra):
         data = [
-            {"type": "scatter", "x": [10 * n + 1], "y": [n], "name": legend[n - 1]}
-            for n in labels
+            {"type": "scatter", "x": [9 - i], "y": [0], "name": n}
+            for i, n in enumerate(names)
         ]
-        return self.update(win, data, append=True, opts={"legend": legend})
+        return self.update("w", data, append=True, **extra)
 
-    def xs(self, win):
-        return {t["name"]: t["x"] for t in self.traces(win)}
+    def xs(self):
+        return [(t["name"], t["x"]) for t in self.traces("w")]
 
-    def test_each_label_joins_its_own_trace(self):
-        win = self.create_numbered(2, 3)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        self.assertEqual(self.xs(win), {"b": [20, 21], "c": [30, 31]})
+    def test_entries_without_labels_fill_the_traces_in_order(self):
+        self.create_pane(["2", "1"], trace_labels=[1, 2])
+        self.append("1")
+        self.assertEqual(self.xs(), [("2", [0, 9]), ("1", [1])])
 
-    def test_a_repeated_legend_keeps_the_names_it_gave(self):
-        win = self.create_numbered(2, 3)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        self.assertEqual(self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31]})
+    def test_labels_sent_to_a_plot_made_without_them_fill_the_traces_in_order(self):
+        """A plot saved before the client sent labels."""
+        self.create_pane(["cat", "dog"])
+        self.append("dog", trace_labels=["dog"])
+        self.assertEqual(self.xs(), [("cat", [0, 9]), ("dog", [1])])
 
-    def test_a_plot_created_with_a_legend_keeps_it_on_the_first_append(self):
-        legend = ["a", "b", "c"]
-        win = self.create_window(
-            [
-                {"type": "scatter", "x": [10 * n], "y": [n], "name": legend[n - 1]}
-                for n in (2, 3)
-            ],
-            opts={"legend": legend},
-            layout={"title": "legended"},
-        )
-        self.append(win, legend, 2, 3)
-        self.assertEqual(self.xs(win), {"b": [20, 21], "c": [30, 31]})
+    def test_unnamed_traces_fill_in_order(self):
+        self.create_pane([None, None])
+        self.append("2", trace_labels=[2])
+        self.assertEqual(self.xs(), [(None, [0, 9]), (None, [1])])
 
-    def test_a_trace_outside_the_legend_leaves_the_others_in_place(self):
-        win = self.create_numbered(2, 3)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        bird = [{"type": "scatter", "x": [40], "y": [4], "name": "bird"}]
-        self.update(win, bird, append=True)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        self.assertEqual(
-            self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31], "bird": [40]}
-        )
+    def test_a_named_update_goes_to_the_trace_of_that_name(self):
+        self.create_pane(["2", "1"], trace_labels=[1, 2])
+        self.append("1", name="1", trace_labels=[1])
+        self.assertEqual(self.xs(), [("2", [0]), ("1", [1, 9])])
 
-    def test_a_label_added_later_keeps_its_own_trace(self):
-        win = self.create_numbered(2, 3)
-        self.append(win, ["a", "b", "c"], 2, 3)
-        self.append(win, ["a", "b", "c"], 1, 3)
-        self.append(win, ["a", "b", "c"], 1, 2)
-        self.assertEqual(
-            self.xs(win), {"b": [20, 21, 21], "c": [30, 31, 31], "a": [11, 11]}
-        )
+    def test_bad_labels_are_refused(self):
+        self.create_pane(["a"], trace_labels=[1])
+        for labels in ([1, 2], [0], [None], "1", [True]):
+            with self.subTest(labels=labels):
+                resp = self.append("1", trace_labels=labels)
+                self.assertEqual(resp.code, 400)
+                self.assertIn("trace_labels", resp.reason)
 
-    def test_an_unseen_label_gets_its_own_trace(self):
-        win = self.create_numbered(2)
-        self.append(win, ["cat", "dog"], 1, 2)
-        self.assertEqual(self.xs(win), {"dog": [20, 21], "cat": [11]})
-
-    def test_a_line_keeps_its_traces(self):
-        win = self.create_numbered(1, 2)
-        self.append(win, ["train", "val"], 1, 2)
-        self.assertEqual(self.xs(win), {"train": [10, 11], "val": [20, 21]})
+    def test_bad_labels_are_refused_on_create(self):
+        resp = self.create_pane(["a"], trace_labels=[1, 2])
+        self.assertEqual(resp.code, 400)
+        self.assertIn("trace_labels", resp.reason)
 
 
 class TestMarkerUpdates(PlotUpdateTestCase):

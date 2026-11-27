@@ -474,6 +474,15 @@ def _normalize_labels(Y, max_label=None):
     return Y_normalized, label_values, K
 
 
+def _label_key(value):
+    """The label a scatter trace of label value ``value`` is matched by."""
+    value = value.item() if isinstance(value, np.generic) else value
+    # 1.0 is the same class as label number 1, which a batch without 0 sends.
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value)
+
+
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
     if mc.ndim == 1:
@@ -3525,12 +3534,11 @@ class Visdom(object):
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
 
-        Appended points join the trace of their own label, and a label the
-        plot hasn't seen yet gets a new trace. String labels name their own
-        traces, so they need no legend. Integer labels 1..K keep the names
-        `opts.legend` gave them, whether or not the legend is passed again.
-        Points appended to traces named some other way, or not at all, are
-        added to them in order.
+        Appended points given labels join the trace of their own label, and a
+        label the plot doesn't have yet gets a new trace. A legend names
+        label `k` by `opts.legend[k-1]`, whether or not it's passed again.
+        Points without labels, or appended to a plot made without them, are
+        added to its traces in order.
 
         The following `opts` are supported:
 
@@ -3597,6 +3605,8 @@ class Visdom(object):
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
         assert X.shape[0] > 0, "X should have at least one point"
 
+        # Points given labels, and no name, are matched to traces by label.
+        labelled = Y is not None and name is None
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
@@ -3657,6 +3667,7 @@ class Visdom(object):
             opts.pop("legend", None)
 
         data = []
+        trace_labels = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
         dash = opts.get("dash")
         mc = opts.get("markercolor")
@@ -3746,6 +3757,9 @@ class Visdom(object):
                     _data.update(_normalize_title_strings(trace_opts[trace_name]))
 
                 data.append(_scrub_dict(_data))
+                trace_labels.append(
+                    int(k) if label_values is None else _label_key(label_values[k - 1])
+                )
 
         if opts:
             for marker_prop in ["markercolor"]:
@@ -3796,6 +3810,8 @@ class Visdom(object):
             "layout": _opts2layout(opts, is3d) if update is None else {},
             "opts": opts,
         }
+        if labelled:
+            data_to_send["trace_labels"] = trace_labels
         endpoint = "events"
         if update:
             data_to_send["name"] = name

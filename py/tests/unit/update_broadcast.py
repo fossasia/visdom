@@ -817,59 +817,84 @@ def test_a_named_resent_legend_that_renames_nothing_takes_the_fast_path():
     assert_patches_agree(pane, args)
 
 
-def labelled_args(*names, marker=False):
-    args = trace_append_args(traces=len(names), marker=marker)
-    for entry, name in zip(args["data"], names):
-        entry["name"] = name
-    return args
+def labelled_pane(names, labels, marker=False, legend=None):
+    pane = plot_pane(traces=len(names), names=names, marker=marker)
+    pane["trace_labels"] = list(labels)
+    if legend is not None:
+        pane["legend"] = list(legend)
+    return pane
+
+
+def labelled_args(*labels, marker=False, **extra):
+    return trace_append_args(
+        traces=len(labels), marker=marker, trace_labels=list(labels), **extra
+    )
+
+
+def added_to(ops):
+    paths = [op["path"] for op in ops if op["path"].startswith("/content/data/")]
+    return {path.split("/")[3] for path in paths}
 
 
 def test_a_labelled_batch_patches_the_trace_of_its_label():
-    pane = plot_pane(traces=2, names=["cat", "dog"])
+    pane = labelled_pane(["cat", "dog"], ["cat", "dog"])
     args = labelled_args("dog")
 
     assert UpdateHandler.appendable(pane, args) is True
-    ops = assert_patches_agree(pane, args)
-    paths = [op["path"] for op in ops if op["op"] == "add"]
-    assert all(path.startswith("/content/data/1/") for path in paths), paths
+    assert added_to(assert_patches_agree(pane, args)) == {"1"}
 
 
-def test_a_label_number_patches_the_trace_its_legend_named():
-    pane = plot_pane(traces=2, names=["cat", "dog"])
-    pane["legend"] = ["cat", "dog"]
-    args = labelled_args("2")
+def test_a_label_number_patches_its_own_trace_whatever_the_legend_named_it():
+    """A legend of ["2", "1"] names label 1 "2", so a name match is wrong."""
+    pane = labelled_pane(["2", "1"], [1, 2], legend=["2", "1"])
+    args = labelled_args(1, opts={"legend": ["2", "1"]})
 
     assert UpdateHandler.appendable(pane, args) is True
-    ops = assert_patches_agree(pane, args)
-    paths = [op["path"] for op in ops if op["op"] == "add"]
-    assert all(path.startswith("/content/data/1/") for path in paths), paths
+    assert added_to(assert_patches_agree(pane, args)) == {"0"}
 
 
-def test_label_numbers_on_unnamed_traces_take_the_fast_path_in_order():
-    pane = plot_pane(traces=2)
-    args = labelled_args("1", "2")
-
-    assert UpdateHandler.appendable(pane, args) is True
-    assert_patches_agree(pane, args)
-
-
-def test_a_batch_of_only_new_labels_keeps_the_diffed_path():
+def test_a_batch_with_a_new_label_keeps_the_diffed_path():
     """A new trace has no index patch, so the fast path would announce nothing."""
-    pane = plot_pane(traces=2, names=["cat", "dog"])
-    args = labelled_args("bird")
+    pane = labelled_pane(["1", "2"], [1, 2])
+    args = labelled_args(3)
 
     assert UpdateHandler.appendable(pane, args) is False
     ops = assert_patches_agree(pane, args)
-    assert any(op["path"] == "/content/data/2" for op in ops), ops
+    assert {op["path"] for op in ops} >= {"/content/data/2", "/trace_labels/2"}
+
+
+def test_a_legend_that_renames_a_labelled_trace_keeps_the_diffed_path():
+    """The legend is already on the pane, but its traces aren't named from it."""
+    pane = labelled_pane(["1", "2"], [1, 2], legend=["a", "b"])
+    args = labelled_args(2, opts={"legend": ["a", "b"]})
+
+    assert UpdateHandler.appendable(pane, args) is False
+    assert_patches_agree(pane, args)
 
 
 def test_the_marker_check_looks_at_the_trace_the_label_pairs_with():
-    pane = plot_pane(traces=2, marker=True, names=["cat", "dog"])
+    pane = labelled_pane(["cat", "dog"], ["cat", "dog"], marker=True)
     pane["content"]["data"][1].pop("marker")
     args = labelled_args("dog", marker=True)
 
     assert UpdateHandler.appendable(pane, args) is False
     assert_patches_agree(pane, args)
+
+
+def test_an_append_without_labels_to_a_labelled_pane_goes_by_position():
+    pane = labelled_pane(["2", "1"], [1, 2])
+    args = trace_append_args(traces=1)
+
+    assert UpdateHandler.appendable(pane, args) is True
+    assert added_to(assert_patches_agree(pane, args)) == {"0"}
+
+
+def test_labels_sent_to_a_pane_without_them_go_by_position():
+    pane = plot_pane(traces=2, names=["cat", "dog"])
+    args = labelled_args("dog")
+
+    assert UpdateHandler.appendable(pane, args) is True
+    assert added_to(assert_patches_agree(pane, args)) == {"0"}
 
 
 def test_a_named_legend_that_renames_the_trace_keeps_the_diffed_path():
