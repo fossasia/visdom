@@ -57,9 +57,9 @@ class OptunaCallback:
     ``create_dashboard=True`` creates a summary, an HParams pane and Optuna's
     Plotly study visualizations in that environment. The first completed trial
     creates the dashboard; later trials refresh it every ``refresh_every``
-    successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
-    to ensure the final trials are included when the total is not an exact
-    multiple of that interval. Supplying ``contour_params`` adds one Optuna
+    trials, including trials that failed to log. Call :meth:`update_dashboard`
+    after ``Study.optimize`` to ensure the final trials are included when the
+    total is not an exact multiple of that interval. Supplying ``contour_params`` adds one Optuna
     contour pane per objective. The HParams pane selects trials through stable
     experiment tags rather than callback-local state, so a new callback can
     rebuild a persisted study dashboard and multiple workers share the same
@@ -665,6 +665,7 @@ class OptunaCallback:
         """Record the completed ``trial`` without affecting optimization by default."""
         env = None
         unfinished = False
+        logged = False
         try:
             payload = self._build_payload(study, trial)
             env = payload["env"]
@@ -694,6 +695,7 @@ class OptunaCallback:
             self._check_recorded(
                 self.viz.finish_experiment(status=payload["status"], env=env), env
             )
+            logged = True
         except Exception as error:
             if unfinished and isinstance(error, _WriteRejected):
                 # Only a refused write is final; after a network or server
@@ -706,9 +708,10 @@ class OptunaCallback:
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return
 
+        # The dashboard is built from the study, so it refreshes either way.
         with self._dashboard_lock:
-            self._trial_envs.append(payload["env"])
+            if logged:
+                self._trial_envs.append(env)
             if self.create_dashboard:
                 self._maybe_update_dashboard(study)

@@ -514,6 +514,22 @@ class TestOptunaRejectedWrites(unittest.TestCase):
             callback(make_study([trial]), trial)
         self.assertEqual(callback._trial_envs, ["optuna_quadratic_trial_000000"])
 
+    def test_the_dashboard_refreshes_after_a_trial_that_failed_to_log(self):
+        """The dashboard is built from the study, so it still has the trial."""
+        for reply in (self.REJECTED, False):
+            with self.subTest(reply=reply):
+                viz = recording_viz()
+                viz.experiment.return_value = reply
+                trial = make_trial()
+                callback = OptunaCallback(
+                    viz, dashboard_env="optuna_quadratic", create_dashboard=True
+                )
+                with patch.object(callback, "update_dashboard") as update_dashboard:
+                    with self.assertWarns(RuntimeWarning):
+                        callback(make_study([trial]), trial)
+                update_dashboard.assert_called_once()
+                self.assertEqual(callback._trial_envs, [])
+
 
 class TestResponseStatusPerThread(unittest.TestCase):
     """Callbacks run on Optuna's worker threads and share one client."""
