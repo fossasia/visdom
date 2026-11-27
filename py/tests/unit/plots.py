@@ -585,6 +585,25 @@ def test_heatmap_replace_sets_append_false(capture_send):
     assert not sent["payload"]["append"]
 
 
+@pytest.mark.parametrize(
+    "update", ["appendRow", "appendColumn", "prependRow", "prependColumn"]
+)
+def test_heatmap_append_sends_creation_only_layout(capture_send, update):
+    opts = dict(title="Heat", xlabel="epoch", ylabel="sample", marginleft=7)
+    normal = capture_send(lambda v: v.heatmap(np.ones((2, 2)), opts=dict(opts)))
+    appended = capture_send(
+        lambda v: v.heatmap(np.ones((2, 2)), win="w", update=update, opts=dict(opts))
+    )
+    assert appended["payload"]["layout"] == {}
+    assert appended["payload"]["layout_create"] == normal["payload"]["layout"]
+
+
+@pytest.mark.parametrize("update", [None, "replace", "remove"])
+def test_heatmap_non_append_does_not_send_creation_layout(capture_send, update):
+    sent = capture_send(lambda v: v.heatmap(np.ones((2, 2)), win="w", update=update))
+    assert "layout_create" not in sent["payload"]
+
+
 def test_heatmap_nan_values_pass_through(capture_send):
     """NaN values in X pass through to the payload without raising."""
     X = np.array([[1.0, np.nan], [np.nan, 4.0]])
