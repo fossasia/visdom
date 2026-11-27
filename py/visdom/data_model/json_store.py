@@ -768,12 +768,35 @@ class JSONStore(DataStore):
         owner = self._legacy_hash_owner(self._primary_path(eid))
         if owner is None or owner == self._safe_eid(eid):
             candidates.append(plain)
-        if self._legacy_hash_owner(self._hash_path(eid)[:-5]) == self._safe_eid(eid):
-            candidates.append(hashed[:-5])
+        legacy_undo = self._legacy_undo_path(eid)
+        if legacy_undo is not None:
+            candidates.append(legacy_undo)
         recovered = self._recovered_path(eid)
         if recovered is not None and self._resolve_existing(eid) == recovered:
             candidates.append(os.path.join(undo_dir, os.path.basename(recovered)))
         return candidates
+
+    def _legacy_undo_path(self, eid):
+        """Return the old-store ``.undo/hash_<sha256>.json`` path if ``eid`` owns it.
+
+        The old store fell back to this name whenever the *undo* path was too
+        long, even if the environment itself fit at ``<eid>.json`` (the extra
+        ``.undo/`` segment can tip a path over the Windows limit). The same
+        name is also the plain undo path of a literal ``hash_<sha256>`` env, so
+        it only belongs to ``eid`` when no such literal env file is present,
+        or when the env file there is ``eid``'s own legacy fallback.
+        """
+        _, _, hashed = self._undo_paths(eid)
+        legacy_env = self._hash_path(eid)[:-5]
+        try:
+            os.stat(legacy_env)
+        except FileNotFoundError:
+            return hashed[:-5]
+        except OSError:
+            return None
+        if self._legacy_hash_owner(legacy_env) == self._safe_eid(eid):
+            return hashed[:-5]
+        return None
 
     def _migrate_recovered_undo(self, eid, recovered):
         undo_dir, _, hashed = self._undo_paths(eid)
@@ -825,6 +848,12 @@ class JSONStore(DataStore):
                 raise
             target = hashed
             self._atomic_write(hashed, payload)
+        legacy_undo = self._legacy_undo_path(eid)
+        if legacy_undo is not None:
+            try:
+                os.remove(legacy_undo)
+            except FileNotFoundError:
+                pass
         return target
 
     def clear_undo(self, eid):

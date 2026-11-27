@@ -121,6 +121,21 @@ class TestRetention(unittest.TestCase):
         self.assertEqual(answer["removed"], 1)
         self.assertTrue(self.settle(path))
 
+    def test_dry_run_lists_hash_fallback_with_uppercase_suffix(self):
+        store = JSONStore(self.directory)
+        eid = "e" * 300
+        store.save_env(eid, {"jsons": {}, "reload": {}})
+        path = store._hash_path(eid)
+        upper = path[: -len(".json.hash")] + ".JSON.HASH"
+        os.replace(path, upper)
+        if not os.path.exists(path):
+            self.skipTest("requires a case-insensitive filesystem")
+        when = time.time() - 30 * DAY
+        os.utime(upper, (when, when))
+        answer = self.app.retire_workspace(self.workspace, 7, dry_run=True)
+        self.assertEqual(answer["envs"], [eid])
+        self.assertTrue(os.path.exists(upper))
+
     def test_old_legacy_copy_does_not_expire_an_updated_environment(self):
         store = JSONStore(self.directory)
         eid = "e" * 300

@@ -1407,6 +1407,49 @@ def test_long_env_and_literal_hash_id_do_not_overwrite_each_other(store, reverse
     assert reopened.load_undo(long_id) == []
 
 
+def test_upgrade_reads_legacy_undo_beside_plain_environment(env_path):
+    """Old store: env fit at ``<eid>.json`` but its undo fell back to the
+    legacy ``.undo/hash_<sha256>.json`` because ``.undo/`` made it too long."""
+    eid = "upgrade-env"
+    old = JSONStore(env_path)
+    old._atomic_write(old._primary_path(eid), json.dumps(_env("old")))
+    undo_dir, plain, hashed = old._undo_paths(eid)
+    legacy_undo = hashed[: -len(".hash")]
+    os.makedirs(undo_dir, exist_ok=True)
+    stack = [["win_0", {"id": "win_0", "content": "before"}]]
+    old._atomic_write(legacy_undo, json.dumps(stack))
+    assert not os.path.exists(plain)
+
+    store = JSONStore(env_path)
+    assert store.load_env(eid) == _env("old")
+    assert store.load_undo(eid) == stack
+
+    updated = stack + [["win_0", {"id": "win_0", "content": "after"}]]
+    store.save_undo(eid, updated)
+    assert store.load_undo(eid) == updated
+    assert not os.path.exists(legacy_undo)
+
+    store.clear_undo(eid)
+    assert store.load_undo(eid) == []
+
+
+def test_legacy_undo_name_owned_by_literal_hash_env_is_not_borrowed(store):
+    """``.undo/hash_<sha256(eid)>.json`` is also the plain undo path of a
+    literal ``hash_<sha256(eid)>`` env; ``eid`` must not read that stack."""
+    eid = "upgrade-env"
+    literal_id = "hash_" + hashlib.sha256(eid.encode()).hexdigest()
+    store.save_env(eid, _env("plain"))
+    store.save_env(literal_id, _env("literal"))
+    store.save_undo(literal_id, [["literal", {}]])
+    _, _, hashed = store._undo_paths(eid)
+    os.makedirs(os.path.dirname(hashed), exist_ok=True)
+    store._atomic_write(hashed[: -len(".hash")], json.dumps([["literal", {}]]))
+    assert store.load_undo(eid) == []
+    store.save_undo(eid, [["plain", {}]])
+    store.clear_undo(eid)
+    assert os.path.exists(hashed[: -len(".hash")])
+
+
 @pytest.mark.parametrize("uppercase", [False, True])
 def test_legacy_fallback_survives_saving_a_literal_hash_id(store, uppercase):
     if uppercase and os.name != "nt":

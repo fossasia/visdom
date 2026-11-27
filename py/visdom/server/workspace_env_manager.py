@@ -399,7 +399,7 @@ class WorkspaceEnvManager:
             eid = _stored_eid(entry)
             if eid is not None and eid not in keep:
                 current = storage._resolve_existing(eid)
-                if current is not None and current != os.path.abspath(entry.path):
+                if current is not None and not _same_file(current, entry.path):
                     continue
                 expired.append(
                     {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
@@ -487,6 +487,20 @@ def remove_directory(path):
     except FileNotFoundError:
         return None
     return total
+
+
+def _same_file(a, b):
+    """Whether ``a`` and ``b`` name the same file under the filesystem's rules.
+
+    A string comparison is not enough: on a case-insensitive filesystem
+    ``hash_x.json.hash`` and ``hash_x.JSON.HASH`` are one file.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(
+            os.path.abspath(b)
+        )
 
 
 def _stored_eid(entry):
