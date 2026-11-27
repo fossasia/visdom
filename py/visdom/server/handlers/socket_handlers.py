@@ -34,6 +34,7 @@ from visdom.utils.server_utils import (
     delete_env_off_loop,
     ensure_env_loaded,
     escape_eid,
+    hold_envs,
     push_deleted_off_loop,
     pop_deleted_off_loop,
     broadcast_undo_state,
@@ -154,24 +155,25 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
                 eid = escape_eid(msg["eid"])
-                if eid not in self.state:
-                    return
                 # One pop, under the escaped id. Popping a second time under the
                 # raw id used to blank out p_data before the event was built, so
                 # sources always saw pane_data: None -- and when the raw id was
                 # not itself a key in state, the lookup returned None and the
                 # close was never announced at all.
-                env = self.state[eid]
-                p_data = env["jsons"].pop(msg["data"], None)
-                if p_data is not None:
-                    undo_count = await push_deleted_off_loop(
-                        self, eid, msg["data"], p_data
-                    )
-                else:
-                    # Closing a pane that is already gone still reports the
-                    # depth, and reading it here would put the file back on the
-                    # loop the push it replaces was just taken off.
-                    undo_count = await count_deleted_off_loop(self, eid)
+                env = await ensure_env_loaded(self, eid)
+                if env is None:
+                    return
+                with hold_envs(self, [eid]):
+                    p_data = env["jsons"].pop(msg["data"], None)
+                    if p_data is not None:
+                        undo_count = await push_deleted_off_loop(
+                            self, eid, msg["data"], p_data
+                        )
+                    else:
+                        # Closing a pane that is already gone still reports the
+                        # depth, and reading it here would put the file back on the
+                        # loop the push it replaces was just taken off.
+                        undo_count = await count_deleted_off_loop(self, eid)
                 if self.state.get(eid) is not env:
                     # A delete_env landed while the undo stack was being
                     # written. The env this close belongs to is gone -- along
@@ -192,10 +194,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "undo":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
-                if eid not in self.state:
+                env_before = await ensure_env_loaded(self, eid)
+                if env_before is None:
                     return
-                env_before = self.state[eid]
-                popped, undo_count = await pop_deleted_off_loop(self, eid)
+                with hold_envs(self, [eid]):
+                    popped, undo_count = await pop_deleted_off_loop(self, eid)
                 if self.state.get(eid) is not env_before:
                     # delete_env ran while the stack was being popped; putting
                     # the pane back would have raised on an env that is no
@@ -230,9 +233,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 # copying a cold env carries its source's id rather than its
                 # data, and the retarget below would then reach for the file
                 # from here, on the loop.
-                source = self.state[prev_eid]
-                await ensure_env_loaded(self, prev_eid)
-                if self.state.get(prev_eid) is not source:
+                source = await ensure_env_loaded(self, prev_eid)
+                if source is None:
                     # the env being saved under a new id was deleted while it
                     # was being read; there is nothing left to copy.
                     return
@@ -295,6 +297,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             if packet.get("pane_data") is not False:
+                environment = await ensure_env_loaded(self, eid)
+                if environment is None:
+                    return
                 pane = environment["jsons"].get(target)
                 if pane is None:
                     logging.warning(
@@ -320,7 +325,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     f" not found, dropping event"
                 )
                 return
-            self.state[eid]["reload"][win] = msg.get("data")
+            environment = await ensure_env_loaded(self, eid)
+            if environment is None:
+                return
+            environment["reload"][win] = msg.get("data")
             self.mark_dirty(eid)
 
         elif cmd == "update_plot_layout":
@@ -341,7 +349,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
 
-            env = self.state[eid]["jsons"]
+            environment = await ensure_env_loaded(self, eid)
+            if environment is None:
+                return
+            env = environment["jsons"]
             if win not in env:
                 logging.warning(
                     f"update_plot_layout: pane {win!r} not found"
@@ -423,7 +434,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
 
-            env = self.state[eid]["jsons"]
+            environment = await ensure_env_loaded(self, eid)
+            if environment is None:
+                return
+            env = environment["jsons"]
             if win not in env:
                 logging.warning(
                     f"update_comment: pane {win!r} not found"
@@ -471,7 +485,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
 
-            env = self.state[eid]["jsons"]
+            environment = await ensure_env_loaded(self, eid)
+            if environment is None:
+                return
+            env = environment["jsons"]
             p = env.get(win)
             if p is None or p.get("type") != "table":
                 logging.warning(
@@ -658,7 +675,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     f" (eid={eid!r}, target={win!r}), dropping event"
                 )
                 return
-            env = self.state.get(eid)
+            env = await ensure_env_loaded(self, eid)
             if env is None:
                 logging.warning(
                     f"pop_embeddings_pane: env {eid!r} not found, dropping event"

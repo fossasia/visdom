@@ -19,11 +19,15 @@ import asyncio
 import inspect
 import json
 import os
+import threading
 
 import pytest
 
+from testutils import open_sub
+from visdom.server.handlers import experiments_handler, socket_handlers
 from visdom.server import run_server
 from visdom.server.app import Application
+from visdom.utils import server_utils
 from visdom.utils.server_utils import LazyEnvData, hold_envs, save_env_off_loop
 
 pytestmark = pytest.mark.integration
@@ -368,3 +372,127 @@ def test_sweep_interval_tracks_the_idle_period(env_path, idle, expected):
     assert (
         _make_app(env_path, idle=idle).server_state.eviction_interval_ms() == expected
     )
+
+
+@pytest.mark.parametrize("cmd", ["close", "undo"])
+def test_sweep_while_socket_command_waits_for_undo_storage(env_path, monkeypatch, cmd):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    sock = open_sub(app)  # viewing main, so only the operation pins a
+    worker = "push_deleted_off_loop" if cmd == "close" else "pop_deleted_off_loop"
+    original = getattr(socket_handlers, worker)
+    if cmd == "undo":
+        app.storage.save_undo("a", [["restored", {"id": "restored"}]])
+
+    async def sweep_during_io(*args):
+        _age(app, "a")
+        assert await app.server_state.evict_idle_envs() == []
+        return await original(*args)
+
+    monkeypatch.setattr(socket_handlers, worker, sweep_during_io)
+    loop_thread = threading.get_ident()
+    load = app.storage.load_env
+
+    def check_worker(eid):
+        assert threading.get_ident() != loop_thread
+        return load(eid)
+
+    monkeypatch.setattr(app.storage, "load_env", check_worker)
+    asyncio.run(sock.on_message(json.dumps({"cmd": cmd, "eid": "a", "data": "w"})))
+    panes = app.state["a"]["jsons"]
+    if cmd == "close":
+        assert "w" not in panes
+    else:
+        assert "restored" in panes
+    assert not app.server_state.held_envs
+
+
+@pytest.mark.parametrize("selection", ["a", ["main", "a"]])
+def test_view_stays_resident_until_subscriber_leaves(env_path, selection):
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    subscriber = open_sub(app)
+    subscriber.eid = selection
+    app.state["a"]["jsons"]
+    _age(app, "a")
+    assert _sweep(app.server_state) == []
+    subscriber.eid = "main"
+    assert _sweep(app.server_state) == ["a"]
+
+
+def test_sweep_considers_only_touched_environments(env_path, monkeypatch):
+    for eid in ("hot", "cold"):
+        _write_env(env_path, eid, 1)
+    app = _make_app(env_path)
+    app.state["hot"]["jsons"]
+    _age(app, "hot")
+
+    def forbid_full_scan(*args):
+        pytest.fail("sweep enumerated the entire environment state")
+
+    for method in ("__iter__", "items", "keys", "values"):
+        monkeypatch.setattr(type(app.state), method, forbid_full_scan)
+    assert _sweep(app.server_state) == ["hot"]
+    assert "hot" not in app.state.accessed
+
+
+def test_hparams_refresh_keeps_destination_resident_during_selection(
+    env_path, monkeypatch
+):
+    app = _make_app(env_path)
+    handler = experiments_handler.LivePaneWriter(app.server_state)
+    destination = {
+        "jsons": {"hp": {"type": "hparams", "i": 0, "hparams": {}}},
+        "reload": {},
+    }
+    app.state["dashboard"] = destination
+    app.storage.save_env("dashboard", destination)
+
+    async def select(handler, spec):
+        _age(app, "dashboard")
+        assert await app.server_state.evict_idle_envs() == []
+        return {"records": []}
+
+    monkeypatch.setattr(
+        experiments_handler.ExperimentHparamsHandler,
+        "_build_content_off_loop",
+        staticmethod(select),
+    )
+    asyncio.run(
+        experiments_handler.ExperimentHparamsUpdateHandler.wrap_func(
+            handler, {"eid": "dashboard", "win": "hp"}
+        )
+    )
+    assert app.storage.load_env("dashboard")["jsons"]["hp"]["content"] == {
+        "records": []
+    }
+    assert not app.server_state.held_envs
+
+
+@pytest.mark.parametrize("transport", ["socket", "http"])
+def test_save_as_pins_a_cold_source_until_the_copy_is_ready(
+    env_path, monkeypatch, transport
+):
+    from visdom.server.handlers.web_handlers import ForkEnvHandler
+
+    _write_env(env_path, "a", 1)
+    app = _make_app(env_path)
+    read = server_utils.load_env_off_loop
+
+    async def read_and_sweep(handler, eid):
+        raw = await read(handler, eid)
+        # A second reader can warm the same env while save-as is waiting.
+        app.state[eid].prime(raw)
+        _age(app, eid)
+        assert await app.server_state.evict_idle_envs() == []
+        return raw
+
+    monkeypatch.setattr(server_utils, "load_env_off_loop", read_and_sweep)
+    args = {"eid": "copy", "prev_eid": "a", "data": {}}
+    if transport == "socket":
+        asyncio.run(open_sub(app).on_message(json.dumps({"cmd": "save", **args})))
+    else:
+        writer = experiments_handler.LivePaneWriter(app.server_state)
+        asyncio.run(ForkEnvHandler.wrap_func(writer, args))
+    assert app.storage.load_env("copy")["jsons"] == {"w": {"v": 1}}
+    assert not app.server_state.held_envs

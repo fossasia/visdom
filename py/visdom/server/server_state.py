@@ -182,9 +182,8 @@ class ServerState:
         self.save_threshold = save_threshold
         if env_idle_seconds < 0 or 0 < env_idle_seconds < MIN_ENV_IDLE_SECONDS:
             raise ValueError(
-                "env_idle_seconds must be 0 (off) or at least %d, so an "
-                "environment is not dropped while a request that is still using "
-                "it is in flight" % MIN_ENV_IDLE_SECONDS
+                "env_idle_seconds must be 0 (off) or at least %d seconds"
+                % MIN_ENV_IDLE_SECONDS
             )
         self.env_idle_seconds = env_idle_seconds
 
@@ -391,6 +390,16 @@ class ServerState:
         touched = self._last_touched(eid, env)
         return touched is not None and now - touched >= self.env_idle_seconds
 
+    def _viewed_envs(self):
+        viewed = set()
+        for subscriber in self.subs.values():
+            selection = getattr(subscriber, "eid", None)
+            if isinstance(selection, str):
+                viewed.add(selection)
+            elif isinstance(selection, (list, tuple)):
+                viewed.update(selection)
+        return viewed
+
     def _existing_envs(self, eids):
         return {eid for eid in eids if self.storage.env_exists(eid)}
 
@@ -407,11 +416,8 @@ class ServerState:
         Skipped, because dropping them would lose or resurrect data: anything
         dirty, being written, or being deleted; anything with no file on disk;
         and anything not touched at all since startup, such as an env loaded
-        with ``-eager_data_loading`` that nobody has asked for. Every write
-        marks its env dirty before it can yield, and a write refreshes the idle
-        clock, so a request that is still using an env keeps it resident for
-        ``env_idle_seconds`` after its last write (the CLI refuses values too
-        small for that to hold).
+        with ``-eager_data_loading`` that nobody has asked for. Browser views
+        and requests using an env across awaits keep it resident.
 
         The file check runs on the storage worker, behind any queued write, so a
         slow filesystem never stalls the loop. Everything is decided again on
@@ -420,11 +426,24 @@ class ServerState:
         if self.env_idle_seconds <= 0 or self.env_path is None:
             return []
         now = time.monotonic()
-        candidates = [
-            eid
-            for eid, env in list(self.state.items())
-            if self._evictable(eid, env, now)
-        ]
+        accessed = getattr(self.state, "accessed", None)
+        # Startup can register thousands of disk-only environments. Only an
+        # access or write can have made one eligible for eviction.
+        touched = (
+            self.last_dirty.keys() | accessed.keys()
+            if accessed is not None
+            else self.state.keys()
+        )
+        viewed = self._viewed_envs()
+        candidates = []
+        for eid in touched:
+            env = dict.get(self.state, eid)
+            if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+                self.last_dirty.pop(eid, None)
+                if accessed is not None:
+                    accessed.pop(eid, None)
+            elif eid not in viewed and self._evictable(eid, env, now):
+                candidates.append(eid)
         evicted = []
         if candidates:
             try:
@@ -437,9 +456,10 @@ class ServerState:
                 )
                 return []
             now = time.monotonic()
+            viewed = self._viewed_envs()
             for eid in candidates:
                 env = dict.get(self.state, eid)
-                if not self._evictable(eid, env, now):
+                if eid in viewed or not self._evictable(eid, env, now):
                     continue
                 if eid not in present:
                     logging.debug("Not evicting %r: no file on disk", eid)
@@ -449,10 +469,9 @@ class ServerState:
                 else:
                     self.state[eid] = LazyEnvData(self.storage, eid)
                 self.last_dirty.pop(eid, None)
+                if accessed is not None:
+                    accessed.pop(eid, None)
                 evicted.append(eid)
-        for stamps in (self.last_dirty, getattr(self.state, "accessed", {})):
-            for eid in [e for e in stamps if e not in self.state]:
-                del stamps[eid]
         return evicted
 
     def eviction_interval_ms(self):

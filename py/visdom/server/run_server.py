@@ -545,8 +545,7 @@ def main(print_func=None):
 
     if FLAGS.env_idle_seconds < 0 or 0 < FLAGS.env_idle_seconds < MIN_ENV_IDLE_SECONDS:
         parser.error(
-            "-env_idle_seconds must be 0 (off) or at least %d, so an environment "
-            "is not dropped while a request that is still using it is in flight"
+            "-env_idle_seconds must be 0 (off) or at least %d seconds"
             % MIN_ENV_IDLE_SECONDS
         )
 

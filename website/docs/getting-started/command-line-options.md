@@ -35,7 +35,8 @@ reaching disk does not hold up the requests arriving while it is written.
 Loaded environments stay in memory until the server stops. On a long-running
 server, set `-env_idle_seconds` to let environments that are saved and untouched
 fall back to disk. An environment is never dropped while it has unsaved changes,
-is being written or deleted, or is in use by a request, and one nobody has opened
+is being written or deleted, is displayed by a connected browser, or is in use
+by a request. An environment nobody has opened
 since startup (for example under `-eager_data_loading`) stays where it is. An
 evicted environment reloads transparently when next used.
 

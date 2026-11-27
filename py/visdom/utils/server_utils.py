@@ -542,7 +542,7 @@ def delete_env_off_loop(handler, eid):
 
 
 async def ensure_env_loaded(handler, eid):
-    """Materialise a cold lazy env without blocking the loop on the read.
+    """Return the current env, warming it off-loop, or None if gone or replaced.
 
     A delete that lands while the read is on the worker takes the env out of
     ``state`` and its file off disk, so the read answers with nothing at all.
@@ -556,11 +556,13 @@ async def ensure_env_loaded(handler, eid):
     """
     env = handler.state.get(eid)
     if not isinstance(env, LazyEnvData) or env.is_loaded:
-        return
-    raw = await load_env_off_loop(handler, eid)
+        return env
+    with hold_envs(handler, [eid]):
+        raw = await load_env_off_loop(handler, eid)
     if handler.state.get(eid) is not env:
         return
     env.prime(raw)
+    return env
 
 
 async def ensure_env_present(handler, eid):

@@ -76,8 +76,7 @@ def resolve_targets(state, changed):
         return []
 
     targets = []
-    for eid in list(state.keys()):
-        env = state.get(eid)
+    for eid, env in state.items():
         if env is None:
             continue
         if not getattr(env, "is_loaded", True):
