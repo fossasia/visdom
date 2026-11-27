@@ -3,8 +3,10 @@ import numpy as np
 
 # boxplot
 def plot_special_boxplot(viz, env, args):
+    """Optional arguments: window title, number of observations per series."""
     title = args[0] if len(args) > 0 else None
-    X = np.random.rand(100, 2)
+    samples = int(args[1]) if len(args) > 1 else 100
+    X = np.random.rand(samples, 2)
     X[:, 1] += 2
     viz.boxplot(X=X, opts=dict(legend=["Men", "Women"], title=title), env=env)
 
