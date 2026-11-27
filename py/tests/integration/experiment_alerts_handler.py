@@ -18,13 +18,14 @@ environment, with the state behind it written to disk.
 """
 
 import json
+from unittest import mock
 
 import pytest
 
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
 
-from testutils.fakes import FakeSocket
+from testutils.fakes import FakeSocket, SpyStore
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -261,6 +262,79 @@ class TestAlertsEndpoint(AlertsTestCase):
         self.post_json("/fork_env", {"prev_eid": "main", "eid": "forked"})
 
         self.assertEqual(len(self.stored_alerts("forked")), 1)
+
+
+class TestAlertWritesAreOnlyForChanges(AlertsTestCase):
+    """What a change to the rules costs when it is not a change at all.
+
+    A rule lives inside the environment file, so persisting one means writing
+    the whole of it -- every window, every metric series, every pane of layout
+    beside the few hundred bytes of metadata that actually changed. A request
+    that removed no rule has no business queueing that, and marking the
+    environment dirty would have the autosave write it a second time.
+    """
+
+    def get_app(self):
+        # ``ServerState`` keeps its own reference to the store, so the spy has
+        # to be what the application builds for itself.
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        return app
+
+    def dirty(self, eid="main"):
+        return self._app.server_state.dirty_envs.get(eid, 0)
+
+    def quiet(self):
+        """Forget what setting the rule up cost, and watch only what follows."""
+        self.spy.calls["save_env"].clear()
+        self._app.server_state.dirty_envs.clear()
+
+    def test_a_clear_that_removes_nothing_writes_nothing(self):
+        self.set_alert()
+        self.quiet()
+
+        response = self.clear_alert("accuracy")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(len(json.loads(response.body)), 1)
+        self.assertEqual(self.spy.calls["save_env"], [])
+        self.assertEqual(self.dirty(), 0)
+
+    def test_a_clear_naming_a_condition_no_rule_has_writes_nothing(self):
+        # The other way a clear matches nothing: the metric is watched, but
+        # not by a rule with that condition.
+        self.set_alert(condition="> 2.0")
+        self.quiet()
+
+        response = self.clear_alert("loss", condition="stalled")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(len(json.loads(response.body)), 1)
+        self.assertEqual(self.spy.calls["save_env"], [])
+        self.assertEqual(self.dirty(), 0)
+
+    def test_a_clear_that_removes_a_rule_still_writes_and_marks(self):
+        # The half that must not be lost in the skipping.
+        self.set_alert()
+        self.quiet()
+
+        response = self.clear_alert("loss")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), [])
+        self.assertEqual(self.spy.calls["save_env"], ["main"])
+        self.assertEqual(self.dirty(), 1)
+        self.assertEqual(self.stored_alerts(), [])
+
+    def test_setting_a_rule_writes_and_marks(self):
+        self.quiet()
+
+        response = self.set_alert()
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.spy.calls["save_env"], ["main"])
+        self.assertEqual(self.dirty(), 1)
 
 
 class TestAlertsReadonly(AlertsTestCase):

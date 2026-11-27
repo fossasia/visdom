@@ -2409,7 +2409,21 @@ class AlertsHandler(BaseHandler):
             metric, condition = target
 
             def mutate(store):
-                return store.clear_alerts(eid, metric, condition)
+                # ``None`` is how a mutation says it changed nothing, and a
+                # clear that matched no rule is the one metadata change that
+                # routinely does. The store already declines to write an
+                # unchanged record, but it answers with the experiment either
+                # way, and ``_write_experiment_metadata`` cannot tell that
+                # from a change -- so it would queue a whole environment file
+                # for a request that removed nothing, and the handler would
+                # mark it dirty for the autosave to write again. Counted
+                # rather than compared: clearing only ever removes, so the
+                # list shrinking is the change.
+                before = len(store.get_alerts(eid))
+                experiment = store.clear_alerts(eid, metric, condition)
+                if len(experiment.get_alerts()) == before:
+                    return None
+                return experiment
 
         try:
             # A rule shares the environment file with the experiment it watches
@@ -2429,6 +2443,15 @@ class AlertsHandler(BaseHandler):
             return
         except (TypeError, ValueError) as error:
             AlertsHandler._refuse(handler, 400, error)
+            return
+
+        if experiment is None:
+            # A clear that matched nothing. Nothing was written and nothing
+            # is dirty, so the answer is simply the list as it stands -- the
+            # same answer ``get`` gives, and the same 200 a clear that did
+            # remove a rule gives, because asking for a rule to be gone and
+            # finding it already gone is not an error.
+            await AlertsHandler._write_alerts(handler, eid)
             return
 
         handler.mark_dirty(eid)
