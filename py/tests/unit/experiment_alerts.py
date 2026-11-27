@@ -25,6 +25,7 @@ the datastore handed to it here raises on every call it could make.
 import builtins
 import json
 import math
+import sys
 
 import pytest
 
@@ -97,6 +98,35 @@ def live_store(env):
         persist=lambda eid, env_data: written.append(eid),
     )
     return store, written
+
+
+# CPython's own default. Pinned by the fixture below rather than assumed,
+# because it is settable per interpreter -- PYTHONINTMAXSTRDIGITS=0 removes the
+# limit outright -- and two tests here are about what happens when an operand
+# runs past it. Without the pin they would pass or fail on the environment
+# rather than on the code, and a build that removed the limit would read the
+# padded operand exactly and report a bug that is not there.
+DEFAULT_INT_MAX_STR_DIGITS = 4300
+
+
+@pytest.fixture
+def int_digit_limit():
+    """Pin the integer string conversion limit, and yield what it was pinned to.
+
+    Yielded rather than hardcoded at the call site so the padding a test builds
+    is always one digit past the limit actually in force. The limit is a
+    CPython facility, so a build without it skips the two tests that read it --
+    they are about that limit's interaction with ``float()``, and there is
+    nothing to assert where it does not exist.
+    """
+    if not hasattr(sys, "set_int_max_str_digits"):
+        pytest.skip("this interpreter has no integer string conversion limit")
+    previous = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(DEFAULT_INT_MAX_STR_DIGITS)
+    try:
+        yield DEFAULT_INT_MAX_STR_DIGITS
+    finally:
+        sys.set_int_max_str_digits(previous)
 
 
 # ------------------------------------------------------------------ grammar --
@@ -187,15 +217,37 @@ class TestParseCondition:
     def test_a_decimal_operand_is_still_read_as_a_float(self, text):
         assert isinstance(parse_condition(text)[1], float)
 
-    def test_a_digit_padded_integer_is_refused_rather_than_rounded(self):
+    def test_a_digit_padded_integer_is_refused_rather_than_rounded(
+        self, int_digit_limit
+    ):
         # int() refuses a run of digits longer than CPython's conversion
         # limit, and float() does not -- so leading zeros alone used to walk
         # an exact integer operand back into the rounding the test above
-        # exists to prevent. 4300 is the limit; this is one digit over it.
-        padded = "0" * 4300 + "9007199254740993"
+        # exists to prevent.
+        padded = "0" * int_digit_limit + "9007199254740993"
         assert float(padded) != 9007199254740993
         with pytest.raises(ValueError):
             parse_condition("== " + padded)
+
+    def test_a_grouped_integer_too_long_to_read_is_refused_too(self, int_digit_limit):
+        # The same padding written with the digit separators Python allows.
+        # They do not count toward the conversion limit, so int() refuses this
+        # operand as well -- while float() reads it, and str.isdigit() says it
+        # is not a run of digits at all. Recognising the separators is what
+        # keeps the operand off the float path.
+        padded = "0_" * int_digit_limit + "9007199254740993"
+        assert float(padded) != 9007199254740993
+        with pytest.raises(ValueError):
+            parse_condition("== " + padded)
+
+    @pytest.mark.parametrize("text", ["== 1_000", "> -1_000", "< +9_007_199"])
+    def test_a_grouped_integer_short_enough_to_read_stays_exact(self, text):
+        # The separators are part of the grammar int() reads, not a reason to
+        # refuse: a grouped operand short enough to convert is the integer it
+        # spells, with no rounding on the way in.
+        threshold = parse_condition(text)[1]
+        assert isinstance(threshold, int)
+        assert threshold == int(text.split(" ", 1)[1])
 
     def test_an_integer_no_observation_could_reach_is_refused(self):
         # An integer operand is not bounded by float's range the way a
@@ -328,12 +380,16 @@ class TestAlertValidation:
         assert isinstance(restored.threshold, int)
         assert restored.to_dict() == alert.to_dict()
 
-    def test_a_digit_padded_threshold_never_reaches_a_saved_rule(self):
+    @pytest.mark.parametrize("pad", ["0", "0_"])
+    def test_a_digit_padded_threshold_never_reaches_a_saved_rule(
+        self, pad, int_digit_limit
+    ):
         # The same operand through the written form a caller sends: refused
         # at build time, so no rounded threshold is ever stored to be read
-        # back exactly on the next load.
+        # back exactly on the next load. Both spellings of the padding, since
+        # only one of them looks like a run of digits.
         with pytest.raises(ValueError):
-            build_alert("count", "== " + "0" * 4300 + "9007199254740993")
+            build_alert("count", "== " + pad * int_digit_limit + "9007199254740993")
 
     def test_a_remembered_best_is_not_rounded_at_load(self):
         # 'best' is an observation the record kept, and the stall watch
@@ -736,6 +792,51 @@ class TestExperimentRules:
         assert (replacement.streak, replacement.fire_count) == (0, 0)
         assert (replacement.best, replacement.since_best) == (None, 0)
         assert experiment.get_alerts("loss") == [replacement]
+
+    def test_a_first_attachment_is_rearmed_as_well(self):
+        # A rule arrives with state whether it is replacing one or not, and
+        # there is only one place it can be cleared. A rule folded in one
+        # experiment and then set on another used to go in as it stood, so the
+        # second experiment started life holding a spent streak.
+        source = Experiment(env_id="run-7")
+        source.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        folded = source.get_alerts("loss")[0]
+        feed(folded, [2.5, 2.5])
+        assert (folded.streak, folded.fire_count) == (2, 1)
+
+        other = Experiment(env_id="run-8")
+        attached = other.set_alert(folded)
+        assert (attached.streak, attached.fire_count) == (0, 0)
+        assert other.get_alerts("loss") == [attached]
+
+    def test_two_experiments_given_one_rule_do_not_share_its_state(self):
+        # The consequence of storing the caller's own object: the two records
+        # would hold the same rule, so an observation logged against either
+        # run would advance one streak and fire one of the two rules at a
+        # moment that had nothing to do with it.
+        rule = build_alert("loss", "> 2.0")
+        first = Experiment(env_id="run-7")
+        second = Experiment(env_id="run-8")
+        first.set_alert(rule)
+        second.set_alert(rule)
+
+        assert first.get_alerts("loss")[0] is not second.get_alerts("loss")[0]
+        feed(first.get_alerts("loss")[0], [2.5])
+        assert first.get_alerts("loss")[0].fire_count == 1
+        assert second.get_alerts("loss")[0].fire_count == 0
+
+    def test_a_rule_loaded_from_the_record_keeps_the_streak_it_was_saved_with(
+        self,
+    ):
+        # The other half of rearming on attachment: the restore path is
+        # from_dict, not set_alert, so a restarted server picks a streak up
+        # where it left off rather than re-arming every rule it reloads.
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        feed(experiment.get_alerts("loss")[0], [2.5])
+
+        restored = Experiment.from_dict(json.loads(json.dumps(experiment.to_dict())))
+        assert restored.get_alerts("loss")[0].streak == 1
 
     def test_a_replacement_can_fire_where_the_rule_it_replaced_already_had(self):
         # The consequence of carrying a streak over, and the reason this is

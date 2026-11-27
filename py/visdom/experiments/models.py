@@ -418,29 +418,40 @@ class Experiment:
         """Attach ``alert``, replacing any rule with the same identity.
 
         A repeat of the same metric and condition replaces the rule rather
-        than adding a second one, and the replacement goes in
+        than adding a second one, and what goes in either way is
         :meth:`~visdom.experiments.alerts.Alert.rearmed`: re-stating a rule is
         how a caller changes its threshold, and carrying the old running state
         over would judge the new rule by observations the old one saw. The
-        rule handed in is not necessarily a fresh one -- reading a rule with
+        rearmed rule is what is returned, so a caller that goes on to read the
+        rule reads the one that was stored.
+
+        A first attachment is rearmed for a second reason, which is that the
+        rule handed in is not necessarily a fresh one. Reading a rule with
         :meth:`get_alerts`, changing its threshold and setting it again is the
-        obvious way to edit one -- so the state is cleared here rather than
-        trusted to be clear already. The rearmed rule is what is returned, so
-        a caller that goes on to read the rule reads the one that was stored.
+        obvious way to edit one -- and setting one experiment's rule on another
+        experiment is the obvious way to copy it. Stored as it arrives, that
+        second experiment would hold the *same object*, so an observation in
+        either run would advance one shared streak and fire one of the two
+        rules at a moment that has nothing to do with it. A copy with the state
+        back at its start is the only thing an attachment can safely keep.
+
+        :meth:`from_dict` is the restore path and does not come through here,
+        so a rule reloaded from the record still arrives with the streak it
+        was persisted with.
         """
+        attached = alert.rearmed()
         for i, existing in enumerate(self.alerts):
-            if existing.rule_id == alert.rule_id:
-                replacement = alert.rearmed()
-                self.alerts[i] = replacement
-                return replacement
+            if existing.rule_id == attached.rule_id:
+                self.alerts[i] = attached
+                return attached
         if len(self.alerts) >= MAX_ALERTS_PER_ENV:
             raise ValueError(
                 "an environment is limited to {0} alert rules".format(
                     MAX_ALERTS_PER_ENV
                 )
             )
-        self.alerts.append(alert)
-        return alert
+        self.alerts.append(attached)
+        return attached
 
     def get_alerts(self, key: Optional[str] = None) -> list[Alert]:
         """This experiment's rules, or only those watching ``key``."""

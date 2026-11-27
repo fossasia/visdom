@@ -18,14 +18,14 @@ environment, with the state behind it written to disk.
 """
 
 import json
-from unittest.mock import patch
+from unittest import mock
 
 import pytest
 
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
 
-from testutils.fakes import FakeSocket
+from testutils.fakes import FakeSocket, SpyStore
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -60,6 +60,13 @@ class AlertsTestCase(VisdomHTTPTestCase):
         """The rules as they were written to disk, not as the reply had them."""
         experiment = ExperimentStore(JSONStore(self.env_path)).get_experiment(eid)
         return [] if experiment is None else [a.to_dict() for a in experiment.alerts]
+
+    def notifications(self, sub):
+        return [
+            message["data"]["message"]
+            for message in sub.sent
+            if message.get("command") == "notification"
+        ]
 
     def subscribe(self, eid="main", sid="sub"):
         sub = FakeSocket(sid, eid)
@@ -115,7 +122,7 @@ class TestAlertsEndpoint(AlertsTestCase):
         # and then gone.
         self.set_alert(condition="> 2.0")
 
-        with patch.object(
+        with mock.patch.object(
             self._app.storage, "save_env", side_effect=OSError("disk full")
         ):
             failed = self.set_alert(condition="nan")
@@ -281,6 +288,79 @@ class TestAlertsEndpoint(AlertsTestCase):
         self.assertEqual(len(self.stored_alerts("forked")), 1)
 
 
+class TestAlertWritesAreOnlyForChanges(AlertsTestCase):
+    """What a change to the rules costs when it is not a change at all.
+
+    A rule lives inside the environment file, so persisting one means writing
+    the whole of it -- every window, every metric series, every pane of layout
+    beside the few hundred bytes of metadata that actually changed. A request
+    that removed no rule has no business queueing that, and marking the
+    environment dirty would have the autosave write it a second time.
+    """
+
+    def get_app(self):
+        # ``ServerState`` keeps its own reference to the store, so the spy has
+        # to be what the application builds for itself.
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        return app
+
+    def dirty(self, eid="main"):
+        return self._app.server_state.dirty_envs.get(eid, 0)
+
+    def quiet(self):
+        """Forget what setting the rule up cost, and watch only what follows."""
+        self.spy.calls["save_env"].clear()
+        self._app.server_state.dirty_envs.clear()
+
+    def test_a_clear_that_removes_nothing_writes_nothing(self):
+        self.set_alert()
+        self.quiet()
+
+        response = self.clear_alert("accuracy")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(len(json.loads(response.body)), 1)
+        self.assertEqual(self.spy.calls["save_env"], [])
+        self.assertEqual(self.dirty(), 0)
+
+    def test_a_clear_naming_a_condition_no_rule_has_writes_nothing(self):
+        # The other way a clear matches nothing: the metric is watched, but
+        # not by a rule with that condition.
+        self.set_alert(condition="> 2.0")
+        self.quiet()
+
+        response = self.clear_alert("loss", condition="stalled")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(len(json.loads(response.body)), 1)
+        self.assertEqual(self.spy.calls["save_env"], [])
+        self.assertEqual(self.dirty(), 0)
+
+    def test_a_clear_that_removes_a_rule_still_writes_and_marks(self):
+        # The half that must not be lost in the skipping.
+        self.set_alert()
+        self.quiet()
+
+        response = self.clear_alert("loss")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), [])
+        self.assertEqual(self.spy.calls["save_env"], ["main"])
+        self.assertEqual(self.dirty(), 1)
+        self.assertEqual(self.stored_alerts(), [])
+
+    def test_setting_a_rule_writes_and_marks(self):
+        self.quiet()
+
+        response = self.set_alert()
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.spy.calls["save_env"], ["main"])
+        self.assertEqual(self.dirty(), 1)
+
+
 class TestAlertsReadonly(AlertsTestCase):
     app_kwargs = {"readonly": True}
 
@@ -297,13 +377,6 @@ class TestAlertsReadonly(AlertsTestCase):
 
 
 class TestAlertNotifications(AlertsTestCase):
-    def notifications(self, sub):
-        return [
-            message["data"]["message"]
-            for message in sub.sent
-            if message.get("command") == "notification"
-        ]
-
     def test_a_crossed_threshold_notifies_the_environment(self):
         sub = self.subscribe()
         self.set_alert(condition="> 2.0")
@@ -355,7 +428,7 @@ class TestAlertNotifications(AlertsTestCase):
         sub = self.subscribe()
         self.set_alert(condition="> 2.0")
 
-        with patch.object(
+        with mock.patch.object(
             self._app.storage, "save_env", side_effect=OSError("disk full")
         ):
             failed = self.log_metric(2.5, step=1)
@@ -519,3 +592,119 @@ class TestAlertNotifications(AlertsTestCase):
         # the metric reached the record the way it does without any rules.
         experiment = ExperimentStore(JSONStore(self.env_path)).get_experiment("main")
         self.assertEqual(experiment.latest_metric("loss").value, 2.5)
+
+
+class TestAWriteThatFails(AlertsTestCase):
+    """What a rule is left holding when the save behind it raises.
+
+    The fold runs on the loop and the write of what it produced runs off it,
+    which leaves one window in which an observation can be judged and then not
+    persisted. The rules are the only part of the record that cannot be put
+    right by sending the request again: a streak that completed has fired, and
+    ``observe`` fires on the streak reaching ``for_steps`` exactly, so a
+    streak left standing at ``for_steps`` goes on counting without ever firing
+    again. The notification would be gone rather than merely late.
+    """
+
+    def get_app(self):
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        self.breaking = None
+        real_save = self.spy.save_env
+
+        def save_env(eid, env_data):
+            if self.breaking is not None:
+                breaking, self.breaking = self.breaking, None
+                breaking()
+                raise OSError("no space left on device")
+            return real_save(eid, env_data)
+
+        self.spy.save_env = save_env
+        return app
+
+    def break_next_save(self, during=lambda: None):
+        """Make the next env save raise, running ``during`` just before it does.
+
+        ``during`` stands in for another request changing the same rules while
+        this one is off the loop waiting on its write. It runs on the storage
+        worker rather than on the loop, which is where the loop would be
+        running it from: parked on this very await, with nothing of its own to
+        do until the write comes back.
+        """
+        self.breaking = during
+
+    def live_alerts(self, eid="main"):
+        """The rules on the environment the server is serving, not on disk."""
+        return [rule["key"] for rule in json.loads(self.fetch_rules(eid).body)]
+
+    def fetch_rules(self, eid="main"):
+        return self.fetch("/experiments/alerts?eid={0}".format(eid))
+
+    def test_a_failed_metric_save_puts_the_streak_back(self):
+        sub = self.subscribe()
+        self.set_alert(condition="> 2.0")
+
+        self.break_next_save()
+        failed = self.log_metric(2.5, step=1)
+
+        self.assertEqual(failed.code, 500)
+        self.assertEqual(self.notifications(sub), [])
+        self.assertEqual(json.loads(self.fetch_rules().body)[0]["streak"], 0)
+
+        # the retry the 500 asks for, and the notification it was owed
+        retried = self.log_metric(2.5, step=1)
+
+        self.assertEqual(retried.code, 200)
+        self.assertEqual(len(self.notifications(sub)), 1)
+        self.assertEqual(self.stored_alerts()[0]["fire_count"], 1)
+
+    def test_a_failed_first_rule_is_not_left_on_the_environment(self):
+        # The environment had no record at all, so there is no earlier rule
+        # list to go back to -- and a rule left in memory regardless would be
+        # read back by the next GET and folded by the next metric, with
+        # nothing on disk having ever heard of it.
+        sub = self.subscribe()
+        self.break_next_save()
+        failed = self.set_alert(condition="> 2.0")
+
+        self.assertEqual(failed.code, 500)
+        self.assertEqual(self.live_alerts(), [])
+        self.assertEqual(self.stored_alerts(), [])
+
+        logged = self.log_metric(2.5)
+
+        self.assertEqual(logged.code, 200)
+        self.assertEqual(self.notifications(sub), [])
+
+    def test_a_failed_save_leaves_an_earlier_rule_alone(self):
+        # The case the rollback is for: a record that already had rules goes
+        # back to having exactly those.
+        self.set_alert(metric="loss", condition="> 2.0")
+
+        self.break_next_save()
+        failed = self.set_alert(metric="accuracy", condition="< 0.5")
+
+        self.assertEqual(failed.code, 500)
+        self.assertEqual(self.live_alerts(), ["loss"])
+        self.assertEqual([r["key"] for r in self.stored_alerts()], ["loss"])
+
+    def test_a_failed_save_does_not_revert_a_rule_set_in_the_meantime(self):
+        self.set_alert(metric="loss", condition="> 2.0")
+
+        def another_request_sets_one():
+            blob = self._app.server_state.state["main"]["experiment"]
+            blob["alerts"] = blob["alerts"] + [
+                {"key": "accuracy", "condition": "<", "threshold": 0.5}
+            ]
+
+        self.break_next_save(during=another_request_sets_one)
+        failed = self.log_metric(2.5, step=1)
+
+        # The other request has already been answered with a 200, so its rule
+        # has to still be there. Rolling back over it would take a stored rule
+        # out of the environment the server is serving to put this request's
+        # streak back, and the next write of that environment would persist
+        # the version without it.
+        self.assertEqual(failed.code, 500)
+        self.assertEqual(self.live_alerts(), ["loss", "accuracy"])

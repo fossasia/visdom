@@ -42,6 +42,7 @@ would spend a second notification on the run that already sent one.
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
@@ -244,6 +245,19 @@ def _optional_int(value: Any, field_name: str) -> Optional[int]:
     return value
 
 
+# The grammar ``int()`` reads: an optional sign, then decimal digits with at
+# most one underscore between any two of them. It is spelled out here because
+# the operand that gets this far is one ``int()`` has already refused, and the
+# only question left is whether it refused the *number* or merely its length.
+#
+# ``\d`` rather than ``str.isdigit``, which is the wider test -- it answers
+# True for '\u00b2', which ``int()`` will not read -- and the underscores are
+# part of the grammar rather than noise to strip: they do not count toward the
+# conversion limit, so a grouped operand can exceed it while looking nothing
+# like a run of digits, and ``float()`` accepts them just as happily.
+_WRITTEN_INTEGER = re.compile(r"[+-]?\d(?:_?\d)*")
+
+
 def _written_number(operand: str) -> Union[int, float]:
     """The number written in ``operand``, as the kind of number it is written as.
 
@@ -260,15 +274,14 @@ def _written_number(operand: str) -> Union[int, float]:
     try:
         return int(operand)
     except ValueError:
-        digits = operand.strip()
-        digits = digits[1:] if digits[:1] in "+-" else digits
-        if digits.isdigit():
-            # ``int()`` refuses a run of digits for exactly one reason: it is
-            # longer than CPython's integer string conversion limit. Falling
-            # through to ``float()`` would parse it anyway -- that limit is
-            # ``int()``'s alone -- and round it, which is the one thing this
-            # function exists to prevent. A padded threshold is refused where
-            # it is written instead of silently becoming its neighbour.
+        if _WRITTEN_INTEGER.fullmatch(operand.strip()):
+            # ``int()`` refuses an operand written as an integer for exactly
+            # one reason: it is longer than CPython's integer string
+            # conversion limit. Falling through to ``float()`` would parse it
+            # anyway -- that limit is ``int()``'s alone -- and round it, which
+            # is the one thing this function exists to prevent. A padded
+            # threshold is refused where it is written instead of silently
+            # becoming its neighbour.
             raise ValueError(
                 "{0!r} is written as an integer but is too long for one to "
                 "be read exactly".format(operand)

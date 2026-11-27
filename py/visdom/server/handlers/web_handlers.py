@@ -1519,46 +1519,60 @@ def _no_write(eid, env):
 
 
 def _alert_state_of(env):
-    """``env``'s alert rules as they stand now, or ``None`` if it has no record.
+    """``env``'s alert rules as they stand, in the shape they go back in.
 
     A copy of each rule, because the rules are folded in place: the list on the
     record is the same list the next write serialises, so holding a reference
-    would hold the mutated state rather than the state before it.
+    would hold the state after the change rather than the state before it.
 
     Only the rules are copied, not the record. The rest of it is what the
     request carried and what a retry carries again, while a rule's streak and
-    ``fire_count`` are derived state that a retry cannot rebuild -- a firing
-    that has been spent is spent until the streak breaks.
+    ``fire_count`` are derived state a retry cannot rebuild -- a firing that
+    has been spent is spent until the streak breaks.
+
+    An environment with no record yet answers with no rules rather than with
+    "nothing to go back to". Its first write creating the record is somebody
+    else's problem, but a rule *inside* that record is this one's: left there
+    by a write that failed, it would be read back by the next GET and folded
+    by the next metric, while nothing on disk has ever heard of it.
     """
     blob = env.get(METADATA_KEY)
     if not isinstance(blob, dict):
-        return None
+        return []
     alerts = blob.get("alerts")
     if not isinstance(alerts, list):
         return []
     return [dict(rule) if isinstance(rule, dict) else rule for rule in alerts]
 
 
-def _restore_alert_state(env, alerts):
-    """Put ``alerts`` back on ``env``'s record, after a write of it failed.
+def _restore_alert_state(env, before, after):
+    """Put ``before`` back on ``env``'s record, after a write of it failed.
 
     The fold runs on the loop and the write of what it produced runs off it, so
     a save that raises leaves behind a rule that has counted an observation
     nobody will ever be told about: ``observe`` fires on the streak reaching
     ``for_steps`` exactly, so a streak left standing at ``for_steps`` cannot
     fire again until something breaks it, and the notification for that run is
-    gone rather than merely late. Putting the rules back means the retry that
-    the 500 asks for folds the observation again and fires on it.
+    gone rather than merely late. Putting the rules back means the retry the
+    500 asks for folds the observation again and fires on it.
 
-    An environment that had no record before the change is left alone: there
-    was no evaluation state to spend, and rolling back the record itself is
-    every first write's problem rather than this one's.
+    ``after`` is the rules as this request left them, and the rollback happens
+    only while they are still that. The await the write happens in is a window
+    the loop spends on other requests, and a rule another one set or cleared in
+    it has already been answered for with a 200. Writing ``before`` over that
+    would take a stored rule back out of the environment the server is serving
+    and let the next write of it persist the version without that rule --
+    losing somebody else's rule to put this request's streak back. A spent
+    streak is the smaller loss of the two, so where the list has moved on the
+    rollback stands down and leaves it alone.
     """
-    if alerts is None:
-        return
     blob = env.get(METADATA_KEY)
-    if isinstance(blob, dict):
-        blob["alerts"] = alerts
+    if not isinstance(blob, dict):
+        return
+    live = blob.get("alerts")
+    if not isinstance(live, list) or live != after:
+        return
+    blob["alerts"] = before
 
 
 async def _write_experiment_metadata(handler, eid, mutate):
@@ -1584,8 +1598,9 @@ async def _write_experiment_metadata(handler, eid, mutate):
     rejects leaves behind neither a new environment nor a write.
 
     A write that is attempted and *fails* is the other case, and the alert
-    rules are the part of the record that cannot simply be sent again: see
-    :func:`_restore_alert_state` for what is put back and why it is only them.
+    rules are the part of the record a retry cannot simply send again: see
+    :func:`_restore_alert_state` for what is put back, when it is not, and
+    why it is only them.
     """
     is_new_env = eid not in handler.state
     await ensure_env_present(handler, eid)
@@ -1609,12 +1624,16 @@ async def _write_experiment_metadata(handler, eid, mutate):
     if experiment is None:
         return None, is_new_env
 
+    # and read again after it, so the rollback can tell its own change from one
+    # another request made while this one was off the loop
+    alerts_after = _alert_state_of(env)
+
     if eid not in handler.state:
         handler.state[eid] = env
     try:
         await save_env_off_loop(handler, eid)
     except Exception:
-        _restore_alert_state(env, alerts_before)
+        _restore_alert_state(env, alerts_before, alerts_after)
         raise
     return experiment, is_new_env
 
@@ -2311,6 +2330,38 @@ class AlertsHandler(BaseHandler):
 
     VALID_ACTIONS = ("get", "set", "clear")
 
+    # The actions that only read. Named apart from ``VALID_ACTIONS`` because
+    # ``prepare`` has to tell a read from a write before the handler runs.
+    READ_ACTIONS = ("get",)
+
+    def body_writes(self):
+        """Whether this POST changes anything, which is its ``action`` and nothing else.
+
+        The endpoint is in ``WRITE_ENDPOINTS`` because two of its three actions
+        write, which is what denies a viewer and a workspace that is out of
+        storage the rules they must not change. Read off the path alone that
+        also denies them ``action: get`` -- the read this very handler answers
+        over GET, for the same caller, from the same state. A viewer reading the
+        rules on a run they are watching is the whole point of their role.
+
+        The body is decoded the same way :meth:`post` decodes it, and a body
+        that cannot be decoded is treated as a write: ``post`` is about to
+        refuse it with a 400, and a request nobody can read is not one to
+        exempt from the role check on the strength of a guess. An action that
+        is not one of :data:`READ_ACTIONS` -- including an unknown one -- is a
+        write for the same reason.
+
+        ``clear`` stays a write even though it only removes: it queues a write
+        of the environment exactly as ``set`` does, and twenty bounded rules
+        are not what fills a workspace, so there is nothing here to match the
+        exemption ``close`` and ``delete_env`` have from ``FILL_ENDPOINTS``.
+        """
+        try:
+            args = _decode_json_body(self.request.body)
+        except tornado.web.HTTPError:
+            return True
+        return args.get("action", "get") not in AlertsHandler.READ_ACTIONS
+
     @staticmethod
     def _as_list(alerts):
         return [alert.to_dict() for alert in alerts]
@@ -2432,7 +2483,21 @@ class AlertsHandler(BaseHandler):
             metric, condition = target
 
             def mutate(store):
-                return store.clear_alerts(eid, metric, condition)
+                # ``None`` is how a mutation says it changed nothing, and a
+                # clear that matched no rule is the one metadata change that
+                # routinely does. The store already declines to write an
+                # unchanged record, but it answers with the experiment either
+                # way, and ``_write_experiment_metadata`` cannot tell that
+                # from a change -- so it would queue a whole environment file
+                # for a request that removed nothing, and the handler would
+                # mark it dirty for the autosave to write again. Counted
+                # rather than compared: clearing only ever removes, so the
+                # list shrinking is the change.
+                before = len(store.get_alerts(eid))
+                experiment = store.clear_alerts(eid, metric, condition)
+                if len(experiment.get_alerts()) == before:
+                    return None
+                return experiment
 
         try:
             # A rule shares the environment file with the experiment it watches
@@ -2452,6 +2517,15 @@ class AlertsHandler(BaseHandler):
             return
         except (TypeError, ValueError) as error:
             AlertsHandler._refuse(handler, 400, error)
+            return
+
+        if experiment is None:
+            # A clear that matched nothing. Nothing was written and nothing
+            # is dirty, so the answer is simply the list as it stands -- the
+            # same answer ``get`` gives, and the same 200 a clear that did
+            # remove a rule gives, because asking for a rule to be gone and
+            # finding it already gone is not an error.
+            await AlertsHandler._write_alerts(handler, eid)
             return
 
         handler.mark_dirty(eid)

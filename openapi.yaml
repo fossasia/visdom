@@ -892,8 +892,17 @@ paths:
                         including the `null` a NaN or an infinity becomes on
                         the wire) or `"stalled"` (no improvement for
                         `patience` observations). A fixed enum with a numeric
-                        operand, never an expression: the operand is read
-                        with `float()`. `>=` and `<=` are not accepted.
+                        operand, never an expression. The operand is read as
+                        the kind of number it is written as: one written as an
+                        integer is read with `int()` and keeps every digit it
+                        was written with, so `== 9007199254740993` watches
+                        that integer and not its neighbour, while a decimal or
+                        exponent operand is read with `float()`. An integer
+                        too long for Python to read exactly -- padded with
+                        leading zeros, or with digit separators, past the
+                        interpreter's conversion limit -- is refused rather
+                        than rounded onto the float path. `>=` and `<=` are
+                        not accepted.
                     for_steps:
                       type: integer
                       minimum: 1
@@ -901,28 +910,43 @@ paths:
                       description: >
                         Consecutive matching observations before the rule
                         fires. It fires on the one that completes the streak
-                        and not again until the streak breaks. "Consecutive"
-                        counts the observations the rule can judge: an
-                        observation that is not a finite number -- a NaN, an
-                        infinity, the `null` either becomes on the wire, or
-                        an integer too wide for a float -- leaves the streak
-                        where it is rather than breaking it, because a run
-                        that is already over its threshold is the one that
-                        starts logging nulls. So `2, null, 2` completes a
-                        two-step streak while `2, 0, 2` starts it over.
+                        and not again until the streak breaks.
+
+                        "Consecutive" counts the observations the rule can
+                        judge, and that depends on the condition. For `>`,
+                        `<`, `==` and `stalled`, an observation that is not a
+                        finite number -- a NaN, an infinity, the `null` either
+                        becomes on the wire, or an integer too wide for a
+                        float -- leaves the streak exactly where it is,
+                        neither advancing nor breaking it, because a run that
+                        is already over its threshold is the one that starts
+                        logging nulls and re-arming there would spend a second
+                        notification on it. So `2, null, 2` completes a
+                        two-step streak, while a finite observation that does
+                        not match -- `2, 0, 2` -- starts it over.
+
+                        For `nan` the same observation is the match rather
+                        than the exception, so `null, null` completes a
+                        two-step streak and a finite observation is what
+                        starts it over.
+
+                        For `stalled` the two knobs are sequential rather than
+                        alternatives: `patience` decides when the metric counts
+                        as having stopped improving, and only then does the
+                        streak `for_steps` counts begin. A rule with
+                        `patience: 2` and `for_steps: 3` fires on the fourth
+                        observation without an improvement.
                     patience:
-                      type: integer
+                      type: [integer, "null"]
                       minimum: 1
                       default: 10
-                      nullable: true
                       description: >
                         Observations without an improvement before `stalled`
                         fires. Refused on any other condition.
                     goal:
-                      type: string
-                      enum: [min, max]
+                      type: [string, "null"]
+                      enum: [min, max, null]
                       default: min
-                      nullable: true
                       description: >
                         Which direction improves, for `stalled`. Refused on
                         any other condition.
@@ -934,9 +958,8 @@ paths:
                         How a firing is delivered. `toast` notifies every
                         browser watching the environment.
                     message:
-                      type: string
+                      type: [string, "null"]
                       maxLength: 200
-                      nullable: true
                       description: >
                         Replaces the generated notification text.
       responses:
@@ -1724,8 +1747,18 @@ components:
       description: >-
         One stored metric alert rule: what it watches, when it fires, and the
         fold state that decides. Both alert operations answer with the whole
-        of an environment's list, so a caller reads the state back from the
-        same shape it set the rule with.
+        of an environment's list.
+
+        This is the stored shape and not the `alert` object a `set` request
+        carries: the watched metric is `key` here and `metric` there, and
+        `condition` here is the bare operator with its operand split out into
+        `threshold`. Sending one of these objects straight back as `alert` is
+        refused for both reasons. To re-state a rule that was read from here,
+        send `metric` as its `key` and `condition` as `"<condition>
+        <threshold>"` -- just `condition` for `nan` and `stalled`, which have
+        no operand -- together with whichever of `for_steps`, `patience`,
+        `goal`, `action` and `message` are to be kept. The fold state is not
+        sent and could not be: re-stating a rule starts it over.
       properties:
         key:
           type: string
