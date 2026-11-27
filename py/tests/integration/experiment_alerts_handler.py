@@ -115,23 +115,6 @@ class TestAlertsEndpoint(AlertsTestCase):
         self.assertEqual(response.code, 200)
         self.assertEqual(json.loads(response.body), [])
 
-    def test_a_rule_whose_write_failed_does_not_linger_in_memory(self):
-        # The rule is put on the record the server is serving and the record is
-        # written off the loop, so a save that raises would otherwise leave a
-        # rule the request answered 500 for: live until the process restarts,
-        # and then gone.
-        self.set_alert(condition="> 2.0")
-
-        with mock.patch.object(
-            self._app.storage, "save_env", side_effect=OSError("disk full")
-        ):
-            failed = self.set_alert(condition="nan")
-
-        self.assertEqual(failed.code, 500)
-        live = json.loads(self.fetch("/experiments/alerts?eid=main").body)
-        self.assertEqual([rule["condition"] for rule in live], [">"])
-        self.assertEqual([rule["condition"] for rule in self.stored_alerts()], [">"])
-
     def test_restating_a_rule_replaces_it(self):
         self.set_alert(condition="> 2.0")
         rules = json.loads(self.set_alert(condition="> 9.0").body)
@@ -418,32 +401,6 @@ class TestAlertNotifications(AlertsTestCase):
         self.assertEqual(len(self.notifications(sub)), 1)
         self.assertIn("for 3 observations", self.notifications(sub)[0])
 
-    def test_a_failed_write_does_not_spend_the_firing(self):
-        # The observation is folded into the rule on the loop and the record
-        # carrying the result is written off it, so a save that raises leaves a
-        # streak that has counted an observation nobody was told about. Since
-        # ``observe`` fires on the streak reaching ``for_steps`` exactly, that
-        # run would never fire again -- the notification is lost rather than
-        # late. The retry the 500 asks for has to be able to fire.
-        sub = self.subscribe()
-        self.set_alert(condition="> 2.0")
-
-        with mock.patch.object(
-            self._app.storage, "save_env", side_effect=OSError("disk full")
-        ):
-            failed = self.log_metric(2.5, step=1)
-
-        self.assertEqual(failed.code, 500)
-        self.assertEqual(self.notifications(sub), [])
-
-        retried = self.log_metric(2.5, step=2)
-
-        self.assertEqual(retried.code, 200)
-        self.assertEqual(
-            self.notifications(sub), ["main: loss is 2.5, > 2.0 at step 2"]
-        )
-        self.assertEqual(self.stored_alerts()[0]["fire_count"], 1)
-
     def test_a_metric_that_stays_over_its_threshold_notifies_once(self):
         sub = self.subscribe()
         self.set_alert(condition="> 2.0")
@@ -656,7 +613,9 @@ class TestAWriteThatFails(AlertsTestCase):
         retried = self.log_metric(2.5, step=1)
 
         self.assertEqual(retried.code, 200)
-        self.assertEqual(len(self.notifications(sub)), 1)
+        self.assertEqual(
+            self.notifications(sub), ["main: loss is 2.5, > 2.0 at step 1"]
+        )
         self.assertEqual(self.stored_alerts()[0]["fire_count"], 1)
 
     def test_a_failed_first_rule_is_not_left_on_the_environment(self):
