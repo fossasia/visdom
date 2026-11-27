@@ -793,6 +793,51 @@ class TestExperimentRules:
         assert (replacement.best, replacement.since_best) == (None, 0)
         assert experiment.get_alerts("loss") == [replacement]
 
+    def test_a_first_attachment_is_rearmed_as_well(self):
+        # A rule arrives with state whether it is replacing one or not, and
+        # there is only one place it can be cleared. A rule folded in one
+        # experiment and then set on another used to go in as it stood, so the
+        # second experiment started life holding a spent streak.
+        source = Experiment(env_id="run-7")
+        source.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        folded = source.get_alerts("loss")[0]
+        feed(folded, [2.5, 2.5])
+        assert (folded.streak, folded.fire_count) == (2, 1)
+
+        other = Experiment(env_id="run-8")
+        attached = other.set_alert(folded)
+        assert (attached.streak, attached.fire_count) == (0, 0)
+        assert other.get_alerts("loss") == [attached]
+
+    def test_two_experiments_given_one_rule_do_not_share_its_state(self):
+        # The consequence of storing the caller's own object: the two records
+        # would hold the same rule, so an observation logged against either
+        # run would advance one streak and fire one of the two rules at a
+        # moment that had nothing to do with it.
+        rule = build_alert("loss", "> 2.0")
+        first = Experiment(env_id="run-7")
+        second = Experiment(env_id="run-8")
+        first.set_alert(rule)
+        second.set_alert(rule)
+
+        assert first.get_alerts("loss")[0] is not second.get_alerts("loss")[0]
+        feed(first.get_alerts("loss")[0], [2.5])
+        assert first.get_alerts("loss")[0].fire_count == 1
+        assert second.get_alerts("loss")[0].fire_count == 0
+
+    def test_a_rule_loaded_from_the_record_keeps_the_streak_it_was_saved_with(
+        self,
+    ):
+        # The other half of rearming on attachment: the restore path is
+        # from_dict, not set_alert, so a restarted server picks a streak up
+        # where it left off rather than re-arming every rule it reloads.
+        experiment = Experiment(env_id="run-7")
+        experiment.set_alert(build_alert("loss", "> 2.0", for_steps=2))
+        feed(experiment.get_alerts("loss")[0], [2.5])
+
+        restored = Experiment.from_dict(json.loads(json.dumps(experiment.to_dict())))
+        assert restored.get_alerts("loss")[0].streak == 1
+
     def test_a_replacement_can_fire_where_the_rule_it_replaced_already_had(self):
         # The consequence of carrying a streak over, and the reason this is
         # not only tidiness: a rule fires as its streak is completed and not
