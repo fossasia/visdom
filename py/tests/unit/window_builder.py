@@ -14,6 +14,8 @@ subsequent ``/update`` mutates it. Both are pure, and both were previously
 covered only indirectly through HTTP tests.
 """
 
+from copy import deepcopy
+
 import pytest
 
 from visdom.utils.server_utils import update_window, window
@@ -343,6 +345,42 @@ def test_none_nested_layout_fields_do_not_clear_axis(capture_send, plot_pane):
     )
     update_window(plot_pane, sent["payload"])
     assert plot_pane["content"]["layout"] == {"xaxis": {"range": [0, 5]}}
+
+
+@pytest.mark.parametrize(
+    "initial",
+    [{}, {"title": "old"}, {"title": {"text": "old", "font": {"size": 18}}}],
+)
+@pytest.mark.parametrize("title_update", [{"text": None}, {"font": {"size": None}}])
+def test_raw_none_only_layout_dict_is_omitted(plot_pane, initial, title_update):
+    plot_pane["content"]["layout"] = deepcopy(initial)
+    update_window(plot_pane, {"layout": {"title": title_update}})
+    assert plot_pane["content"]["layout"] == initial
+
+
+def test_raw_layout_replacements_omit_none_and_keep_explicit_values(plot_pane):
+    updates = {
+        "title": {"text": None, "font": {"size": 18, "color": None}},
+        "xaxis": {"range": None, "autorange": False},
+        "margin": {"l": 0},
+    }
+    original = deepcopy(updates)
+    update_window(plot_pane, {"layout": updates})
+    assert plot_pane["content"]["layout"] == {
+        "title": {"font": {"size": 18}},
+        "showlegend": False,
+        "xaxis": {"autorange": False},
+        "margin": {"l": 0},
+    }
+    assert updates == original
+
+
+@pytest.mark.parametrize("title_update", [{}, {"font": {}}, {"text": None, "font": {}}])
+def test_raw_empty_dict_resets_survive_normalization(plot_pane, title_update):
+    update_window(plot_pane, {"layout": {"title": title_update}})
+    assert plot_pane["content"]["layout"]["title"] == (
+        {} if not title_update else {"font": {}}
+    )
 
 
 @pytest.mark.parametrize("args", [{"layout": {"title": None}}, {}])

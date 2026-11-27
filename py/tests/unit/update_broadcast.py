@@ -953,6 +953,14 @@ def test_an_empty_append_leaves_the_pane_exactly_as_it_was(x, y):
         ({"title": {"text": "epoch"}}, {"range": [0, 5], "title": {"text": "epoch"}}),
         ({}, {}),
         ({"title": {}}, {"range": [0, 5], "title": {}}),
+        (
+            {"title": {"font": {"size": None}}},
+            {"range": [0, 5], "title": {"text": "step"}},
+        ),
+        (
+            {"title": {"text": None, "font": {}}},
+            {"range": [0, 5], "title": {"text": "step", "font": {}}},
+        ),
     ],
 )
 def test_options_only_layout_patch_preserves_unmentioned_fields(

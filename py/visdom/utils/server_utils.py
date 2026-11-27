@@ -599,12 +599,17 @@ def extract_eid(args):
 
 
 def _merge_layout_options(layout, updates):
-    """Merge supplied fields; an explicit empty dict resets that layout object."""
+    """Ignore None-only dicts; an explicit empty dict resets that layout object."""
     for name, value in updates.items():
         if value is None:
             continue
-        if isinstance(value, dict) and value and isinstance(layout.get(name), dict):
-            _merge_layout_options(layout[name], value)
+        if isinstance(value, dict) and value:
+            nested_layout = layout.get(name)
+            if not isinstance(nested_layout, dict):
+                nested_layout = {}
+            _merge_layout_options(nested_layout, value)
+            if nested_layout:
+                layout[name] = nested_layout
         else:
             layout[name] = value
 

@@ -223,6 +223,46 @@ class OptsOnlyUpdateTestCase(VisdomHTTPTestCase):
 
 
 class TestPlotLayoutOptions(VisdomHTTPTestCase):
+    def test_raw_none_only_title_updates_preserve_legacy_title(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"title": "old", "showlegend": True},
+        )
+        for title_update in (
+            {"text": None},
+            {"font": {"size": None}},
+            {"text": None, "font": {"size": None}},
+        ):
+            with self.subTest(title_update=title_update):
+                response = self.update(win, None, layout={"title": title_update})
+                self.assertEqual(response.code, 200, response.body)
+                self.assertEqual(
+                    self.get_win_data(win)["content"]["layout"],
+                    {"title": "old", "showlegend": True},
+                )
+        response = self.update(win, None, layout={"title": {}})
+        self.assertEqual(response.code, 200, response.body)
+        self.assertEqual(self.get_win_data(win)["content"]["layout"]["title"], {})
+
+    def test_raw_layout_replacement_discards_nested_null_fields(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"title": "old"},
+        )
+        response = self.update(
+            win,
+            None,
+            layout={
+                "title": {"text": None, "font": {"size": 18, "color": None}},
+                "xaxis": {"title": {"text": None}, "range": [0, 5]},
+            },
+        )
+        self.assertEqual(response.code, 200, response.body)
+        self.assertEqual(
+            self.get_win_data(win)["content"]["layout"],
+            {"title": {"font": {"size": 18}}, "xaxis": {"range": [0, 5]}},
+        )
+
     def test_empty_axis_update_clears_existing_settings(self):
         win = self.create_window(
             [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
