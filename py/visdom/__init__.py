@@ -279,7 +279,7 @@ def loadfile(filename):
         return fileobj.read()
 
 
-def _finite_range(ar):
+def _finite_range(ar, *, as_float=True):
     """Smallest and largest finite value in `ar`, or `None` if it has none.
 
     This is `ar[np.isfinite(ar)].min()/.max()`, except that the mask does not
@@ -287,7 +287,8 @@ def _finite_range(ar):
     element just to read two numbers off it, which on an image-sized array is
     a second full array per call. `fmin`/`fmax` skip NaN the same way and
     reduce in place, so only an infinity -- which they propagate rather than
-    skip -- needs the mask at all.
+    skip -- needs the mask at all. Set `as_float=False` to retain extended
+    floating-point extrema for image normalization.
     """
     if ar.size == 0:
         return None
@@ -299,8 +300,10 @@ def _finite_range(ar):
         finite = ar[np.isfinite(ar)]
         if finite.size == 0:
             return None
-        return float(finite.min()), float(finite.max())
-    return float(ar_min), float(ar_max)
+        ar_min, ar_max = finite.min(), finite.max()
+    if as_float:
+        return float(ar_min), float(ar_max)
+    return ar_min.item(), ar_max.item()
 
 
 def _title2str(opts):
@@ -739,6 +742,39 @@ def _to_numpy(a):
     return a
 
 
+def _plain_scalar(value, what):
+    """Turn a one-element tensor or numpy value into a plain Python number.
+
+    Anything else is returned as it is, except a complex number, which JSON
+    can't carry.
+    """
+    item = getattr(value, "item", None)
+    if callable(item):
+        numel = getattr(value, "numel", None)
+        count = numel() if callable(numel) else getattr(value, "size", 1)
+        if count != 1:
+            raise TypeError(
+                "{} must be a single value, got {} values".format(what, count)
+            )
+        # A masked value is missing; item() would give its hidden fill instead.
+        if np.ma.is_masked(value):
+            return None
+        value = item()
+    if isinstance(value, (complex, np.complexfloating)):
+        raise TypeError("{} must be a real number, got {}".format(what, value))
+    if not isinstance(value, np.floating):
+        return value
+    # np.longdouble.item() stays a numpy scalar, which json can't encode.
+    number = float(value)
+    # A float can't hold it, and inf or 0 would send a different value. The
+    # message uses str(): format() would print the value as that float.
+    if math.isinf(number) and np.isfinite(value):
+        raise ValueError("{} is too large to send: {!s}".format(what, value))
+    if number == 0 and value != 0:
+        raise ValueError("{} is too small to send: {!s}".format(what, value))
+    return number
+
+
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
@@ -770,7 +806,7 @@ def _binary_clf_curve(y_true, y_score, pos_label=1):
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
 
-    distinct_value_indices = np.where(np.diff(y_score))[0]
+    distinct_value_indices = np.where(y_score[1:] != y_score[:-1])[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
 
     tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
@@ -1779,6 +1815,12 @@ class Visdom(object):
             raise TypeError("params must be a dict of {name: value}")
         if tags is not None and not isinstance(tags, dict):
             raise TypeError("tags must be a dict of {name: value}")
+        if params is not None:
+            params = {
+                k: _plain_scalar(v, "param {!r}".format(k)) for k, v in params.items()
+            }
+        if tags is not None:
+            tags = {k: _plain_scalar(v, "tag {!r}".format(k)) for k, v in tags.items()}
         return self._experiment_send(
             {
                 "action": "log",
@@ -1795,10 +1837,15 @@ class Visdom(object):
 
         `metrics` is a dict of `{name: value}` recorded at an optional training
         `step`; the experiment is created automatically if it does not exist yet.
+        Values and `step` may be one-element torch tensors or numpy values.
         Returns the updated experiment as a dict.
         """
         if not isinstance(metrics, dict) or not metrics:
             raise TypeError("metrics must be a non-empty dict of {name: value}")
+        metrics = {
+            k: _plain_scalar(v, "metric {!r}".format(k)) for k, v in metrics.items()
+        }
+        step = _plain_scalar(step, "step")
         return self._experiment_send(
             {"action": "metrics", "metrics": metrics, "step": step}, env
         )
@@ -2110,13 +2157,18 @@ class Visdom(object):
         )
 
     def delete_envs(self, env_list):
-        """This function deletes a list of environments."""
+        """Delete a list of environments.
+
+        Validate all environment ID types before sending any delete request.
+        """
         if not isinstance(env_list, list):
             raise TypeError("env_list must be a list of strings")
-        responses = []
+        env_list = tuple(env_list)
         for env in env_list:
             if not isinstance(env, str):
                 raise TypeError(f"Environment ID must be a string, got {type(env)}")
+        responses = []
+        for env in env_list:
             responses.append(self.delete_env(env))
         return responses
 
@@ -2782,14 +2834,21 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -2921,14 +2980,21 @@ class Visdom(object):
         if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
             img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
-            finite_range = _finite_range(img)
+            finite_range = _finite_range(img, as_float=False)
             if finite_range is not None:
                 img_min, img_max = finite_range
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
