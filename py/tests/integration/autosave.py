@@ -158,6 +158,18 @@ class TestDirtyTracking(AutosaveTestCase):
         self.assertEqual(self.dirty_count("fragile"), 1)
         self.assertEqual(self.flush_dirty(), ["fragile"])
 
+    def test_one_unwritable_environment_does_not_block_the_rest(self):
+        bad = "bad\x00name"
+        for eid in ("alpha", bad, "zeta"):
+            self.app.state[eid] = {"jsons": {}, "reload": {}}
+            self.app.mark_dirty(eid)
+
+        self.assertEqual(self.flush_dirty(), ["alpha", "zeta"])
+
+        self.assertIn("zeta", self.app.storage.list_envs())
+        self.assertEqual(self.dirty_count("zeta"), 0)
+        self.assertEqual(self.dirty_count(bad), 1)
+
     def test_an_environment_the_backend_declined_stays_marked(self):
         self.app.state["skipped"] = {"jsons": {}, "reload": {}}
         self.app.mark_dirty("skipped")
@@ -335,6 +347,16 @@ class TestShutdown(AutosaveTestCase):
 
         self.assertIn("unsaved", self.app.storage.list_envs())
         self.assertEqual(self.dirty_count("unsaved"), 0)
+
+    def test_an_unwritable_environment_does_not_stop_the_final_save(self):
+        for eid in ("alpha", "bad\x00name", "zeta"):
+            self.app.state[eid] = {"jsons": {}, "reload": {}}
+            self.app.mark_dirty(eid)
+
+        self.app.shutdown_storage()
+
+        self.assertIn("alpha", self.app.storage.list_envs())
+        self.assertIn("zeta", self.app.storage.list_envs())
 
 
 class TestDeleteOutlastsAQueuedSave(unittest.TestCase):

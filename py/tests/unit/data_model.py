@@ -109,6 +109,17 @@ def test_save_envs_drops_unknown_ids(store):
     assert store.save_envs({"main": _env()}, ["main", "ghost"]) == ["main"]
 
 
+def test_save_envs_keeps_going_past_an_env_it_cannot_write(store):
+    bad = "bad\x00name"
+    state = {"alpha": _env("a"), bad: _env("b"), "zeta": _env("z")}
+    assert store.save_envs(state, ["alpha", bad, "zeta"]) == ["alpha", "zeta"]
+    assert store.load_env("alpha") == _env("a")
+    assert store.load_env("zeta") == _env("z")
+    assert store.save_all(state) == ["alpha", "zeta"]
+    with pytest.raises(ValueError):
+        store.save_env(bad, _env("b"))
+
+
 def test_save_all_saves_everything(store):
     """save_all persists every environment in state."""
     state = {"main": _env(), "other": _env()}
