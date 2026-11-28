@@ -364,6 +364,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.table`](#vistable)     : editable, resizable table pane
 - [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.audio`](#visaudio)    : audio
+- [`vis.spectrogram`](#visspectrogram)    : spectrogram of a waveform
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
 - [`vis.matplot`](#vismatplot)  : matplotlib plot
@@ -1057,6 +1058,24 @@ The following `opts` are supported:
 
 Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
 versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
+
+#### vis.spectrogram
+This function draws the spectrogram of a waveform: how loud each frequency is
+over time, as a heatmap with time in seconds on the x axis and frequency in Hz
+on the y axis. It takes the waveforms `vis.audio` does: an `N` tensor, an `Nx2`
+matrix for stereo, or the `(channels, N)` layout that torchaudio and librosa
+return (`1xN` or `2xN`). Stereo is averaged to mono.
+
+The following `opts` are supported:
+
+- `opts.sample_frequency`: sample frequency (`number` > 0; default = 44100)
+- `opts.n_fft`: samples per frame (`integer` >= 2; default = 1024)
+- `opts.hop_length`: samples between frames (`integer` from 1 to `n_fft`; default = `n_fft // 4`)
+- `opts.scale`: `'db'` for the magnitude in dB, `'linear'` for the magnitude itself (`string`; default = `'db'`)
+- `opts.top_db`: in dB, how far below the loudest value the colours reach (`number` > 0; default = 80)
+- `opts.fmax`: highest frequency shown, in Hz (`number` > 0; default = half the sample frequency)
+- `opts.max_columns`: most time columns sent; a longer clip keeps the loudest value of each group of frames (`integer` >= 1; default = 1000)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 
 #### vis.video
 This function plays a video. It takes as input the filename or `pathlib.Path` of the video

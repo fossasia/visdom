@@ -23,6 +23,7 @@ GRAPH_METHODS = frozenset(
         "scatter",
         "bar",
         "heatmap",
+        "spectrogram",
         "histogram",
         "histogram2d",
         "boxplot",

@@ -75,6 +75,17 @@ def misc_audio_basic(viz, env, args):
     viz.audio(tensor=tensor, opts={"sample_frequency": 441000}, env=env)
 
 
+# spectrogram demo:
+def misc_spectrogram(viz, env, args):
+    rate = 16000
+    t = np.arange(2 * rate) / rate
+    waveform = np.sin(2 * np.pi * (200 + 1800 * t) * t)
+    waveform[rate : rate + 80] += 1.0
+    viz.spectrogram(
+        waveform, opts={"sample_frequency": rate, "title": "Spectrogram"}, env=env
+    )
+
+
 # audio demo:
 # download from http://www.externalharddrive.com/waves/animal/dolphin.wav
 def misc_audio_download(viz, env, args):

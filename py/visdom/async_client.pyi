@@ -392,6 +392,13 @@ class AsyncVisdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    async def spectrogram(
+        self,
+        tensor: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     async def video(
         self,
         tensor: Tensor = ...,

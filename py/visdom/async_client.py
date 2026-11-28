@@ -970,6 +970,7 @@ _PROXIED = frozenset(
         "search_experiments",
         "set_tags",
         "set_window_data",
+        "spectrogram",
         "stem",
         "suggest_experiment",
         "sunburst",
