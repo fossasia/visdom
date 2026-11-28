@@ -2963,6 +2963,9 @@ class Visdom(object):
         blended in Python and sent as a single image, so no frontend changes
         are required.
 
+        A 2D `heatmap` of another size, such as a 7x7 GradCAM map, is
+        stretched over the image with bilinear interpolation.
+
         The following `opts` are supported:
 
         - `opts.alpha`:    heatmap blend strength (`float` in [0, 1]; default = 0.5)
@@ -3026,10 +3029,10 @@ class Visdom(object):
             )
 
         heatmap = np.asarray(heatmap, dtype=np.float32)
-        if heatmap.shape != (H, W):
+        if heatmap.ndim != 2 or not heatmap.size:
             raise ValueError(
-                "heatmap shape {} does not match image ({},{})".format(
-                    heatmap.shape, H, W
+                "heatmap must be a non-empty 2D array; got shape {}".format(
+                    heatmap.shape
                 )
             )
         finite = np.isfinite(heatmap)
@@ -3041,6 +3044,13 @@ class Visdom(object):
             else:
                 heatmap = np.where(finite, 0.0, heatmap)
         heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
+
+        if heatmap.shape != (H, W):
+            # A map at model resolution (7x7 GradCAM, 14x14 attention) is
+            # stretched over the image after it has been cleaned and rescaled.
+            heatmap = np.asarray(
+                Image.fromarray(heatmap).resize((W, H), Image.BILINEAR)
+            )
 
         colormap = opts.get("colormap", "jet")
         try:
