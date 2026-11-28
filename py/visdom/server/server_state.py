@@ -374,6 +374,17 @@ class ServerState:
 
         future.add_done_callback(settle)
 
+    def check_final_save(self, written):
+        if written is None or self.env_path is None:
+            return
+        for eid in written:
+            self.dirty_envs.pop(eid, None)
+        unsaved = [eid for eid in self.dirty_envs if eid in self.state]
+        if unsaved:
+            raise OSError(
+                "Could not save environments: %s" % ", ".join(map(repr, unsaved))
+            )
+
     def flush_dirty(self):
         """Persist every environment changed since the last save."""
         return self.flush_envs(list(self.dirty_envs))
@@ -558,7 +569,7 @@ class ServerState:
             self.stop_autosave()
             self.stop_env_eviction()
             self.storage_executor.shutdown(wait=True)
-            self.storage.save_all(self.state)
+            self.check_final_save(self.storage.save_all(self.state))
             self._storage_shut_down = True
             self.dirty_envs.clear()
             self.saving_envs.clear()

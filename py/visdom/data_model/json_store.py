@@ -263,11 +263,21 @@ class JSONStore(DataStore):
             return []
         os.makedirs(os.path.abspath(self.env_path), exist_ok=True)
         written = []
+        failure = None
         for eid in eids:
             if eid not in state:
                 continue
-            if self.serialize_env(eid, state[eid]):
+            try:
+                saved = self.serialize_env(eid, state[eid])
+            except Exception as error:
+                logging.exception("Could not save environment %r", eid)
+                if failure is None:
+                    failure = error
+                continue
+            if saved:
                 written.append(eid)
+        if failure is not None and not written:
+            raise failure
         return written
 
     def _atomic_write(self, path, payload):
