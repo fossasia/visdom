@@ -7,6 +7,9 @@ on:
       - master
       - dev
 
+permissions:
+  contents: read
+
 jobs:
   # Fast gate: the unit tests need no Application and no HTTP, so they finish in
   # about a second. Running them first means an obvious break fails the workflow
@@ -30,13 +33,14 @@ jobs:
         run: pytest -m unit
 
   pytest:
-    name: "pytest (Python ${{ matrix.python-version }})"
+    name: "pytest (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/3)"
     needs: unit
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
+        group: [1, 2, 3]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7.0.1
@@ -49,6 +53,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install -r test-requirements.txt
+      # The suite is split into 3 duration-balanced shards with pytest-split.
+      # Timings live in py/tests/.test_durations and are refreshed weekly by
+      # refresh-test-durations.yml. Keep --splits in sync with the matrix above.
       # Coverage is reported, not enforced. A --cov-fail-under threshold is a
       # separate decision -- it needs a number the whole codebase can actually
       # hold, and picking one belongs in its own PR rather than riding along
@@ -59,5 +66,17 @@ jobs:
       - name: Run pytest with coverage
         run: >-
           pytest -m "not server"
+          --splits 3 --group ${{ matrix.group }}
+          --durations-path py/tests/.test_durations
           --cov=visdom
           --cov-report=term-missing
+
+  # Single required check that stays green only when every shard passed.
+  pytest-result:
+    name: "pytest"
+    runs-on: ubuntu-latest
+    needs: pytest
+    if: always()
+    steps:
+      - name: Check shard results
+        run: test "${{ needs.pytest.result }}" = "success"
