@@ -1120,22 +1120,27 @@ def _replay_key(key, value, step):
     return key, tag(value), tag(step)
 
 
-def _experiment_reply(reply):
-    """Whether a reply to an experiment call is the experiment, as on success.
+def _replay_recorded(endpoint, msg, reply):
+    """Whether a replayed experiment write was stored, going by its reply.
 
-    A lost connection gives False, a rejected call an error page, and a
-    refused one (a readonly server, say) ``{"success": false, ...}``.
+    Each endpoint answers a stored write its own way: ``experiments/log`` with
+    the experiment, ``experiments/tags`` with the env's tags, and the hparams
+    endpoints with the pane's id. A lost connection gives False, a rejected
+    call an error page, and a refused one (a readonly server, say)
+    ``{"success": false, ...}``, none of which is such a reply.
     """
+    if endpoint in ("experiments/hparams", "experiments/hparams/update"):
+        return isstr(reply) and reply == msg.get("win")
     if isinstance(reply, (str, bytes)):
         try:
             reply = json.loads(reply)
         except ValueError:
             return False
-    return (
-        isinstance(reply, dict)
-        and isinstance(reply.get("env_id"), str)
-        and isinstance(reply.get("status"), str)
-    )
+    if not isinstance(reply, dict):
+        return False
+    if endpoint == "experiments/tags":
+        return all(isstr(k) and isstr(v) for k, v in reply.items())
+    return isinstance(reply.get("env_id"), str) and isinstance(reply.get("status"), str)
 
 
 def _without_userinfo(url):
@@ -2392,10 +2397,12 @@ class Visdom(object):
         confirms it; if it fails, the calls after it are still replayed, with
         a warning. A line that is not a whole entry, such as the
         last one of a log cut short by a crash, is skipped with a warning, and
-        so is an experiment call that names no env. If a metric or log call
-        fails, the experiment's logged finish is not sent and it stays running,
-        with a warning: finished, a run missing some of its calls would look
-        complete.
+        so is an experiment call that names no env. If a metric, log or tag
+        call fails, the experiment's logged finish is not sent and it stays
+        running, with a warning: finished, a run missing some of its calls
+        would look complete. An hparams pane that can't be written is warned
+        about too; it shows runs rather than recording one, so it doesn't hold
+        a finish back.
 
         The log is read twice rather than held in memory, and each env's stored
         metrics are read just before its first call and dropped after its last.
@@ -2414,7 +2421,9 @@ class Visdom(object):
         stored, unsent, failed = {}, Counter(), Counter()
         for number, endpoint, msg in self._log_entries(log_filename):
             if endpoint != "experiments/log":
-                self._send(msg, endpoint, from_log=True)
+                reply = self._send(msg, endpoint, from_log=True)
+                if endpoint.startswith("experiments/") and not self.offline:
+                    self._check_replayed(endpoint, msg, reply, failed)
                 continue
             eid = extract_eid(msg)
             if eid not in stored:
@@ -2506,7 +2515,7 @@ class Visdom(object):
         if self.offline:
             return
         if msg.get("action") != "finish":
-            if not _experiment_reply(reply):
+            if not _replay_recorded("experiments/log", msg, reply):
                 failed[eid] += 1
             return
         # Only once the server says so: a finish that did not go
@@ -2519,6 +2528,25 @@ class Visdom(object):
                 " experiment for %r, so the calls logged after it are"
                 " still replayed",
                 eid,
+            )
+
+    def _check_replayed(self, endpoint, msg, reply, failed):
+        """Count a tag write that didn't go through; warn about an hparams pane.
+
+        A failed tag write holds back its run's finish, as a failed metric
+        does. A pane shows runs rather than recording one, so it doesn't.
+        """
+        from visdom.utils.server_utils import extract_eid
+
+        if _replay_recorded(endpoint, msg, reply):
+            return
+        if endpoint == "experiments/tags":
+            failed[extract_eid(msg)] += 1
+        elif endpoint.startswith("experiments/hparams"):
+            logger.warning(
+                "replay_log: the hparams pane %r in %r could not be written",
+                msg.get("win"),
+                msg.get("eid"),
             )
 
     def _unreplayed(self, msg, eid, stored, unsent):

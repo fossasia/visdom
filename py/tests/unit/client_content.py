@@ -957,15 +957,23 @@ def test_replay_log_resends_an_offline_experiment(logging_client):
     ]
 
 
-def _replay_answering(client, answer):
-    """Replay the log with each experiment call answered by ``answer(msg)``."""
+def _replay_answering(client, answer, answer_others=None):
+    """Replay the log, each ``experiments/log`` call answered by ``answer(msg)``.
+
+    Every other call gets what the server sends back for a stored write,
+    unless ``answer_others(endpoint, msg)`` says otherwise.
+    """
     sent = []
 
     def send(msg, endpoint="events", **_):
         if endpoint == "experiments/search":  # nothing stored yet
             return json.dumps({"experiments": [], "total": 0})
         sent.append((endpoint, msg.get("action")))
-        return answer(msg) if endpoint == "experiments/log" else "ok"
+        if endpoint == "experiments/log":
+            return answer(msg)
+        if answer_others is not None:
+            return answer_others(endpoint, msg)
+        return _stored_write(endpoint, msg)
 
     client.offline = False
     with patch.object(client, "_send", side_effect=send):
@@ -977,6 +985,102 @@ def _ok(msg):
     """The server's reply: the experiment, finished if that's what was asked."""
     status = "finished" if msg.get("action") == "finish" else "running"
     return json.dumps({"env_id": msg["eid"], "status": status, "metrics": []})
+
+
+def _stored_write(endpoint, msg):
+    """What the server sends back for a stored write to ``endpoint``."""
+    if endpoint == "experiments/log":
+        return _ok(msg)
+    if endpoint == "experiments/tags":
+        return json.dumps(msg["tags"])
+    if endpoint.startswith("experiments/hparams"):
+        return msg["win"]
+    return msg.get("win", "ok")
+
+
+def _warnings(warning):
+    return [c.args[0] % c.args[1:] for c in warning.call_args_list]
+
+
+FAILED_REPLIES = [
+    False,
+    "<html><title>400: Bad Request</title></html>",
+    '{"success": false, "error": "Tag updates are disabled"}',
+    "",
+]
+FAILED_REPLY_IDS = ["no_connection", "error_page", "refused", "empty"]
+
+
+@pytest.mark.parametrize("failure", FAILED_REPLIES, ids=FAILED_REPLY_IDS)
+def test_replay_log_does_not_finish_a_run_whose_tags_failed(logging_client, failure):
+    """A run missing its tags would look complete, as with a missing metric."""
+    logging_client.log_metrics({"acc": 0.5}, step=1)
+    logging_client.set_tags({"dataset": "cifar10"})
+    logging_client.finish_experiment()
+    tags = lambda endpoint, msg: failure  # noqa: E731
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, _ok, tags)
+    assert ("experiments/log", "finish") not in sent
+    messages = _warnings(warning)
+    assert any("not finishing the experiment for 'main'" in m for m in messages)
+    assert any("1 logged experiment call(s) for 'main' failed" in m for m in messages)
+
+
+@pytest.mark.parametrize("tags", [{"dataset": "cifar10"}, {}], ids=["set", "cleared"])
+def test_replay_log_finishes_a_run_whose_tags_were_stored(logging_client, tags):
+    logging_client.set_tags(tags)
+    logging_client.finish_experiment()
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, _ok)
+    assert sent[-1] == ("experiments/log", "finish")
+    warning.assert_not_called()
+
+
+def test_replay_log_warns_about_an_hparams_pane_it_could_not_write(logging_client):
+    """A pane shows runs rather than recording one, so the finish still goes out."""
+    logging_client.log_metrics({"acc": 0.5}, step=1)
+    logging_client.hparams(win="hp")
+    logging_client.update_hparams(win="hp")
+    logging_client.finish_experiment()
+    refused = '{"success": false, "error": "disabled in readonly mode"}'
+
+    def panes(endpoint, msg):
+        if endpoint == "experiments/hparams":
+            return refused
+        return _stored_write(endpoint, msg)
+
+    with patch("visdom.logger.warning") as warning:
+        sent = _replay_answering(logging_client, _ok, panes)
+    assert sent[-1] == ("experiments/log", "finish")
+    assert _warnings(warning) == [
+        "replay_log: the hparams pane 'hp' in 'main' could not be written"
+    ]
+
+
+@pytest.mark.parametrize(
+    "endpoint, msg, reply, recorded",
+    [
+        ("experiments/log", {}, '{"env_id": "e", "status": "running"}', True),
+        ("experiments/log", {}, '{"success": false}', False),
+        ("experiments/log", {}, "{}", False),
+        ("experiments/tags", {}, '{"dataset": "cifar10"}', True),
+        ("experiments/tags", {}, "{}", True),
+        ("experiments/tags", {}, '{"success": false, "error": "readonly"}', False),
+        ("experiments/tags", {}, '["dataset"]', False),
+        ("experiments/tags", {}, "<html>403</html>", False),
+        ("experiments/hparams", {"win": "hp"}, "hp", True),
+        ("experiments/hparams", {"win": "hp"}, '{"success": false}', False),
+        ("experiments/hparams", {"win": "hp"}, "<html>400</html>", False),
+        ("experiments/hparams/update", {"win": "hp"}, "hp", True),
+        ("experiments/hparams/update", {"win": "hp"}, False, False),
+    ],
+)
+def test_replay_judges_each_write_by_its_endpoints_reply(
+    endpoint, msg, reply, recorded
+):
+    from visdom import _replay_recorded
+
+    assert _replay_recorded(endpoint, msg, reply) is recorded
 
 
 @pytest.mark.parametrize(
