@@ -911,3 +911,61 @@ def test_confusion_matrix_input_errors(offline_client, kwargs, message):
     """Every ValueError guard on the public method."""
     with pytest.raises(ValueError, match=message):
         offline_client.confusion_matrix(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "dtype,value", [(np.float16, 40000), (np.int64, 2**62), (np.uint64, 2**63)]
+)
+@pytest.mark.parametrize("normalize", [None, "true", "pred", "all"])
+def test_confusion_matrix_accumulates_counts_without_overflow(
+    capture_send, dtype, value, normalize
+):
+    matrix = np.full((2, 2), value, dtype=dtype)
+    original = matrix.copy()
+    with np.errstate(over="raise", invalid="raise"):
+        sent = capture_send(
+            lambda v: v.confusion_matrix(
+                cm=matrix, normalize=normalize, opts={"showPercent": True}
+            )
+        )
+    payload = sent["payload"]
+    expected = (
+        matrix
+        if normalize is None
+        else np.full((2, 2), 0.25 if normalize == "all" else 0.5)
+    )
+    np.testing.assert_allclose(payload["data"][0]["z"], expected)
+    percent = "50.0%" if normalize in ("true", "pred") else "25.0%"
+    assert all(
+        a["text"].endswith("<br>" + percent) for a in payload["layout"]["annotations"]
+    )
+    if np.issubdtype(dtype, np.integer):
+        assert all(
+            a["text"].startswith(str(value) + "<br>")
+            for a in payload["layout"]["annotations"]
+        )
+    np.testing.assert_array_equal(matrix, original)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
+@pytest.mark.parametrize("method", ["roc_curve", "pr_curve"])
+def test_curves_accept_extreme_finite_scores(capture_send, method, dtype):
+    limit = np.finfo(dtype).max
+    scores = np.array([-limit, -limit, limit, limit], dtype=dtype)
+    original = scores.copy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        payload = capture_send(
+            lambda client: getattr(client, method)(
+                y_true=np.array([0, 0, 1, 1]), y_score=scores
+            )
+        )["payload"]
+    curve = payload["data"][0]
+    if method == "roc_curve":
+        assert curve["x"] == [0.0, 0.0, 1.0]
+        assert curve["y"] == [0.0, 1.0, 1.0]
+    else:
+        assert curve["x"] == [0.0, 1.0, 1.0]
+        assert curve["y"] == [1.0, 1.0, 0.5]
+    assert "AUC=1.0000" in payload["opts"]["title"]
+    np.testing.assert_array_equal(scores, original)
