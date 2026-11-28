@@ -375,6 +375,56 @@ class TestClientCreatesWithoutPreflight(VisdomHTTPTestCase):
         self.assertEqual(len(pane["content"]), 2)
         self.assertNotEqual(pane["content"][0]["src"], pane["content"][1]["src"])
 
+    def test_missing_heatmap_gets_the_same_layout_as_normal_creation(self):
+        vis = self.client(use_preflight_checks=False)
+        data = np.array([[1.0, 2.0], [3.0, 4.0]])
+        opts = dict(title="Heat", xlabel="epoch", ylabel="sample", marginleft=7)
+        vis.heatmap(data, win="normal", opts=dict(opts))
+        normal = self.get_win_data("normal")["content"]
+        self.assertEqual(normal["layout"]["xaxis"]["title"], {"text": "epoch"})
+        self.assertEqual(normal["layout"]["yaxis"]["title"], {"text": "sample"})
+        self.assertEqual(normal["layout"]["margin"]["l"], 7)
+
+        for update in ("appendRow", "appendColumn", "prependRow", "prependColumn"):
+            with self.subTest(update=update):
+                self.assertFalse(self.win_exists(update))
+                vis.heatmap(data, win=update, update=update, opts=dict(opts))
+                self.assertEqual(self.get_win_data(update)["content"], normal)
+        self.assertEqual(vis.requests, ["events"] + ["update"] * 4)
+
+    def test_later_appends_keep_the_existing_layout_and_extend_data(self):
+        vis = self.client(use_preflight_checks=False)
+        data = np.array([[1.0, 2.0], [3.0, 4.0]])
+        opts = dict(title="Original", xlabel="epoch", ylabel="sample", marginleft=7)
+        for update in ("appendRow", "appendColumn", "prependRow", "prependColumn"):
+            for append_created in (False, True):
+                with self.subTest(update=update, append_created=append_created):
+                    win = "{}_{}".format(update, append_created)
+                    vis.heatmap(
+                        data,
+                        win=win,
+                        update=update if append_created else None,
+                        opts=dict(opts),
+                    )
+                    layout = self.get_win_data(win)["content"]["layout"]
+                    axis = 0 if update.endswith("Row") else 1
+                    extra = np.full((1, 2) if axis == 0 else (2, 1), 5.0)
+                    vis.heatmap(
+                        extra,
+                        win=win,
+                        update=update,
+                        opts=dict(title="Changed", xlabel="changed", marginleft=99),
+                    )
+                    content = self.get_win_data(win)["content"]
+                    self.assertEqual(content["layout"], layout)
+                    pieces = (
+                        (extra, data) if update.startswith("prepend") else (data, extra)
+                    )
+                    self.assertEqual(
+                        content["data"][0]["z"],
+                        np.concatenate(pieces, axis=axis).tolist(),
+                    )
+
 
 class TestWindowOrdering(VisdomHTTPTestCase):
     def test_windows_are_indexed_in_creation_order(self):

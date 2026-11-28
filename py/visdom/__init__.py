@@ -4237,6 +4237,9 @@ class Visdom(object):
         if update:
             data_to_send["append"] = is_appending
             data_to_send["updateDir"] = update
+            if is_appending:
+                # Used only when the append creates a missing window.
+                data_to_send["layout_create"] = _opts2layout(opts)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
