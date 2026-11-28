@@ -582,3 +582,41 @@ def test_explicit_save_only_acknowledges_ids_returned_by_storage(env_path, monke
 
     assert asyncio.run(run()) == ["written"]
     assert app.server_state.dirty_envs == {"declined": 1}
+
+
+@pytest.mark.parametrize("cmd", ["save", "save_all"])
+@pytest.mark.parametrize("edit_during_write", [False, True])
+def test_browser_save_acknowledges_only_written_edits(
+    env_path, monkeypatch, cmd, edit_during_write
+):
+    app = _make_app(env_path, save_interval=0, save_threshold=0)
+    sock = open_sub(app)
+    sock.eid = "a"
+    app.state["a"] = {"jsons": {"w": 1}, "reload": {}}
+    app.mark_dirty("a")
+
+    async def run():
+        submitted = asyncio.get_running_loop().create_future()
+
+        def defer_write(handler, write, *args):
+            done = asyncio.get_running_loop().create_future()
+            submitted.set_result((write, args, done))
+            return done
+
+        monkeypatch.setattr(server_utils, "run_on_storage_executor", defer_write)
+        message = {"cmd": cmd, "eid": "a", "prev_eid": "a", "data": {}}
+        command = asyncio.create_task(sock.on_message(json.dumps(message)))
+        write, args, done = await submitted
+        if edit_during_write:
+            app.state["a"]["jsons"]["w"] = 2
+            app.mark_dirty("a")
+        done.set_result(write(*args))
+        await command
+        await asyncio.sleep(0)  # save_all completes through a done callback
+
+    asyncio.run(run())
+    assert app.storage.load_env("a")["jsons"]["w"] == 1
+    assert app.server_state.dirty_envs["a"] == int(edit_during_write)
+    sock.eid = "main"
+    _age(app, "a")
+    assert _sweep(app.server_state) == ([] if edit_during_write else ["a"])

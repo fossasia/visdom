@@ -396,13 +396,25 @@ def _hold_unsaved(handler, eids):
     return release
 
 
+def _submit_tracked_save(handler, eids, write, *args):
+    """Capture dirty counts alongside the snapshot, before submitting its write."""
+    dirty = getattr(handler, "dirty_envs", {})
+    covered = {eid: dirty[eid] for eid in eids if eid in dirty}
+    future = run_on_storage_executor(handler, write, *args)
+    if covered:
+        handler.track_saved_changes(future, covered)
+    return future
+
+
 def save_env_off_loop(handler, eid):
     """Persist one env off the loop, or ``None`` when there is nothing to write."""
     snapshot = snapshot_env(handler.state[eid])
     if snapshot is None:
         return None
     release = _hold_unsaved(handler, [eid])
-    future = run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+    future = _submit_tracked_save(
+        handler, [eid], handler.storage.save_env, eid, snapshot
+    )
     future.add_done_callback(release)
     return future
 
@@ -418,22 +430,17 @@ def save_envs_off_loop(handler, eids):
     eids = list(eids)
     snapshots = snapshot_envs(handler.state, eids)
     release = _hold_unsaved(handler, list(snapshots))
-    dirty = getattr(handler, "dirty_envs", {})
-    covered = {eid: dirty[eid] for eid in snapshots if eid in dirty}
-    future = run_on_storage_executor(
-        handler, handler.storage.save_envs, snapshots, eids
+    future = _submit_tracked_save(
+        handler, snapshots, handler.storage.save_envs, snapshots, eids
     )
     future.add_done_callback(release)
-    if covered:
-        handler.track_saved_changes(future, covered)
     return future
 
 
 def save_all_off_loop(handler):
     """Persist every materialised env off the loop."""
-    return run_on_storage_executor(
-        handler, handler.storage.save_all, snapshot_state(handler.state)
-    )
+    snapshots = snapshot_state(handler.state)
+    return _submit_tracked_save(handler, snapshots, handler.storage.save_all, snapshots)
 
 
 def load_env_off_loop(handler, eid):

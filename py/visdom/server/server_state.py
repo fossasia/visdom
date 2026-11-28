@@ -352,11 +352,12 @@ class ServerState:
             self._pending_save_counts.setdefault(eid, {})[token] = count
 
         def settle(done):
-            written = (
-                set(done.result())
-                if not done.cancelled() and done.exception() is None
-                else set()
-            )
+            written = set()
+            if not done.cancelled() and done.exception() is None:
+                result = done.result()
+                # save_env reports success for its one ID with a boolean.
+                # save_envs and save_all return the IDs actually written.
+                written = covered if result is True else set(result or ())
             for eid in covered:
                 pending = self._pending_save_counts[eid]
                 count = pending.pop(token)
