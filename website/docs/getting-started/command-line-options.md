@@ -22,6 +22,7 @@ The following options can be provided to the server:
 | `-eager_data_loading` | By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup |
 | `-save_interval` | Seconds between automatic saves of changed environments (default = 30). Set to 0 to disable the timer |
 | `-save_threshold` | Save an environment early once it has taken this many updates (default = 50), so a busy one is not left unsaved for a whole interval. Set to 0 to disable |
+| `-env_idle_seconds` | Drop a saved environment from memory once nothing has touched it for this many seconds; it is read back from disk on next use (default = 0, keep every loaded environment in memory; otherwise at least 10) |
 
 ## Saving
 
@@ -30,6 +31,14 @@ Environments are held in memory and written to `-env_path` automatically: every
 `-save_threshold` updates. Only environments that changed since the last write are
 saved. The write runs on a background storage thread, so a large environment
 reaching disk does not hold up the requests arriving while it is written.
+
+Loaded environments stay in memory until the server stops. On a long-running
+server, set `-env_idle_seconds` to let environments that are saved and untouched
+fall back to disk. An environment is never dropped while it has unsaved changes,
+is being written or deleted, is displayed by a connected browser, or is in use
+by a request. An environment nobody has opened
+since startup (for example under `-eager_data_loading`) stays where it is. An
+evicted environment reloads transparently when next used.
 
 Setting both to 0 restores the older behaviour of saving only when asked, and once
 more at shutdown.
