@@ -798,6 +798,8 @@ class UpdateHandler(BaseHandler):
             )
         if not isinstance(args.get("layout_create", {}), dict):
             raise tornado.web.HTTPError(400, reason="layout_create must be an object")
+        if not isinstance(args.get("opts_create", {}), dict):
+            raise tornado.web.HTTPError(400, reason="opts_create must be an object")
         eid = extract_eid(args)
 
         if eid not in handler.state:
