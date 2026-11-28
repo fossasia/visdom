@@ -48,7 +48,7 @@ Version `0.3.1` · Python >= 3.12 · Apache 2.0
 
 ## PR Checklist
 
-- Branch from `master`; add `pytest` tests in `py/tests/` for Python code and Playwright tests for frontend behavior
+- Branch from `dev` and open PRs against `dev`. Add `pytest` tests in `py/tests/` for Python code and Playwright tests for frontend behavior
 - New test file: put it in `py/tests/unit/` or `py/tests/integration/`, and give it the matching
   `pytestmark` — CI runs `-m unit` as a gate, so an unmarked file is in neither job
 - Update `README` for API changes, `__init__.pyi` for interface changes
