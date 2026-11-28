@@ -58,6 +58,11 @@ from visdom.utils.server_utils import (
     compare_envs,
     load_env,
     broadcast,
+    label_trace_name,
+    labelled_update,
+    pair_by_label,
+    pane_labels,
+    trace_labels_ok,
     update_window,
     hash_password_off_loop,
     push_deleted_many_off_loop,
@@ -81,6 +86,17 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def check_trace_labels(args):
+    """Refuse ``trace_labels`` that don't give one label per data entry."""
+    if "trace_labels" in args and not trace_labels_ok(
+        args["trace_labels"], args.get("data")
+    ):
+        raise tornado.web.HTTPError(
+            400,
+            reason="trace_labels must hold one label number or string per data entry",
+        )
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
@@ -99,6 +115,7 @@ class PostHandler(BaseHandler):
                 "but it is no longer officially supported."
             )
 
+        check_trace_labels(req)
         eid = extract_eid(req)
         await ensure_env_loaded(self, eid)
 
@@ -148,6 +165,54 @@ class UpdateHandler(BaseHandler):
         if name is None:
             return list(range(len(pdata)))
         return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
+
+    @staticmethod
+    def trace_pairs(p, args, idxs, new_data):
+        """``(index, entry, label, name)`` for each trace ``update`` touches.
+
+        A labelled update (``labelled_update``) sends each entry to the trace
+        of its label (``pair_by_label``), with index None for a new trace,
+        named ``name``. An entry with no points is left out, so it can't take
+        a trace from a later entry of the same label. Anything else pairs the
+        entries with ``idxs`` in order, label and name None.
+        """
+        labels = labelled_update(p, args)
+        if labels is None:
+            return [(i, entry, None, None) for i, entry in zip(idxs, new_data)]
+        legend = (args.get("opts") or {}).get("legend")
+        if not isinstance(legend, (list, tuple)):
+            legend = p.get("legend")
+        entries = [
+            (entry, label)
+            for entry, label in zip(new_data, args["trace_labels"])
+            if not (
+                isinstance(entry, dict)
+                and isinstance(entry.get("x"), list)
+                and all(_is_missing_value(v) for v in entry["x"])
+            )
+        ]
+        new_names = [label_trace_name(label, entry, legend) for entry, label in entries]
+        idxs = pair_by_label(
+            labels,
+            [label for _, label in entries],
+            [d.get("name") for d in p["content"]["data"]],
+            new_names,
+        )
+        return [
+            (i, entry, label, name)
+            for i, (entry, label), name in zip(idxs, entries, new_names)
+        ]
+
+    @staticmethod
+    def add_trace(p, trace, label=None):
+        """Add ``trace`` to the pane, keeping ``trace_labels`` in step.
+
+        The labels are replaced rather than extended: ``update_packet`` diffs
+        the pane against a shallow copy, which shares the old list.
+        """
+        p["content"]["data"].append(trace)
+        if isinstance(p.get("trace_labels"), list):
+            p["trace_labels"] = p["trace_labels"] + [label]
 
     @staticmethod
     def window_args_are_noops(p, args):
@@ -209,6 +274,13 @@ class UpdateHandler(BaseHandler):
             return all(
                 d.get("name") == legend[0] for d in pdata if d.get("name") == name
             )
+        labels = pane_labels(p)
+        if labels is not None:
+            return all(
+                d.get("name") == legend[label - 1]
+                for label, d in zip(labels, pdata)
+                if isinstance(label, int) and label <= len(legend)
+            )
         return all(
             d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
         )
@@ -250,9 +322,15 @@ class UpdateHandler(BaseHandler):
             # Nothing matched, so ``update`` injects a new trace rather than
             # appending to an existing one.
             return False
-        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
-        # actually touched.
-        for i, new_trace in zip(idxs, new_data):
+        # Only the traces ``update`` pairs the entries with are touched. An
+        # entry that becomes a new trace has no index patch, so it takes the
+        # general path.
+        labels = pane_labels(p)
+        pairs = UpdateHandler.trace_pairs(p, args, idxs, new_data)
+        for i, new_trace, label, _ in pairs:
+            if i is None or (label is not None and labels[i] is None):
+                # A new trace, or one that takes a label: more than points.
+                return False
             target = pdata[i]
             if not isinstance(target, dict) or not isinstance(new_trace, dict):
                 return False
@@ -557,11 +635,16 @@ class UpdateHandler(BaseHandler):
         if delete:
             idxs_set = set(idxs)
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
+            labels = p.get("trace_labels")
+            if isinstance(labels, list) and len(labels) == len(pdata):
+                p["trace_labels"] = [
+                    label for i, label in enumerate(labels) if i not in idxs_set
+                ]
             return p
 
         # add new heatmap data if plot has been deleted previously
         if len(idxs) == 0 and new_data[0]["type"] == "heatmap":
-            pdata.append(new_data[0])
+            UpdateHandler.add_trace(p, new_data[0])
             return p
 
         # update heatmap
@@ -652,18 +735,32 @@ class UpdateHandler(BaseHandler):
         # every key of the clone, which raised IndexError once a plot had all of
         # its traces deleted. The clone was dead work anyway, so build the trace
         # from the update alone.
-        if len(idxs) == 0:
+        # A labelled update to a pane with no traces left adds a trace for each
+        # of its labels below instead.
+        if len(idxs) == 0 and labelled_update(p, args) is None:
             trace = dict(new_data[0])
             trace["name"] = name
-            pdata.append(trace)
+            UpdateHandler.add_trace(p, trace)
             return p
 
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for idx, new_trace in zip(idxs, new_data):
+        pairs = UpdateHandler.trace_pairs(p, args, idxs, new_data)
+        for idx, new_trace, label, new_name in pairs:
             if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
+            if idx is None:
+                trace = dict(new_trace)
+                if label is not None:
+                    trace["name"] = new_name
+                UpdateHandler.add_trace(p, trace, label)
+                continue
+            if label is not None and p["trace_labels"][idx] is None:
+                # A trace added by name, with this label's name, takes it.
+                labels = list(p["trace_labels"])
+                labels[idx] = label
+                p["trace_labels"] = labels
             # handle data for plotting
             axes = ["x", "y"]
             if pdata[idx]["type"] == "scatter3d":
@@ -798,6 +895,7 @@ class UpdateHandler(BaseHandler):
             )
         if not isinstance(args.get("layout_create", {}), dict):
             raise tornado.web.HTTPError(400, reason="layout_create must be an object")
+        check_trace_labels(args)
         eid = extract_eid(args)
 
         if eid not in handler.state:

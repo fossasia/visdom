@@ -11,14 +11,18 @@
 Once ``UpdateHandler.update`` is past the content panes it works on
 ``p["content"]["data"]``, and which branch runs depends on how many traces the
 ``name`` argument selects: none injects a trace, exactly one heatmap takes the
-``updateDir`` path, and anything else falls through to the positional trace
-update. Every one of those branches is driven here over HTTP.
+``updateDir`` path, and anything else falls through to the trace update, which
+matches a labelled scatter's traces by label and any other update's by
+position. Every one of those branches is driven here over HTTP.
 """
 
 import unittest
+from unittest import mock
 
+import numpy as np
 import pytest
 
+import visdom
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -232,6 +236,212 @@ class TestTraceUpdates(PlotUpdateTestCase):
             name="t1",
         )
         self.assertEqual(resp.code, 400)
+
+
+class TestAppendByLabel(PlotUpdateTestCase):
+    """A labelled scatter append, sent by the real client.
+
+    A batch only carries the labels in it, so pairing its traces with the
+    plot's by position sent a batch holding only "dog" into "cat".
+    """
+
+    def client(self, use_preflight_checks=True):
+        with (
+            mock.patch.object(visdom.Visdom, "_handle_post", return_value=True),
+            mock.patch.object(visdom.Visdom, "_start_session_reaper"),
+            mock.patch.object(visdom.logger, "warning"),
+        ):
+            vis = visdom.Visdom(
+                use_incoming_socket=False,
+                raise_exceptions=True,
+                use_preflight_checks=use_preflight_checks,
+            )
+
+        def post(url, data=None):
+            resp = self.fetch("/" + url.rsplit("/", 1)[1], method="POST", body=data)
+            self.assertEqual(resp.code, 200, resp.body)
+            return resp.body.decode()
+
+        vis._handle_post = post
+        return vis
+
+    def scatter(self, vis, win, labels, x0=0, **kwargs):
+        X = np.array([[x0 + i, x0 + i] for i in range(len(labels))], dtype=float)
+        return vis.scatter(X, Y=labels, win=win, env="main", **kwargs)
+
+    def xs(self, win):
+        return [(t["name"], t["x"]) for t in self.traces(win)]
+
+    def test_a_label_joins_its_trace_whatever_the_legend_named_it(self):
+        """With a legend of ["2", "1"], class 1 is the trace named "2"."""
+        for preflight in (True, False):
+            with self.subTest(preflight=preflight):
+                vis, win = self.client(preflight), "swapped_%s" % preflight
+                legend = {"legend": ["2", "1"]}
+                self.scatter(vis, win, [1, 2], opts=legend)
+                self.scatter(vis, win, [1], x0=9, update="append")
+                self.scatter(vis, win, [2, 1], x0=7, update="append", opts=legend)
+                self.assertEqual(
+                    self.xs(win), [("2", [0.0, 9.0, 8.0]), ("1", [1.0, 7.0])]
+                )
+
+    def test_a_batch_with_one_class_joins_that_class(self):
+        vis = self.client()
+        self.scatter(vis, "one", ["cat", "dog"])
+        self.scatter(vis, "one", ["dog"], x0=9, update="append")
+        self.assertEqual(self.xs("one"), [("cat", [0.0]), ("dog", [1.0, 9.0])])
+
+    def test_a_new_class_becomes_its_own_trace(self):
+        vis = self.client()
+        self.scatter(vis, "new", ["cat", "dog"])
+        self.scatter(vis, "new", ["dog", "bird"], x0=8, update="append")
+        self.assertEqual(
+            self.xs("new"),
+            [("cat", [0.0]), ("dog", [1.0, 8.0]), ("bird", [9.0])],
+        )
+        self.scatter(vis, "new", ["bird"], x0=5, update="append")
+        self.assertEqual(self.xs("new")[2], ("bird", [9.0, 5.0]))
+
+    def test_a_plot_made_with_a_legend_takes_appends_without_it(self):
+        vis = self.client()
+        self.scatter(vis, "legend", [1, 2], opts={"legend": ["cat", "dog"]})
+        self.scatter(vis, "legend", [2], x0=9, update="append")
+        self.assertEqual(self.xs("legend"), [("cat", [0.0]), ("dog", [1.0, 9.0])])
+
+    def test_a_legend_sent_with_an_append_names_each_trace_by_its_label(self):
+        vis = self.client()
+        self.scatter(vis, "sparse", [2, 3])
+        self.scatter(
+            vis, "sparse", [3], x0=9, update="append", opts={"legend": ["a", "b", "c"]}
+        )
+        self.assertEqual(self.xs("sparse"), [("b", [0.0]), ("c", [1.0, 9.0])])
+
+    def test_0_based_class_ids_keep_their_traces_in_a_batch_without_0(self):
+        vis = self.client()
+        self.scatter(vis, "zero", [0, 1, 2])
+        self.scatter(vis, "zero", [2], x0=9, update="append")
+        self.assertEqual(
+            self.xs("zero"), [("0", [0.0]), ("1", [1.0]), ("2", [2.0, 9.0])]
+        )
+
+    def test_an_append_that_creates_the_plot_keeps_its_labels(self):
+        vis = self.client(use_preflight_checks=False)
+        self.scatter(vis, "created", [2], update="append")
+        self.scatter(vis, "created", [1, 2], x0=8, update="append")
+        self.assertEqual(self.xs("created"), [("2", [0.0, 9.0]), ("1", [8.0])])
+
+    def test_a_removed_trace_takes_its_label_with_it(self):
+        vis = self.client()
+        self.scatter(vis, "removed", [1, 2, 3])
+        vis.scatter(None, win="removed", env="main", update="remove", name="2")
+        self.scatter(vis, "removed", [3], x0=9, update="append")
+        self.assertEqual(self.xs("removed"), [("1", [0.0]), ("3", [2.0, 9.0])])
+        self.assertEqual(self.get_win_data("removed")["trace_labels"], [1, 3])
+
+    def test_a_label_joins_a_trace_added_by_name_with_its_name(self):
+        vis = self.client()
+        self.scatter(vis, "named", [1])
+        vis.scatter(
+            np.array([[5.0, 5.0]]), win="named", env="main", update="append", name="2"
+        )
+        self.scatter(vis, "named", [2], x0=9, update="append")
+        self.assertEqual(self.xs("named"), [("1", [0.0]), ("2", [5.0, 9.0])])
+        self.assertEqual(self.get_win_data("named")["trace_labels"], [1, 2])
+
+    def test_a_new_label_is_named_by_the_legend_the_plot_was_made_with(self):
+        """Not "2", which the legend gave label 1."""
+        vis = self.client()
+        self.scatter(vis, "unsent", [3, 1], opts={"legend": ["2", "1", "3"]})
+        self.scatter(vis, "unsent", [1, 2], x0=8, update="append")
+        self.assertEqual(
+            self.xs("unsent"), [("2", [1.0, 8.0]), ("3", [0.0]), ("1", [9.0])]
+        )
+
+    def test_a_label_appended_after_its_trace_was_removed_gets_one_trace(self):
+        vis = self.client()
+        self.scatter(vis, "gone", [1, 3], opts={"legend": ["2", "1", "3"]})
+        vis.scatter(None, win="gone", env="main", update="remove", name="3")
+        self.scatter(vis, "gone", [2, 3], x0=8, update="append")
+        self.assertEqual(self.xs("gone"), [("2", [0.0]), ("1", [8.0]), ("3", [9.0])])
+
+    def test_a_legend_set_with_update_window_opts_names_traces_by_label(self):
+        vis = self.client()
+        self.scatter(vis, "opts", [3])
+        vis.update_window_opts(win="opts", env="main", opts={"legend": ["2", "1", "3"]})
+        self.assertEqual(self.xs("opts"), [("3", [0.0])])
+        self.scatter(vis, "opts", [2], x0=9, update="append")
+        self.assertEqual(self.xs("opts"), [("3", [0.0]), ("1", [9.0])])
+
+    def test_a_line_appends_to_its_lines(self):
+        vis = self.client()
+        opts = {"legend": ["train", "val"]}
+        vis.line(Y=np.array([[1, 10]]), X=[0], win="line", env="main", opts=opts)
+        vis.line(Y=np.array([[2, 20]]), X=[1], win="line", env="main", update="append")
+        traces = self.traces("line")
+        self.assertEqual([t["name"] for t in traces], ["train", "val"])
+        self.assertEqual([t["y"] for t in traces], [[1, 2], [10, 20]])
+
+
+class TestAppendWithoutLabels(PlotUpdateTestCase):
+    """Updates without labels, or to a plot made without them, go by position."""
+
+    def create_pane(self, names, trace_labels=None):
+        payload = {
+            "eid": "main",
+            "win": "w",
+            "layout": {},
+            "data": [
+                {"type": "scatter", "x": [i], "y": [i], "name": n}
+                for i, n in enumerate(names)
+            ],
+        }
+        if trace_labels is not None:
+            payload["trace_labels"] = trace_labels
+        return self.post_json("/events", payload)
+
+    def append(self, *names, **extra):
+        data = [
+            {"type": "scatter", "x": [9 - i], "y": [0], "name": n}
+            for i, n in enumerate(names)
+        ]
+        return self.update("w", data, append=True, **extra)
+
+    def xs(self):
+        return [(t["name"], t["x"]) for t in self.traces("w")]
+
+    def test_entries_without_labels_fill_the_traces_in_order(self):
+        self.create_pane(["2", "1"], trace_labels=[1, 2])
+        self.append("1")
+        self.assertEqual(self.xs(), [("2", [0, 9]), ("1", [1])])
+
+    def test_labels_sent_to_a_plot_made_without_them_fill_the_traces_in_order(self):
+        """A plot saved before the client sent labels."""
+        self.create_pane(["cat", "dog"])
+        self.append("dog", trace_labels=["dog"])
+        self.assertEqual(self.xs(), [("cat", [0, 9]), ("dog", [1])])
+
+    def test_unnamed_traces_fill_in_order(self):
+        self.create_pane([None, None])
+        self.append("2", trace_labels=[2])
+        self.assertEqual(self.xs(), [(None, [0, 9]), (None, [1])])
+
+    def test_a_named_update_goes_to_the_trace_of_that_name(self):
+        self.create_pane(["2", "1"], trace_labels=[1, 2])
+        self.append("1", name="1", trace_labels=[1])
+        self.assertEqual(self.xs(), [("2", [0]), ("1", [1, 9])])
+
+    def test_bad_labels_are_refused(self):
+        self.create_pane(["a"], trace_labels=[1])
+        for labels in ([1, 2], [0], [None], "1", [True]):
+            with self.subTest(labels=labels):
+                resp = self.append("1", trace_labels=labels)
+                self.assertEqual(resp.code, 400)
+                self.assertIn("trace_labels", resp.reason)
+
+    def test_bad_labels_are_refused_on_create(self):
+        resp = self.create_pane(["a"], trace_labels=[1, 2])
+        self.assertEqual(resp.code, 400)
+        self.assertIn("trace_labels", resp.reason)
 
 
 class TestMarkerUpdates(PlotUpdateTestCase):
