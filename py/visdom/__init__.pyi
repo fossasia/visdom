@@ -5,7 +5,19 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Set,
+    Text,
+    Tuple,
+    Union,
+)
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -39,6 +51,11 @@ Tensor = Any
 # it will return a single string. We only type it as such to prevent the need for users to unwrap the union.
 # See https://github.com/python/mypy/issues/1693.
 _SendReturn = Text
+
+# The 'update' values line, scatter and learning_curve accept; any other raises
+# ValueError. '_LineUpdate' spells out the same values for a type checker.
+LINE_UPDATES: Tuple[Optional[Text], ...]
+_LineUpdate = Optional[Literal["append", "replace", "remove", "insert", "new"]]
 
 # A decoded server event, as handed to a registered event handler. The handler's
 # return value is discarded, so it is deliberately unconstrained.
@@ -289,7 +306,7 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
     ) -> _SendReturn: ...
     def scatter(
         self,
@@ -298,7 +315,7 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
         name: _OptStr = ...,
     ) -> _SendReturn: ...
     def line(
@@ -308,7 +325,7 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
-        update: _OptStr = ...,
+        update: _LineUpdate = ...,
         name: _OptStr = ...,
         Z: Optional[Tensor] = ...,
         is3d: bool = ...,
