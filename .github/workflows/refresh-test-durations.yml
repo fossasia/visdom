@@ -52,7 +52,7 @@ jobs:
       - name: Compare the predicted slowest shards
         id: compare
         run: |
-          pytest -m "not server" --collect-only -q -p no:warnings > "$RUNNER_TEMP/collection"
+          pytest -o addopts= -m "not server" --collect-only -q -p no:warnings > "$RUNNER_TEMP/collection"
           python .github/scripts/duration_gain.py py/tests/.test_durations "$RUNNER_TEMP/durations.json" "$RUNNER_TEMP/collection" "$SPLITS" | tee "$RUNNER_TEMP/comparison"
           cat "$RUNNER_TEMP/comparison" >> "$GITHUB_STEP_SUMMARY"
           echo "baseline=$(git rev-parse HEAD:py/tests/.test_durations)" >> "$GITHUB_OUTPUT"
