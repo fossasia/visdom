@@ -58,6 +58,7 @@ from visdom.utils.server_utils import (
     ensure_env_present,
     env_is_deleting,
     extract_eid,
+    hold_envs,
     register_window,
     check_readonly_message,
     run_on_storage_executor,
@@ -130,7 +131,7 @@ def _resident_experiments(state, env_ids=None):
     since it is the scan that decides which ones match.
     """
     if env_ids is None:
-        items = list(state.items())
+        items = state.items()
     else:
         items = [(eid, state[eid]) for eid in dict.fromkeys(env_ids) if eid in state]
     resident = {}
@@ -502,7 +503,10 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
                 )
 
         rebuilt_from = existing.get("contentID")
-        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
+        with hold_envs(handler, [eid]):
+            content = await ExperimentHparamsHandler._build_content_off_loop(
+                handler, spec
+            )
 
         # the loop kept serving while the selection was read, so the pane may be
         # gone, retyped, or rebuilt by another update since it was looked up.

@@ -58,6 +58,34 @@ test.describe('plot redraws', () => {
     await waitForPlotRender(page);
   });
 
+  test('draws an open freeform path and switches back to zoom', async ({
+    page,
+  }) => {
+    const graph = page.locator(plotSelector).first();
+    await graph.hover();
+    await graph.getByRole('button', { name: 'Draw open freeform' }).click();
+    await expect
+      .poll(() => graph.evaluate((el) => el._fullLayout.dragmode))
+      .toBe('drawopenpath');
+
+    const area = await graph.locator('.nsewdrag').first().boundingBox();
+    const x = area.x + area.width / 2;
+    const y = area.y + area.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 15, y + 10, { steps: 3 });
+    await page.mouse.move(x + 30, y, { steps: 3 });
+    await page.mouse.up();
+    await expect
+      .poll(() => graph.evaluate((el) => el.layout.shapes?.[0]?.path))
+      .toMatch(/^M/);
+
+    await graph.getByRole('button', { name: 'Zoom', exact: true }).click();
+    await expect
+      .poll(() => graph.evaluate((el) => el._fullLayout.dragmode))
+      .toBe('zoom');
+  });
+
   test('a redraw does not also resize the plot', async ({ page }) => {
     await openSmoothing(page, '20');
     await countPlotCalls(page);
