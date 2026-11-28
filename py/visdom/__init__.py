@@ -1050,22 +1050,27 @@ def _decode_binary_arrays(obj):
     return obj
 
 
-def _experiment_reply(reply):
-    """Whether a reply to an experiment call is the experiment, as on success.
+def _replay_recorded(endpoint, msg, reply):
+    """Whether a replayed experiment write was stored, going by its reply.
 
-    A lost connection gives False, a rejected call an error page, and a
-    refused one (a readonly server, say) ``{"success": false, ...}``.
+    Each endpoint answers a stored write its own way: ``experiments/log`` with
+    the experiment, ``experiments/tags`` with the env's tags, and the hparams
+    endpoints with the pane's id. A lost connection gives False, a rejected
+    call an error page, and a refused one (a readonly server, say)
+    ``{"success": false, ...}``, none of which is such a reply.
     """
+    if endpoint in ("experiments/hparams", "experiments/hparams/update"):
+        return isstr(reply) and reply == msg.get("win")
     if isinstance(reply, (str, bytes)):
         try:
             reply = json.loads(reply)
         except ValueError:
             return False
-    return (
-        isinstance(reply, dict)
-        and isinstance(reply.get("env_id"), str)
-        and isinstance(reply.get("status"), str)
-    )
+    if not isinstance(reply, dict):
+        return False
+    if endpoint == "experiments/tags":
+        return all(isstr(k) and isstr(v) for k, v in reply.items())
+    return isinstance(reply.get("env_id"), str) and isinstance(reply.get("status"), str)
 
 
 def _without_userinfo(url):
@@ -2308,20 +2313,23 @@ class Visdom(object):
         the current server to restore the state or handle any missing entries.
 
         Experiment calls are replayed too. Metrics are appended, so a log
-        replayed twice records them twice. If a metric or log call fails, the
-        experiment's logged finish is not sent and it stays running, with a
+        replayed twice records them twice. If a metric, log or tag call fails,
+        the experiment's logged finish is not sent and it stays running, with a
         warning: finished, a run missing some of its calls would look complete.
+        An hparams pane that can't be written is warned about too; it shows
+        runs rather than recording one, so it doesn't hold a finish back.
         """
         with open(log_filename) as f:
             log_entries = f.readlines()
         failed = Counter()
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
-            if endpoint != "experiments/log":
+            if not endpoint.startswith("experiments/"):
                 self._send(msg, endpoint, from_log=True)
                 continue
             eid = msg.get("eid")
-            if msg.get("action") == "finish" and failed[eid]:
+            finish = endpoint == "experiments/log" and msg.get("action") == "finish"
+            if finish and failed[eid]:
                 logger.warning(
                     "replay_log: not finishing the experiment for %r, since %d of"
                     " its logged calls failed; it stays running",
@@ -2330,13 +2338,19 @@ class Visdom(object):
                 )
                 continue
             reply = self._send(msg, endpoint, from_log=True)
-            if self.offline or _experiment_reply(reply):
+            if self.offline or _replay_recorded(endpoint, msg, reply):
                 continue
-            if msg.get("action") == "finish":
+            if finish:
                 # Nothing is lost: a finish later in the log can still go through.
                 logger.warning(
                     "replay_log: finishing the experiment for %r failed; it stays"
                     " running",
+                    eid,
+                )
+            elif endpoint.startswith("experiments/hparams"):
+                logger.warning(
+                    "replay_log: the hparams pane %r in %r could not be written",
+                    msg.get("win"),
                     eid,
                 )
             else:
