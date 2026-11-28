@@ -31,7 +31,7 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from visdom.data_model.json_store import HASHED_ENV_RE, JSONStore
+from visdom.data_model.json_store import HASHED_ENV_RE, HASHED_STORAGE_RE, JSONStore
 from visdom.server.server_state import ServerState
 from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
@@ -384,8 +384,11 @@ class WorkspaceEnvManager:
         except OSError:
             return []
 
+        storage = JSONStore(directory)
         for entry in entries:
-            if not entry.is_file() or not entry.name.endswith(".json"):
+            if not entry.is_file() or not (
+                entry.name.endswith(".json") or HASHED_STORAGE_RE.fullmatch(entry.name)
+            ):
                 continue
             try:
                 stat = entry.stat()
@@ -395,6 +398,9 @@ class WorkspaceEnvManager:
                 continue
             eid = _stored_eid(entry)
             if eid is not None and eid not in keep:
+                current = storage._resolve_existing(eid)
+                if current is not None and not _same_file(current, entry.path):
+                    continue
                 expired.append(
                     {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
                 )
@@ -483,9 +489,25 @@ def remove_directory(path):
     return total
 
 
+def _same_file(a, b):
+    """Whether ``a`` and ``b`` name the same file under the filesystem's rules.
+
+    A string comparison is not enough: on a case-insensitive filesystem
+    ``hash_x.json.hash`` and ``hash_x.JSON.HASH`` are one file.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(
+            os.path.abspath(b)
+        )
+
+
 def _stored_eid(entry):
-    stem = entry.name[: -len(".json")]
-    if not HASHED_ENV_RE.match(entry.name):
+    is_hashed = HASHED_STORAGE_RE.fullmatch(entry.name)
+    suffix = ".json.hash" if is_hashed else ".json"
+    stem = entry.name[: -len(suffix)]
+    if not (HASHED_ENV_RE.match(entry.name) or is_hashed):
         return stem
     try:
         with open(entry.path, "r", encoding="utf-8") as fn:
