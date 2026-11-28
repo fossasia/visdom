@@ -40,6 +40,10 @@ _OPTUNA_TAG_NAMES = {
 }
 
 
+class _WriteRejected(RuntimeError):
+    """The server refused a trial write (a 4xx reply), so retrying won't help."""
+
+
 class OptunaCallback:
     """Log completed Optuna trials and optionally maintain a study dashboard.
 
@@ -53,9 +57,9 @@ class OptunaCallback:
     ``create_dashboard=True`` creates a summary, an HParams pane and Optuna's
     Plotly study visualizations in that environment. The first completed trial
     creates the dashboard; later trials refresh it every ``refresh_every``
-    successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
-    to ensure the final trials are included when the total is not an exact
-    multiple of that interval. Supplying ``contour_params`` adds one Optuna
+    trials, including trials that failed to log. Call :meth:`update_dashboard`
+    after ``Study.optimize`` to ensure the final trials are included when the
+    total is not an exact multiple of that interval. Supplying ``contour_params`` adds one Optuna
     contour pane per objective. The HParams pane selects trials through stable
     experiment tags rather than callback-local state, so a new callback can
     rebuild a persisted study dashboard and multiple workers share the same
@@ -594,30 +598,109 @@ class OptunaCallback:
             "status": "finished" if state == "COMPLETE" else "failed",
         }
 
-    def __call__(self, study: Any, trial: Any) -> None:
-        """Record the completed ``trial`` without affecting optimization by default."""
-        try:
-            payload = self._build_payload(study, trial)
-            self.viz.experiment(
-                name=payload["name"],
-                params=payload["params"],
-                tags=payload["tags"],
-                description=payload["description"],
-                env=payload["env"],
+    def _check_recorded(self, reply: Any, env: str) -> None:
+        """Raise unless the reply is the stored experiment.
+
+        ``True`` is the client's offline sentinel: nothing was sent, so there is
+        nothing to confirm. A 4xx reply raises ``_WriteRejected`` with a reason
+        that matches its status; no reply or a 5xx raises ``RuntimeError``,
+        since the server may still accept the write later.
+        """
+        if reply is True or (isinstance(reply, Mapping) and "env_id" in reply):
+            return
+        if reply is None or reply is False:
+            raise RuntimeError(
+                "visdom did not record it in env {!r}: the server could not be "
+                "reached".format(env)
             )
-            for step, value in self._intermediate_values(trial):
-                self.viz.log_metrics(
-                    {_INTERMEDIATE_METRIC_NAME: value},
-                    step=step,
-                    env=payload["env"],
-                )
-            if payload["metrics"]:
-                self.viz.log_metrics(payload["metrics"], env=payload["env"])
-            self.viz.finish_experiment(
-                status=payload["status"],
-                env=payload["env"],
+        status = getattr(self.viz, "_last_response_status", None)
+        if not isinstance(status, int) or isinstance(status, bool):
+            status = None
+        if status is not None and status >= 500:
+            raise RuntimeError(
+                "visdom did not record it in env {!r}: server error "
+                "(status {})".format(env, status)
+            )
+        if status == 409:
+            # Trial envs come from dashboard_env when it is set, else study_name.
+            rename = "dashboard_env" if self.dashboard_env is not None else "study_name"
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: an experiment already "
+                "finished there. If an earlier run used the same {}, use a "
+                "new one or delete the old trial envs".format(env, rename)
+            )
+        if status in (401, 403):
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server refused the "
+                "request (status {}). Check the API key and whether the "
+                "server is running in readonly mode".format(env, status)
+            )
+        if status is not None and 400 <= status < 500:
+            raise _WriteRejected(
+                "visdom did not record it in env {!r}: the server rejected "
+                "the request (status {})".format(env, status)
+            )
+        raise _WriteRejected(
+            "visdom did not record it in env {!r}: unexpected reply {!r}".format(
+                env, reply
+            )
+        )
+
+    def _close_as_failed(self, trial: Any, env: str) -> None:
+        """Mark a half-written trial failed, warning if that is refused too."""
+        try:
+            self._check_recorded(
+                self.viz.finish_experiment(status="failed", env=env), env
             )
         except Exception as error:
+            warnings.warn(
+                "OptunaCallback could not mark trial {} as failed: {}".format(
+                    trial.number, error
+                ),
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
+    def __call__(self, study: Any, trial: Any) -> None:
+        """Record the completed ``trial`` without affecting optimization by default."""
+        env = None
+        unfinished = False
+        logged = False
+        try:
+            payload = self._build_payload(study, trial)
+            env = payload["env"]
+            self._check_recorded(
+                self.viz.experiment(
+                    name=payload["name"],
+                    params=payload["params"],
+                    tags=payload["tags"],
+                    description=payload["description"],
+                    env=env,
+                ),
+                env,
+            )
+            unfinished = True
+            for step, value in self._intermediate_values(trial):
+                self._check_recorded(
+                    self.viz.log_metrics(
+                        {_INTERMEDIATE_METRIC_NAME: value}, step=step, env=env
+                    ),
+                    env,
+                )
+            if payload["metrics"]:
+                self._check_recorded(
+                    self.viz.log_metrics(payload["metrics"], env=env), env
+                )
+            unfinished = False
+            self._check_recorded(
+                self.viz.finish_experiment(status=payload["status"], env=env), env
+            )
+            logged = True
+        except Exception as error:
+            if unfinished and isinstance(error, _WriteRejected):
+                # Only a refused write is final; after a network or server
+                # error the trial is left open so it can still be logged.
+                self._close_as_failed(trial, env)
             if self.raise_on_error:
                 raise
             warnings.warn(
@@ -625,9 +708,10 @@ class OptunaCallback:
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return
 
+        # The dashboard is built from the study, so it refreshes either way.
         with self._dashboard_lock:
-            self._trial_envs.append(payload["env"])
+            if logged:
+                self._trial_envs.append(env)
             if self.create_dashboard:
                 self._maybe_update_dashboard(study)

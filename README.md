@@ -796,8 +796,9 @@ refresh.
 
 Completed studies with two or three objectives also get a Pareto-front pane.
 Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
-successful writes by the dashboard writer. The explicit final
-`update_dashboard()` includes any trials left since the last scheduled refresh.
+trials by the dashboard writer, including trials that failed to log. The
+explicit final `update_dashboard()` includes any trials left since the last
+scheduled refresh.
 Plotly is only needed for the Optuna visualization panes. Timeline bars preserve
 each trial's true duration, and a fixed-size marker at the true start time keeps
 even sub-pixel trials visible and hoverable without exaggerating their runtime.
