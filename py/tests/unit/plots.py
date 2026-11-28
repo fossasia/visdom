@@ -91,6 +91,42 @@ def test_line_y_2d_x_1d_broadcasts(capture_send):
     assert "data" in sent["payload"]
 
 
+def test_line_y_1d_x_column_vector(capture_send):
+    """(N,1) X is flattened even when Y is already 1D."""
+    Y = np.array([1.0, 2.0, 3.0])
+    X = np.array([[0.0], [1.0], [2.0]])
+    sent = capture_send(lambda v: v.line(Y, X=X))
+    (trace,) = sent["payload"]["data"]
+    assert trace["x"] == [0.0, 1.0, 2.0]
+    assert trace["y"] == [1.0, 2.0, 3.0]
+
+
+def test_line_y_2d_x_column_vector_is_shared(capture_send):
+    """(N,1) X is shared by every line of a 2D Y."""
+    Y = np.array([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]])
+    X = np.array([[0.0], [1.0], [2.0]])
+    sent = capture_send(lambda v: v.line(Y, X=X))
+    traces = sent["payload"]["data"]
+    assert [t["x"] for t in traces] == [[0.0, 1.0, 2.0]] * 2
+    assert [t["y"] for t in traces] == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+
+
+def test_line_y_1d_z_column_vector(capture_send):
+    """(N,1) Z is flattened even when Y is already 1D."""
+    Y = np.array([1.0, 2.0, 3.0])
+    X = np.array([0.0, 1.0, 2.0])
+    Z = np.array([[7.0], [8.0], [9.0]])
+    sent = capture_send(lambda v: v.line(Y, X=X, Z=Z))
+    (trace,) = sent["payload"]["data"]
+    assert trace["z"] == [7.0, 8.0, 9.0]
+
+
+def test_line_x_with_several_columns_still_raises(offline_client):
+    """Only single-column X is flattened; a mismatched 2D X still raises."""
+    with pytest.raises(AssertionError, match="X and Y should be the same shape"):
+        offline_client.line(np.ones((3, 2)), X=np.ones((3, 3)))
+
+
 def test_line_update_append_requires_x(offline_client):
     """update='append' without X raises before sending."""
     with pytest.raises(AssertionError):
