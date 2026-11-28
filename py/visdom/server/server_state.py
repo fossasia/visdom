@@ -24,8 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import tornado.ioloop
 
-from visdom.server.defaults import MAX_SOCKET_WAIT
-from visdom.utils.server_utils import run_on_storage_executor, snapshot_env
+from visdom.server.defaults import MAX_SOCKET_WAIT, MIN_ENV_IDLE_SECONDS
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    run_on_storage_executor,
+    snapshot_env,
+)
 from visdom.utils.shared_utils import warn_once
 
 
@@ -106,6 +110,17 @@ class StateAccessorsMixin:
     def live_updates(self):
         return self.server_state.live_updates
 
+    def track_saved_changes(self, future, covered):
+        self.server_state.track_saved_changes(future, covered)
+
+    @property
+    def dirty_envs(self):
+        return self.server_state.dirty_envs
+
+    @property
+    def held_envs(self):
+        return self.server_state.held_envs
+
     @property
     def deleting_envs(self):
         return self.server_state.deleting_envs
@@ -145,6 +160,7 @@ class ServerState:
         max_plot_history,
         save_interval,
         save_threshold,
+        env_idle_seconds=0,
     ):
         # Shared mutable containers (passed by reference, never rebound here).
         self.state = state
@@ -167,6 +183,12 @@ class ServerState:
         self.max_plot_history = max_plot_history
         self.save_interval = save_interval
         self.save_threshold = save_threshold
+        if env_idle_seconds < 0 or 0 < env_idle_seconds < MIN_ENV_IDLE_SECONDS:
+            raise ValueError(
+                "env_idle_seconds must be 0 (off) or at least %d seconds"
+                % MIN_ENV_IDLE_SECONDS
+            )
+        self.env_idle_seconds = env_idle_seconds
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go
@@ -174,6 +196,17 @@ class ServerState:
         self._layouts = self._load_layouts()
         self._socket_wrap_monitor = None
         self.dirty_envs = Counter()
+        self._pending_save_counts = {}
+        # When each environment last took a write, on the monotonic clock. Read
+        # by ``evict_idle_envs`` to tell an env that is merely resident from one
+        # that is in use; only kept while eviction is on, and pruned by it.
+        self.last_dirty = {}
+        # Envs a request is relying on staying resident -- one being written
+        # directly, or read across awaits. Kept apart from ``dirty_envs``: that
+        # counter belongs to the autosave, which subtracts what it recorded when
+        # its write settles, and a second owner would be released twice.
+        self.held_envs = Counter()
+        self.env_eviction = None
         self.saving_envs = set()
         # Environments whose removal is queued or running on the worker. A read
         # that started before one of those deletes must not file what it read
@@ -252,6 +285,8 @@ class ServerState:
         waiting for the next tick.
         """
         self.dirty_envs[eid] += 1
+        if self.env_idle_seconds > 0:
+            self.last_dirty[eid] = time.monotonic()
         if 0 < self.save_threshold <= self.dirty_envs[eid]:
             self.flush_envs([eid])
 
@@ -290,30 +325,54 @@ class ServerState:
         future = run_on_storage_executor(
             self, self.storage.save_envs, snapshots, list(snapshots)
         )
+        self.track_saved_changes(future, pending)
         future.add_done_callback(lambda done: self._settle_flush(done, pending))
         return future
 
     def _settle_flush(self, future, pending):
-        """Clear the marks the completed write covered, and only those.
-
-        An environment changed while its write was in flight was not in the
-        snapshot the worker serialized, so its mark is decremented by what was
-        written rather than cleared: the change stays pending for the next
-        pass. One the backend declined, or a write that raised, keeps its mark
-        in full and is retried.
-        """
+        """Release the autosave slot and report storage errors."""
         self.saving_envs.difference_update(pending)
+        if future.cancelled():
+            return
         try:
-            written = future.result()
+            future.result()
         except Exception:
             logging.exception("Automatic environment save failed; will retry")
             return
-        for eid in written:
-            remaining = self.dirty_envs.get(eid, 0) - pending[eid]
-            if remaining > 0:
-                self.dirty_envs[eid] = remaining
-            else:
-                self.dirty_envs.pop(eid, None)
+
+    def track_saved_changes(self, future, covered):
+        """Share acknowledgement of dirty marks across manual and automatic saves.
+
+        Two snapshots can cover the same edits. Each successful write takes
+        those marks out of the other pending counts before they can settle.
+        """
+        token = object()
+        originals = {eid: dict.get(self.state, eid) for eid in covered}
+        for eid, count in covered.items():
+            self._pending_save_counts.setdefault(eid, {})[token] = count
+
+        def settle(done):
+            written = set()
+            if not done.cancelled() and done.exception() is None:
+                result = done.result()
+                # save_env reports success for its one ID with a boolean.
+                # save_envs and save_all return the IDs actually written.
+                written = covered if result is True else set(result or ())
+            for eid in covered:
+                pending = self._pending_save_counts[eid]
+                count = pending.pop(token)
+                if eid in written and dict.get(self.state, eid) is originals[eid]:
+                    remaining = self.dirty_envs[eid] - count
+                    if remaining > 0:
+                        self.dirty_envs[eid] = remaining
+                    else:
+                        self.dirty_envs.pop(eid, None)
+                    for other in pending:
+                        pending[other] = max(0, pending[other] - count)
+                if not pending:
+                    del self._pending_save_counts[eid]
+
+        future.add_done_callback(settle)
 
     def flush_dirty(self):
         """Persist every environment changed since the last save."""
@@ -331,6 +390,132 @@ class ServerState:
             )
             self.autosave.start()
         return self.autosave
+
+    def _last_touched(self, eid, env):
+        """When ``eid`` was last read or written, or ``None`` if never this run."""
+        stamps = [self.last_dirty.get(eid)]
+        if isinstance(env, LazyEnvData):
+            stamps.append(env.last_access)
+        accessed = getattr(self.state, "accessed", None)
+        if accessed is not None:
+            stamps.append(accessed.get(eid))
+        stamps = [stamp for stamp in stamps if stamp is not None]
+        return max(stamps) if stamps else None
+
+    def _evictable(self, eid, env, now):
+        """Whether ``eid`` is idle, resident and safe to drop right now."""
+        if (
+            env is None
+            or eid in self.dirty_envs
+            or eid in self.saving_envs
+            or eid in self.deleting_envs
+            or self.held_envs.get(eid)
+            or self.env_delete_watches.get(eid)
+        ):
+            return False
+        if isinstance(env, LazyEnvData) and not env.is_loaded:
+            return False
+        touched = self._last_touched(eid, env)
+        return touched is not None and now - touched >= self.env_idle_seconds
+
+    def _viewed_envs(self):
+        viewed = set()
+        for subscriber in self.subs.values():
+            selection = getattr(subscriber, "eid", None)
+            if isinstance(selection, str):
+                viewed.add(selection)
+            elif isinstance(selection, (list, tuple)):
+                viewed.update(selection)
+        return viewed
+
+    def _existing_envs(self, eids):
+        return {eid for eid in eids if self.storage.env_exists(eid)}
+
+    async def evict_idle_envs(self):
+        """Drop saved, idle environments from memory; return the ids dropped.
+
+        Without this every environment a client has ever opened or written to
+        stays in ``state`` until it is deleted or the server restarts, so a
+        long-lived server only ever grows. An env goes back to a cold
+        ``LazyEnvData`` -- the same thing it was at startup -- once it has been
+        untouched for ``env_idle_seconds`` and its on-disk copy is current, and
+        is read back transparently the next time anything asks for it.
+
+        Skipped, because dropping them would lose or resurrect data: anything
+        dirty, being written, or being deleted; anything with no file on disk;
+        and anything not touched at all since startup, such as an env loaded
+        with ``-eager_data_loading`` that nobody has asked for. Browser views
+        and requests using an env across awaits keep it resident.
+
+        The file check runs on the storage worker, behind any queued write, so a
+        slow filesystem never stalls the loop. Everything is decided again on
+        the loop once it answers, because the env may have been used meanwhile.
+        """
+        if self.env_idle_seconds <= 0 or self.env_path is None:
+            return []
+        now = time.monotonic()
+        accessed = getattr(self.state, "accessed", None)
+        # Startup can register thousands of disk-only environments. Only an
+        # access or write can have made one eligible for eviction.
+        touched = (
+            self.last_dirty.keys() | accessed.keys()
+            if accessed is not None
+            else self.state.keys()
+        )
+        viewed = self._viewed_envs()
+        candidates = []
+        for eid in touched:
+            env = dict.get(self.state, eid)
+            if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+                self.last_dirty.pop(eid, None)
+                if accessed is not None:
+                    accessed.pop(eid, None)
+            elif eid not in viewed and self._evictable(eid, env, now):
+                candidates.append(eid)
+        evicted = []
+        if candidates:
+            try:
+                present = await tornado.ioloop.IOLoop.current().run_in_executor(
+                    self.storage_executor, self._existing_envs, candidates
+                )
+            except Exception:
+                logging.warning(
+                    "Idle environment check failed; will retry", exc_info=True
+                )
+                return []
+            now = time.monotonic()
+            viewed = self._viewed_envs()
+            for eid in candidates:
+                env = dict.get(self.state, eid)
+                if eid in viewed or not self._evictable(eid, env, now):
+                    continue
+                if eid not in present:
+                    logging.debug("Not evicting %r: no file on disk", eid)
+                    continue
+                if isinstance(env, LazyEnvData):
+                    env.unload()
+                else:
+                    self.state[eid] = LazyEnvData(self.storage, eid)
+                self.last_dirty.pop(eid, None)
+                if accessed is not None:
+                    accessed.pop(eid, None)
+                evicted.append(eid)
+        return evicted
+
+    def eviction_interval_ms(self):
+        """How often the idle sweep runs.
+
+        A few times per idle period keeps an env from overstaying by much,
+        without scanning ``state`` more than once a second or waiting longer
+        than a minute between sweeps.
+        """
+        return max(1.0, min(60.0, self.env_idle_seconds / 4.0)) * 1000
+
+    def stop_env_eviction(self):
+        """Stop the idle sweep; started by ``Application.start_env_eviction``."""
+        if self.env_eviction is not None:
+            self.env_eviction.stop()
+            self.env_eviction = None
 
     def stop_autosave(self):
         """Stop the timer, so no further tick can queue a write."""
@@ -371,6 +556,7 @@ class ServerState:
             if self._storage_shut_down:
                 return
             self.stop_autosave()
+            self.stop_env_eviction()
             self.storage_executor.shutdown(wait=True)
             self.storage.save_all(self.state)
             self._storage_shut_down = True
