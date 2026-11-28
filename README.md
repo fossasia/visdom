@@ -1121,6 +1121,32 @@ We currently assume that there are no more than 10 unique labels, in the future 
 
 From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
 
+#### vis.update_window_opts
+
+Updates the supplied options of an existing window without replacing its plot data.
+Omitted options and options set to `None` are left unchanged. For example, changing
+only a title preserves the legend, axis ranges and custom margins:
+
+```python
+vis.update_window_opts("loss", {"title": "Loss: epoch 5"})
+```
+
+To explicitly clear a layout object, pass an empty dictionary through
+`layoutopts["plotly"]`. For example, this removes the existing x-axis settings
+(including its range and title) while leaving the y-axis and margins unchanged:
+
+```python
+vis.update_window_opts("loss", {"layoutopts": {"plotly": {"xaxis": {}}}})
+```
+
+Nonempty layout dictionaries merge with existing settings; `None` fields remain
+unchanged. Setting `tight_layout=False` restores the normal margins and disables
+automatic margin expansion on both 2D axes, preserving their other settings.
+
+Upgrade the Python client and server together to obtain all layout-preservation
+behavior. With an older client or server, the previous legend/margin resets or
+replacement of nested axis settings can still occur.
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list of env ids to be saved.
 

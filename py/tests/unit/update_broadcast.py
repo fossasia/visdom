@@ -947,6 +947,43 @@ def test_an_empty_append_leaves_the_pane_exactly_as_it_was(x, y):
     assert updated == before
 
 
+@pytest.mark.parametrize(
+    "axis_update,expected_axis",
+    [
+        ({"title": {"text": "epoch"}}, {"range": [0, 5], "title": {"text": "epoch"}}),
+        ({}, {}),
+        ({"title": {}}, {"range": [0, 5], "title": {}}),
+        (
+            {"title": {"font": {"size": None}}},
+            {"range": [0, 5], "title": {"text": "step"}},
+        ),
+        (
+            {"title": {"text": None, "font": {}}},
+            {"range": [0, 5], "title": {"text": "step", "font": {}}},
+        ),
+    ],
+)
+def test_options_only_layout_patch_preserves_unmentioned_fields(
+    axis_update, expected_axis
+):
+    pane = plot_pane()
+    pane["content"]["layout"].update(
+        showlegend=True,
+        xaxis={"range": [0, 5], "title": {"text": "step"}},
+        margin={"l": 5, "r": 10, "t": 15, "b": 20},
+    )
+    before = copy.deepcopy(pane)
+    updated, ops = UpdateHandler.update_packet(
+        pane, {"layout": {"xaxis": axis_update}}, *CAPS
+    )
+    assert jsonpatch.apply_patch(before, ops) == updated
+    assert updated["content"]["layout"]["xaxis"] == expected_axis
+    assert updated["content"]["layout"]["showlegend"] is True
+    assert (
+        updated["content"]["layout"]["margin"] == before["content"]["layout"]["margin"]
+    )
+
+
 def test_the_empty_append_fast_path_agrees_with_the_diffed_path(monkeypatch):
     """Both paths say nothing, which is the whole claim the fast path makes.
 

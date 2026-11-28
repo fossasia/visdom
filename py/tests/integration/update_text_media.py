@@ -20,6 +20,7 @@ import unittest
 
 import pytest
 
+from visdom import _opts2layout
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args
 
@@ -219,6 +220,145 @@ class OptsOnlyUpdateTestCase(VisdomHTTPTestCase):
         resp = self.push_title(win, title)
         self.assertEqual(resp.code, 200, resp.body)
         self.assertEqual(self.get_win_data(win)["title"], title)
+
+
+class TestPlotLayoutOptions(VisdomHTTPTestCase):
+    def test_raw_none_only_title_updates_preserve_legacy_title(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"title": "old", "showlegend": True},
+        )
+        for title_update in (
+            {"text": None},
+            {"font": {"size": None}},
+            {"text": None, "font": {"size": None}},
+        ):
+            with self.subTest(title_update=title_update):
+                response = self.update(win, None, layout={"title": title_update})
+                self.assertEqual(response.code, 200, response.body)
+                self.assertEqual(
+                    self.get_win_data(win)["content"]["layout"],
+                    {"title": "old", "showlegend": True},
+                )
+        response = self.update(win, None, layout={"title": {}})
+        self.assertEqual(response.code, 200, response.body)
+        self.assertEqual(self.get_win_data(win)["content"]["layout"]["title"], {})
+
+    def test_raw_layout_replacement_discards_nested_null_fields(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"title": "old"},
+        )
+        response = self.update(
+            win,
+            None,
+            layout={
+                "title": {"text": None, "font": {"size": 18, "color": None}},
+                "xaxis": {"title": {"text": None}, "range": [0, 5]},
+            },
+        )
+        self.assertEqual(response.code, 200, response.body)
+        self.assertEqual(
+            self.get_win_data(win)["content"]["layout"],
+            {"title": {"font": {"size": 18}}, "xaxis": {"range": [0, 5]}},
+        )
+
+    def test_empty_axis_update_clears_existing_settings(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"xaxis": {"range": [0, 5]}, "showlegend": True},
+        )
+        response = self.update(win, None, layout={"xaxis": {}})
+        assert response.code == 200, response.body
+        assert self.get_win_data(win)["content"]["layout"] == {
+            "xaxis": {},
+            "showlegend": True,
+        }
+
+    def test_tight_layout_can_be_disabled_without_dropping_axis_range(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout=_opts2layout(
+                {
+                    "tight_layout": True,
+                    "xlabel": "epoch",
+                    "ylabel": "score",
+                    "xtickmin": 0,
+                    "xtickmax": 5,
+                }
+            ),
+        )
+        for tight in (False, True, False):
+            response = self.update(
+                win, None, layout=_opts2layout({"tight_layout": tight}, partial=True)
+            )
+            assert response.code == 200, response.body
+            layout = self.get_win_data(win)["content"]["layout"]
+            assert layout["xaxis"]["automargin"] is tight
+            assert layout["yaxis"]["automargin"] is tight
+            assert layout["xaxis"]["range"] == [0, 5]
+            assert layout["xaxis"]["title"] == {"text": "epoch"}
+            assert layout["margin"] == (
+                {"l": 0, "r": 0, "t": 30, "b": 0}
+                if tight
+                else {"l": 60, "r": 60, "t": 60, "b": 60}
+            )
+
+    def test_data_update_reaches_layout_replacement_branch(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"xaxis": {"range": [0, 5]}},
+        )
+        response = self.update(
+            win,
+            [{"type": "scatter", "x": [2, 3], "y": [3, 4]}],
+            layout={"xaxis": {"title": {"text": "epoch"}}},
+            append=False,
+        )
+        assert response.code == 200, response.body
+        content = self.get_win_data(win)["content"]
+        assert content["layout"]["xaxis"] == {"title": {"text": "epoch"}}
+        assert content["data"][0]["x"] == [2, 3]
+
+    def test_axis_label_update_keeps_range_and_title_font(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={
+                "showlegend": True,
+                "xaxis": {
+                    "range": [0, 5],
+                    "title": {"text": "step", "font": {"size": 18}},
+                },
+                "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+            },
+        )
+        response = self.update(
+            win, None, layout={"xaxis": {"title": {"text": "epoch"}}}
+        )
+        assert response.code == 200, response.body
+        layout = self.get_win_data(win)["content"]["layout"]
+        assert layout == {
+            "showlegend": True,
+            "xaxis": {
+                "range": [0, 5],
+                "title": {"text": "epoch", "font": {"size": 18}},
+            },
+            "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+        }
+
+    def test_margin_update_keeps_other_sides(self):
+        win = self.create_window(
+            [{"type": "scatter", "x": [0, 1], "y": [1, 2]}],
+            layout={"margin": {"l": 5, "r": 10, "t": 15, "b": 20}},
+        )
+        response = self.update(win, None, layout={"margin": {"l": 7}})
+        assert response.code == 200, response.body
+        assert self.get_win_data(win)["content"]["layout"]["margin"] == {
+            "l": 7,
+            "r": 10,
+            "t": 15,
+            "b": 20,
+        }
 
 
 class TestOptsOnlyUpdate(

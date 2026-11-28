@@ -751,8 +751,27 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def _merge_layout_options(layout, updates):
+    """Ignore None-only dicts; an explicit empty dict resets that layout object."""
+    for name, value in updates.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and value:
+            nested_layout = layout.get(name)
+            if not isinstance(nested_layout, dict):
+                nested_layout = {}
+            _merge_layout_options(nested_layout, value)
+            if nested_layout:
+                layout[name] = nested_layout
+        else:
+            layout[name] = value
+
+
 def update_window(p, args):
     """Merge an update's ``layout``/``opts``/``legend`` into an existing window.
+
+    Options-only updates merge nested layout fields. Content updates retain
+    their top-level layout replacement behavior.
 
     Does not touch ``p["version"]``. That counter sequences the incremental
     ``window_update`` broadcast, and only some updates reach this helper --
@@ -764,9 +783,12 @@ def update_window(p, args):
     has_layout = isinstance(content, dict) and isinstance(content.get("layout"), dict)
     layout_update = args.get("layout", {})
     if has_layout:
-        for layout_name, layout_val in layout_update.items():
-            if layout_val is not None:
-                content["layout"][layout_name] = layout_val
+        if not args.get("data") and not args.get("delete") and args.get("name") is None:
+            _merge_layout_options(content["layout"], layout_update)
+        else:
+            for layout_name, layout_val in layout_update.items():
+                if layout_val is not None:
+                    content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:

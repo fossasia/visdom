@@ -14,6 +14,8 @@ subsequent ``/update`` mutates it. Both are pure, and both were previously
 covered only indirectly through HTTP tests.
 """
 
+from copy import deepcopy
+
 import pytest
 
 from visdom.utils.server_utils import update_window, window
@@ -249,6 +251,136 @@ def test_unmentioned_layout_keys_survive(plot_pane):
 def test_new_layout_keys_are_added(plot_pane):
     update_window(plot_pane, {"layout": {"xaxis": {"type": "log"}}})
     assert plot_pane["content"]["layout"]["xaxis"] == {"type": "log"}
+
+
+def test_options_only_layout_update_preserves_nested_fields(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout.update(
+        xaxis={"range": [0, 5], "title": {"text": "old", "font": {"size": 18}}},
+        margin={"l": 5, "r": 10, "t": 15, "b": 20},
+    )
+    update_window(
+        plot_pane,
+        {"layout": {"xaxis": {"title": {"text": "epoch"}}, "margin": {"l": 7}}},
+    )
+    assert layout["xaxis"] == {
+        "range": [0, 5],
+        "title": {"text": "epoch", "font": {"size": 18}},
+    }
+    assert layout["margin"] == {"l": 7, "r": 10, "t": 15, "b": 20}
+
+
+def test_options_only_layout_update_replaces_range_array(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout["xaxis"] = {"range": [0, 5], "title": {"text": "epoch"}}
+    update_window(plot_pane, {"layout": {"xaxis": {"range": [2, 8]}}})
+    assert layout["xaxis"] == {"range": [2, 8], "title": {"text": "epoch"}}
+
+
+def test_none_window_options_preserve_existing_plot(capture_send, plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout.update(
+        showlegend=True,
+        xaxis={"range": [0, 5]},
+        margin={"l": 5, "r": 10, "t": 15, "b": 20},
+    )
+    sent = capture_send(
+        lambda v: v.update_window_opts(
+            "w1", {"title": "new", "legend": None, "tight_layout": None}
+        )
+    )
+    update_window(plot_pane, sent["payload"])
+    assert layout == {
+        "title": {"text": "new"},
+        "showlegend": True,
+        "xaxis": {"range": [0, 5]},
+        "margin": {"l": 5, "r": 10, "t": 15, "b": 20},
+    }
+
+
+def test_content_update_keeps_layout_replacement_semantics(plot_pane):
+    layout = plot_pane["content"]["layout"]
+    layout["xaxis"] = {"range": [0, 5]}
+    update_window(
+        plot_pane,
+        {"data": [plot_data()], "layout": {"xaxis": {"title": {"text": "new"}}}},
+    )
+    assert layout["xaxis"] == {"title": {"text": "new"}}
+
+
+@pytest.mark.parametrize(
+    "reset,expected",
+    [
+        ({"xaxis": {}}, {"xaxis": {}, "margin": {"l": 5}}),
+        (
+            {"xaxis": {"title": {}}},
+            {"xaxis": {"range": [0, 5], "title": {}}, "margin": {"l": 5}},
+        ),
+        (
+            {"margin": {}},
+            {"xaxis": {"range": [0, 5], "title": {"text": "epoch"}}, "margin": {}},
+        ),
+    ],
+)
+def test_empty_layout_dict_explicitly_resets_object(
+    capture_send, plot_pane, reset, expected
+):
+    plot_pane["content"]["layout"] = {
+        "xaxis": {"range": [0, 5], "title": {"text": "epoch"}},
+        "margin": {"l": 5},
+    }
+    sent = capture_send(
+        lambda v: v.update_window_opts("w1", {"layoutopts": {"plotly": reset}})
+    )
+    update_window(plot_pane, sent["payload"])
+    assert plot_pane["content"]["layout"] == expected
+
+
+def test_none_nested_layout_fields_do_not_clear_axis(capture_send, plot_pane):
+    plot_pane["content"]["layout"] = {"xaxis": {"range": [0, 5]}}
+    sent = capture_send(
+        lambda v: v.update_window_opts(
+            "w1", {"layoutopts": {"plotly": {"xaxis": {"range": None}}}}
+        )
+    )
+    update_window(plot_pane, sent["payload"])
+    assert plot_pane["content"]["layout"] == {"xaxis": {"range": [0, 5]}}
+
+
+@pytest.mark.parametrize(
+    "initial",
+    [{}, {"title": "old"}, {"title": {"text": "old", "font": {"size": 18}}}],
+)
+@pytest.mark.parametrize("title_update", [{"text": None}, {"font": {"size": None}}])
+def test_raw_none_only_layout_dict_is_omitted(plot_pane, initial, title_update):
+    plot_pane["content"]["layout"] = deepcopy(initial)
+    update_window(plot_pane, {"layout": {"title": title_update}})
+    assert plot_pane["content"]["layout"] == initial
+
+
+def test_raw_layout_replacements_omit_none_and_keep_explicit_values(plot_pane):
+    updates = {
+        "title": {"text": None, "font": {"size": 18, "color": None}},
+        "xaxis": {"range": None, "autorange": False},
+        "margin": {"l": 0},
+    }
+    original = deepcopy(updates)
+    update_window(plot_pane, {"layout": updates})
+    assert plot_pane["content"]["layout"] == {
+        "title": {"font": {"size": 18}},
+        "showlegend": False,
+        "xaxis": {"autorange": False},
+        "margin": {"l": 0},
+    }
+    assert updates == original
+
+
+@pytest.mark.parametrize("title_update", [{}, {"font": {}}, {"text": None, "font": {}}])
+def test_raw_empty_dict_resets_survive_normalization(plot_pane, title_update):
+    update_window(plot_pane, {"layout": {"title": title_update}})
+    assert plot_pane["content"]["layout"]["title"] == (
+        {} if not title_update else {"font": {}}
+    )
 
 
 @pytest.mark.parametrize("args", [{"layout": {"title": None}}, {}])
