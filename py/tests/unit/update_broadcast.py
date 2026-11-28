@@ -881,6 +881,17 @@ def test_the_marker_check_looks_at_the_trace_the_label_pairs_with():
     assert_patches_agree(pane, args)
 
 
+def test_a_label_taking_a_trace_added_by_name_keeps_the_diffed_path():
+    """The trace gets a label as well as points, which an index patch can't say."""
+    pane = labelled_pane(["1", "2"], [1, None])
+    args = labelled_args(2)
+    args["data"][0]["name"] = "2"
+
+    assert UpdateHandler.appendable(pane, args) is False
+    ops = assert_patches_agree(pane, args)
+    assert any(op["path"].startswith("/trace_labels") for op in ops), ops
+
+
 def test_an_append_without_labels_to_a_labelled_pane_goes_by_position():
     pane = labelled_pane(["2", "1"], [1, 2])
     args = trace_append_args(traces=1)

@@ -338,14 +338,39 @@ class TestAppendByLabel(PlotUpdateTestCase):
         self.assertEqual(self.xs("removed"), [("1", [0.0]), ("3", [2.0, 9.0])])
         self.assertEqual(self.get_win_data("removed")["trace_labels"], [1, 3])
 
-    def test_a_trace_added_by_name_is_not_taken_for_a_label(self):
+    def test_a_label_joins_a_trace_added_by_name_with_its_name(self):
         vis = self.client()
         self.scatter(vis, "named", [1])
         vis.scatter(
             np.array([[5.0, 5.0]]), win="named", env="main", update="append", name="2"
         )
         self.scatter(vis, "named", [2], x0=9, update="append")
-        self.assertEqual(self.xs("named"), [("1", [0.0]), ("2", [5.0]), ("2", [9.0])])
+        self.assertEqual(self.xs("named"), [("1", [0.0]), ("2", [5.0, 9.0])])
+        self.assertEqual(self.get_win_data("named")["trace_labels"], [1, 2])
+
+    def test_a_new_label_is_named_by_the_legend_the_plot_was_made_with(self):
+        """Not "2", which the legend gave label 1."""
+        vis = self.client()
+        self.scatter(vis, "unsent", [3, 1], opts={"legend": ["2", "1", "3"]})
+        self.scatter(vis, "unsent", [1, 2], x0=8, update="append")
+        self.assertEqual(
+            self.xs("unsent"), [("2", [1.0, 8.0]), ("3", [0.0]), ("1", [9.0])]
+        )
+
+    def test_a_label_appended_after_its_trace_was_removed_gets_one_trace(self):
+        vis = self.client()
+        self.scatter(vis, "gone", [1, 3], opts={"legend": ["2", "1", "3"]})
+        vis.scatter(None, win="gone", env="main", update="remove", name="3")
+        self.scatter(vis, "gone", [2, 3], x0=8, update="append")
+        self.assertEqual(self.xs("gone"), [("2", [0.0]), ("1", [8.0]), ("3", [9.0])])
+
+    def test_a_legend_set_with_update_window_opts_names_traces_by_label(self):
+        vis = self.client()
+        self.scatter(vis, "opts", [3])
+        vis.update_window_opts(win="opts", env="main", opts={"legend": ["2", "1", "3"]})
+        self.assertEqual(self.xs("opts"), [("3", [0.0])])
+        self.scatter(vis, "opts", [2], x0=9, update="append")
+        self.assertEqual(self.xs("opts"), [("3", [0.0]), ("1", [9.0])])
 
     def test_a_line_appends_to_its_lines(self):
         vis = self.client()

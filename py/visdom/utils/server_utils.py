@@ -615,43 +615,72 @@ def trace_labels_ok(labels, data):
     )
 
 
-def labelled_update(p, args):
-    """The label of each trace of ``p``, if ``args`` is a labelled update to it.
+def pane_labels(p):
+    """The label of each trace of plot pane ``p``, or None.
 
     A scatter given labels sends the label of each trace, and the pane keeps
-    them in ``trace_labels``. An unnamed update that sends them, to a pane that
-    holds one for each of its traces, is matched and renamed by label. For
-    anything else this is None, and the traces are matched by position.
+    them in ``trace_labels``; a trace added another way has None. A pane that
+    doesn't hold one for each of its traces has none.
     """
     content = p.get("content")
     pdata = content.get("data") if isinstance(content, dict) else None
     labels = p.get("trace_labels")
-    if (
-        args.get("name") is None
-        and trace_labels_ok(args.get("trace_labels"), args.get("data"))
-        and isinstance(labels, list)
-        and isinstance(pdata, list)
-        and len(labels) == len(pdata)
-    ):
-        return labels
+    if isinstance(labels, list) and isinstance(pdata, list):
+        if len(labels) == len(pdata):
+            return labels
     return None
 
 
-def pair_by_label(labels, entry_labels):
+def labelled_update(p, args):
+    """The pane's labels, if ``args`` is a labelled update to ``p``, else None.
+
+    An unnamed update that sends ``trace_labels``, to a pane that has them, is
+    matched by label. Anything else is matched by position.
+    """
+    if args.get("name") is None and trace_labels_ok(
+        args.get("trace_labels"), args.get("data")
+    ):
+        return pane_labels(p)
+    return None
+
+
+def label_trace_name(label, entry, legend):
+    """The name of a new trace for ``label``: its legend entry, if it has one.
+
+    ``legend[k - 1]`` names label number k, also when the update didn't send
+    the legend. Otherwise the trace keeps the name the client gave it.
+    """
+    if isinstance(legend, (list, tuple)) and isinstance(label, int):
+        if label <= len(legend):
+            return legend[label - 1]
+    return entry.get("name") if isinstance(entry, dict) else None
+
+
+def pair_by_label(labels, entry_labels, names=None, new_names=None):
     """The trace each entry goes to, by label, with None for a new trace.
 
     A label number k and a label value "k" are the same label: a scatter names
     both traces "k", and a batch of 0-based class ids holding no 0 is sent as
-    label numbers.
+    label numbers. An entry whose label has no trace yet joins a trace without
+    a label (one added by name) that already has the name its new trace would
+    get, given as ``names`` and ``new_names``, rather than adding a second
+    trace of that name.
     """
-    free = {}
+    free, unlabelled = {}, {}
     for i, label in enumerate(labels):
         if label is not None:
             free.setdefault(str(label), []).append(i)
-    return [
-        free[str(label)].pop(0) if free.get(str(label)) else None
-        for label in entry_labels
-    ]
+        elif names is not None:
+            unlabelled.setdefault(names[i], []).append(i)
+    idxs = []
+    for at, label in enumerate(entry_labels):
+        if free.get(str(label)):
+            idxs.append(free[str(label)].pop(0))
+        elif new_names is not None and unlabelled.get(new_names[at]):
+            idxs.append(unlabelled[new_names[at]].pop(0))
+        else:
+            idxs.append(None)
+    return idxs
 
 
 def update_window(p, args):
@@ -688,15 +717,15 @@ def update_window(p, args):
         legend = opts["legend"]
         pdata = p["content"]["data"]
         name = args.get("name")
-        labels = labelled_update(p, args)
+        labels = pane_labels(p)
         if name is not None:
             if len(legend) > 0:
                 for d in pdata:
                     if d.get("name") == name:
                         d["name"] = legend[0]
         elif labels is not None:
-            # legend[k - 1] names label number k. A trace of a label value
-            # keeps its name: the client numbers those per call.
+            # legend[k - 1] names label number k, wherever its trace is. A
+            # trace of a label value, or added by name, keeps its name.
             for label, d in zip(labels, pdata):
                 if isinstance(label, int) and label <= len(legend):
                     d["name"] = legend[label - 1]
@@ -808,6 +837,9 @@ def window(args):
         p["type"] = "plot"
         if trace_labels_ok(args.get("trace_labels"), args["data"]):
             p["trace_labels"] = list(args["trace_labels"])
+            # Names the traces of labels the first call didn't have.
+            if isinstance(opts.get("legend"), (list, tuple)):
+                p["legend"] = list(opts["legend"])
 
     return p
 

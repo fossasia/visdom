@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from visdom.utils.server_utils import (
+    label_trace_name,
     labelled_update,
     pair_by_label,
     trace_labels_ok,
@@ -111,6 +112,43 @@ def test_the_pane_keeps_the_labels_it_was_created_with():
     assert pane(["2", "1"], [1, 2])["trace_labels"] == [1, 2]
 
 
+def test_a_labelled_pane_keeps_its_creation_legend():
+    assert pane(["b"], [2], legend=["a", "b"])["legend"] == ["a", "b"]
+
+
+def test_a_pane_without_labels_doesnt_keep_its_legend():
+    """As on dev: only an update writes ``legend`` onto such a pane."""
+    assert "legend" not in pane(["a", "b"], legend=["a", "b"])
+
+
+@pytest.mark.parametrize(
+    "label, legend, name",
+    [
+        (2, ["a", "b"], "b"),
+        (2, ("a", "b"), "b"),
+        (3, ["a", "b"], "3"),
+        (2, None, "2"),
+        ("cat", ["a", "b"], "cat"),
+    ],
+)
+def test_a_new_trace_is_named_by_its_legend_entry(label, legend, name):
+    assert label_trace_name(label, {"name": str(label)}, legend) == name
+
+
+def test_a_new_label_joins_a_trace_added_by_name_with_its_name():
+    """Rather than add a second trace of that name."""
+    idxs = pair_by_label([1, None], [2], ["a", "b"], ["b"])
+    assert idxs == [1]
+
+
+def test_a_trace_with_a_label_is_not_joined_by_name():
+    assert pair_by_label([1, 2], [3], ["a", "b"], ["b"]) == [None]
+
+
+def test_a_trace_added_by_name_is_joined_once():
+    assert pair_by_label([None], [2, 3], ["b"], ["b", "b"]) == [0, None]
+
+
 @pytest.mark.parametrize("labels", [None, [1], [0, 1], "12"])
 def test_a_pane_keeps_no_labels_unless_one_per_trace_was_sent(labels):
     assert "trace_labels" not in pane(["a", "b"], labels)
@@ -160,10 +198,18 @@ def test_a_legend_leaves_traces_past_its_end_and_label_values_alone():
     assert names(p) == ["b", "3", "cat"]
 
 
-def test_a_legend_without_labels_still_renames_by_position():
+def test_a_legend_alone_renames_a_labelled_pane_by_label():
+    """``update_window_opts(legend=...)``: renaming by position put "a" on label 2."""
     p = pane(["2", "3"], [2, 3])
     update_window(p, {"opts": {"legend": ["a", "b", "c"]}})
-    assert names(p) == ["a", "b"]
+    assert names(p) == ["b", "c"]
+
+
+def test_a_legend_leaves_a_trace_added_by_name_alone():
+    p = pane(["1", "extra"], [1, 2])
+    p["trace_labels"] = [1, None]
+    update_window(p, {"opts": {"legend": ["a", "b"]}})
+    assert names(p) == ["a", "extra"]
 
 
 def test_a_legend_on_a_pane_without_labels_still_renames_by_position():
