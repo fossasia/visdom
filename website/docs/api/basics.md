@@ -141,6 +141,34 @@ vis.audio(waveform, opts=dict(sample_frequency=44100))
 Visdom uses scipy to convert tensor inputs to wave files. Some versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
 :::
 
+## vis.spectrogram
+
+```python
+vis.spectrogram(tensor, win=None, env=None, opts=None)
+```
+
+This function draws the spectrogram of a waveform: how loud each frequency is over time, as a heatmap with time in seconds on the x axis and frequency in Hz on the y axis. It takes the waveforms `vis.audio` does: an `N` tensor, an `Nx2` matrix for stereo, or the `(channels, N)` layout that torchaudio and librosa return (`1xN` or `2xN`). Stereo is averaged to mono.
+
+```python
+import numpy as np
+t = np.linspace(0, 2, 2 * 16000, endpoint=False)
+chirp = np.sin(2 * np.pi * (200 + 1800 * t) * t)  # rises from 200 Hz
+vis.spectrogram(chirp, opts=dict(sample_frequency=16000, title='Chirp'))
+```
+
+**Supported opts:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `opts.sample_frequency` | `44100` | Sample frequency (`number` > 0) |
+| `opts.n_fft` | `1024` | Samples per frame (`integer` >= 2) |
+| `opts.hop_length` | `n_fft // 4` | Samples between frames (`integer` from 1 to `n_fft`) |
+| `opts.scale` | `'db'` | `'db'` for the magnitude in dB, `'linear'` for the magnitude itself |
+| `opts.top_db` | `80` | In dB, how far below the loudest value the colours reach (`number` > 0) |
+| `opts.fmax` | half the sample frequency | Highest frequency shown, in Hz (`number` > 0) |
+| `opts.max_columns` | `1000` | Most time columns sent; a longer clip keeps the loudest value of each group of frames (`integer` >= 1) |
+| `opts.colormap` | `'Viridis'` | Colormap |
+
 ## vis.video
 
 ```python

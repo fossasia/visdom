@@ -105,6 +105,7 @@ from components.misc import (
     misc_video_tensor,
     misc_video_download,
     misc_audio_basic,
+    misc_spectrogram,
     misc_audio_download,
     misc_plot_plotly,
     misc_arbitrary_visdom,
@@ -263,6 +264,7 @@ def run_demo(viz, env, args):
     misc_video_tensor(viz, env, args)
     misc_video_download(viz, env, args)
     misc_audio_basic(viz, env, args)
+    misc_spectrogram(viz, env, args)
     misc_audio_download(viz, env, args)
     misc_plot_plotly(viz, env, args)
     misc_arbitrary_visdom(viz, env, args)

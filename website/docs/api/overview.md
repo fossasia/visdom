@@ -73,6 +73,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.text`](./basics.md#vistext) — arbitrary HTML
 - [`vis.properties`](./basics.md#visproperties) — properties grid
 - [`vis.audio`](./basics.md#visaudio) — audio
+- [`vis.spectrogram`](./basics.md#visspectrogram) — spectrogram of a waveform
 - [`vis.video`](./basics.md#visvideo) — videos
 - [`vis.svg`](./basics.md#vissvg) — SVG object
 - [`vis.matplot`](./basics.md#vismatplot) — matplotlib plot

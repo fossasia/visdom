@@ -262,6 +262,86 @@ def _audio_sample_rate(rate, channels):
     return int(rate)
 
 
+def _spectrogram_number(value, name):
+    """Check that ``value`` is a positive number."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
+        raise ValueError("{} should be a number > 0, got {!r}".format(name, value))
+    value = float(value)
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError("{} should be a number > 0, got {!r}".format(name, value))
+    return value
+
+
+def _spectrogram_int(value, name, minimum):
+    """Check that ``value`` is an integer of at least ``minimum``."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Integral):
+        raise ValueError(
+            "{} should be an integer >= {}, got {!r}".format(name, minimum, value)
+        )
+    if value < minimum:
+        raise ValueError(
+            "{} should be an integer >= {}, got {!r}".format(name, minimum, value)
+        )
+    return int(value)
+
+
+def _spectrogram_waveform(tensor):
+    """Return the waveform as mono floats."""
+    if tensor is None:
+        raise ValueError("spectrogram needs a waveform")
+    waveform = np.asarray(tensor)
+    if not np.issubdtype(waveform.dtype, np.number):
+        raise ValueError(
+            "the waveform should hold numbers, got {}".format(waveform.dtype)
+        )
+    if np.iscomplexobj(waveform):
+        raise ValueError("the waveform should be real, not complex")
+    waveform = waveform.astype(float)
+    # torchaudio and librosa give (channels, N); scipy writes (N, channels).
+    if waveform.ndim == 2 and waveform.shape[1] != 2:
+        if waveform.shape[0] == 2:
+            waveform = waveform.T
+        elif 1 in waveform.shape:
+            waveform = waveform.reshape(-1)
+    if not (waveform.ndim == 1 or (waveform.ndim == 2 and waveform.shape[1] == 2)):
+        raise ValueError(
+            "the waveform should be a 1D vector or a 2D matrix with 2 columns "
+            "(or 2 rows), got shape {}".format(np.shape(tensor))
+        )
+    if waveform.ndim == 2:
+        waveform = waveform.mean(axis=1)
+    if waveform.size == 0:
+        raise ValueError("the waveform is empty")
+    if not np.all(np.isfinite(waveform)):
+        raise ValueError("the waveform should only hold finite values")
+    return waveform
+
+
+def _stft_magnitude(waveform, n_fft, hop, max_columns):
+    """STFT magnitude, matching ``scipy.signal.stft`` with a Hann window.
+
+    Frames are max-pooled down to ``max_columns`` and computed in blocks to
+    keep memory low. Returns the magnitudes and the frame index of each column.
+    """
+    window = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(n_fft) / n_fft)
+    edge = n_fft // 2
+    tail = (-(len(waveform) + 2 * edge - n_fft) % hop) % n_fft
+    padded = np.pad(waveform, (edge, edge + tail))
+    frames = np.lib.stride_tricks.sliding_window_view(padded, n_fft)[::hop]
+    n_frames = len(frames)
+    group = -(-n_frames // max_columns)
+    block = group * max(1, 2048 // group)  # a whole number of groups
+    columns = []
+    for start in range(0, n_frames, block):
+        magnitude = np.abs(np.fft.rfft(frames[start : start + block] * window, axis=1))
+        columns.append(
+            np.maximum.reduceat(magnitude, np.arange(0, len(magnitude), group), axis=0)
+        )
+    starts = np.arange(0, n_frames, group)
+    ends = np.minimum(starts + group, n_frames)
+    return np.concatenate(columns).T / window.sum(), (starts + ends - 1) / 2
+
+
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
@@ -3318,6 +3398,91 @@ class Visdom(object):
         content = content.getvalue()
 
         return content, "mp4"
+
+    @pytorch_wrap
+    def spectrogram(self, tensor, win=None, env=None, opts=None):
+        """
+        This function draws the spectrogram of a waveform as a heatmap, with
+        time in seconds and frequency in Hz. It takes the same input as
+        `audio`: an `N` tensor, an `Nx2` matrix, or a `1xN`/`2xN` tensor.
+        Stereo is averaged to mono.
+
+        The following `opts` are supported:
+
+        - `opts.sample_frequency`: sample frequency (`number` > 0; default = 44100)
+        - `opts.n_fft`: samples per frame (`integer` >= 2; default = 1024)
+        - `opts.hop_length`: samples between frames (`integer` from 1 to
+          `n_fft`; default = `n_fft // 4`)
+        - `opts.scale`: `'db'` for the magnitude in dB, `'linear'` for the
+          magnitude itself (`string`; default = `'db'`)
+        - `opts.top_db`: in dB, how far below the loudest value the colours
+          reach (`number` > 0; default = 80)
+        - `opts.fmax`: highest frequency shown, in Hz (`number` > 0;
+          default = half the sample frequency)
+        - `opts.max_columns`: most time columns sent; a longer clip keeps the
+          loudest value of each group of frames (`integer` >= 1; default = 1000)
+        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+        """
+        opts = {} if opts is None else dict(opts)
+        rate = _spectrogram_number(
+            opts.get("sample_frequency", 44100), "sample_frequency"
+        )
+        n_fft = _spectrogram_int(opts.get("n_fft", 1024), "n_fft", 2)
+        hop = _spectrogram_int(opts.get("hop_length", n_fft // 4), "hop_length", 1)
+        if hop > n_fft:
+            raise ValueError(
+                "hop_length should be at most n_fft ({}), got {}".format(n_fft, hop)
+            )
+        scale = opts.get("scale", "db")
+        if scale not in ("db", "linear"):
+            raise ValueError("scale should be 'db' or 'linear', got {!r}".format(scale))
+        top_db = _spectrogram_number(opts.get("top_db", 80), "top_db")
+        fmax = opts.get("fmax")
+        if fmax is not None:
+            fmax = _spectrogram_number(fmax, "fmax")
+        max_columns = _spectrogram_int(opts.get("max_columns", 1000), "max_columns", 1)
+        opts["colormap"] = opts.get("colormap", "Viridis")
+        opts.setdefault("xlabel", "Time (s)")
+        opts.setdefault("ylabel", "Frequency (Hz)")
+        _title2str(opts)
+        _assert_opts(opts)
+
+        waveform = _spectrogram_waveform(tensor)
+        if len(waveform) < n_fft:
+            # pad short clips to one frame
+            waveform = np.pad(waveform, (0, n_fft - len(waveform)))
+        z, frames = _stft_magnitude(waveform, n_fft, hop, max_columns)
+        times = frames * hop / rate
+        freqs = np.arange(n_fft // 2 + 1) * rate / n_fft
+        if scale == "db":
+            z = 20 * np.log10(np.maximum(z, 1e-10))
+            z = np.maximum(z, z.max() - top_db)
+        if fmax is not None:
+            keep = freqs <= fmax
+            keep[0] = True  # at least the 0 Hz row
+            freqs, z = freqs[keep], z[keep]
+        if scale == "db":
+            z = np.round(z, 1)
+
+        data = [
+            {
+                "z": z.tolist(),
+                "x": times.tolist(),
+                "y": freqs.tolist(),
+                "type": "heatmap",
+                "colorscale": opts.get("colormap"),
+                "colorbar": {"title": {"text": "dB" if scale == "db" else "magnitude"}},
+            }
+        ]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
 
     @pytorch_wrap
     def video(
