@@ -72,7 +72,9 @@ setup(
     # Package info
     packages=find_packages(where="py", exclude=["tests", "tests.*"]),
     package_dir={"": "py"},
-    package_data={"visdom": ["static/*.*", "static/**/*", "py.typed", "*.pyi"]},
+    package_data={
+        "visdom": ["static/*.*", "static/**/*", "py.typed", "*.pyi", "VERSION"]
+    },
     include_package_data=True,
     zip_safe=False,
     install_requires=requirements,
