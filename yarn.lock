@@ -2192,10 +2192,10 @@ data-view-byte-offset@^1.0.1:
     es-errors "^1.3.0"
     is-data-view "^1.0.1"
 
-debounce@^3.0.0:
-  version "3.0.0"
-  resolved "https://registry.yarnpkg.com/debounce/-/debounce-3.0.0.tgz#7633adff3bcd92cdfe13370c2f46e87bdb946a1b"
-  integrity sha512-64byRbF0/AirwbuHqB3/ZpMG9/nckDa6ZA0yd6UnaQNwbbemCOwvz2sL5sjXLHhZHADyiwLm0M5qMhltUUx+TA==
+debounce@^4.0.0:
+  version "4.0.0"
+  resolved "https://registry.yarnpkg.com/debounce/-/debounce-4.0.0.tgz#63de5ae349506abf1e386df099b9dba52d1299ce"
+  integrity sha512-o6nMNFRtqLR6mRlyt0b21cgYPSKAEMZFpROIRS9ZRH6hhSJWvGErqeSCJnWyiwVQYMSw7f/DZLilF5YRDwFz7w==
 
 debug@2:
   version "2.6.9"
