@@ -200,6 +200,12 @@ def _refusal_reason(body):
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+# (connect, read) for the login request. Unlike the plot posts it gets a read
+# timeout too: the reply is a small JSON, and without one a server that accepts
+# the connection but never answers blocks Visdom() forever. Matches the async
+# client's CONNECT_TIMEOUT / REQUEST_TIMEOUT.
+LOGIN_TIMEOUT = (20, 20)
+
 KEY_HEADERS = ("X-API-KEY", "X-Visdom-Workspace")
 
 
@@ -1310,6 +1316,9 @@ class Visdom(object):
                     self._session.close()
                 except Exception:
                     pass
+                # Drop the closed session, so a failed login below does not
+                # leave it in place to be returned by the next call.
+                self._session = None
             self._pid = current_pid
             logger.warning("Setting up a new session...")
             sess = _KeySession()
@@ -1324,12 +1333,19 @@ class Visdom(object):
                     {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
                 )
             if self.username:
-                resp = sess.post(
-                    "%s:%s%s" % (self.server, self.port, self.base_url),
-                    json=dict(username=self.username, password=self.password),
-                )
-                if resp.status_code != requests.codes.ok:
-                    raise RuntimeError("Authentication failed")
+                # Close the new session if the login fails or times out, so a
+                # failed attempt does not leave its connection pool open.
+                try:
+                    resp = sess.post(
+                        "%s:%s%s" % (self.server, self.port, self.base_url),
+                        json=dict(username=self.username, password=self.password),
+                        timeout=LOGIN_TIMEOUT,
+                    )
+                    if resp.status_code != requests.codes.ok:
+                        raise RuntimeError("Authentication failed")
+                except BaseException:
+                    sess.close()
+                    raise
                 logger.info("Authentication succeeded")
             self._session = sess
             return sess
