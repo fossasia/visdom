@@ -76,13 +76,13 @@ def resolve_targets(state, changed):
         return []
 
     targets = []
-    for eid in list(state.keys()):
-        env = state.get(eid)
+    for eid, env in state.items():
         if env is None:
             continue
         if not getattr(env, "is_loaded", True):
             continue
-        for win_id, win in list((env.get("jsons") or {}).items()):
+        resident = getattr(env, "resident_data", env)
+        for win_id, win in (resident.get("jsons") or {}).items():
             if not isinstance(win, dict) or win.get("type") != "hparams":
                 continue
             spec = win.get("hparams")
