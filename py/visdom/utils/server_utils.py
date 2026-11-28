@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import errno
+import time
 from collections import OrderedDict
 
 import tornado.escape
@@ -167,18 +168,87 @@ def hash_password_off_loop(password, salt):
 # ------- File management helpers ----- #
 
 
+class AccessTrackingDict(dict):
+    """The server's ``state`` mapping, remembering when each env was last used.
+
+    Idle eviction has to tell an env nobody asks for from one that is merely
+    not being written to, and a plain-dict env cannot say when it was read.
+    Lookups and assignments through ``state[eid]`` / ``state.get(eid)`` stamp
+    ``accessed``; iteration and ``items()`` do not, so a sweep does not keep
+    what it is looking at alive. Building one from an existing mapping stamps
+    nothing: an env nobody has touched since startup has no entry.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.accessed = {}
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.accessed[key] = time.monotonic()
+        return value
+
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.accessed[key] = time.monotonic()
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    # A removed env takes its stamp with it, so ``accessed`` never outgrows the
+    # envs actually held -- whether or not idle eviction is turned on.
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.accessed.pop(key, None)
+
+    def pop(self, key, *default):
+        self.accessed.pop(key, None)
+        return super().pop(key, *default)
+
+    def popitem(self):
+        key, value = super().popitem()
+        self.accessed.pop(key, None)
+        return key, value
+
+    def clear(self):
+        super().clear()
+        self.accessed.clear()
+
+
 class LazyEnvData(Mapping):
     def __init__(self, store, eid):
         self._store = store
         self._eid = eid
         self._raw_dict = None
+        self.last_access = time.monotonic()
 
     @property
     def is_loaded(self):
         """Whether this environment has been materialized in memory."""
         return self._raw_dict is not None
 
+    @property
+    def resident_data(self):
+        """Peek at materialized data for maintenance without recording a user read."""
+        return self._raw_dict
+
+    def unload(self):
+        """Drop the in-memory copy; the next access reads it from disk again.
+
+        Only safe once the on-disk copy is current -- the caller (see
+        ``ServerState.evict_idle_envs``) checks that.
+        """
+        self._raw_dict = None
+
     def lazy_load_data(self):
+        self.last_access = time.monotonic()
         if self._raw_dict is not None:
             return
         self.prime(self._store.load_env(self._eid))
@@ -190,6 +260,7 @@ class LazyEnvData(Mapping):
         """
         if self._raw_dict is not None:
             return
+        self.last_access = time.monotonic()
 
         try:
             raw = dict(env_data)
@@ -267,12 +338,82 @@ def run_on_storage_executor(handler, func, *args):
     )
 
 
+@contextlib.contextmanager
+def hold_envs(handler, eids):
+    """Keep ``eids`` resident for the body of the ``with``.
+
+    Idle eviction skips a held env. For a request that names several envs and
+    yields between reading them: without it, the sweep can drop an env it has
+    already prepared, and the read that follows loads it from disk on the loop.
+    """
+    held = getattr(handler, "held_envs", None)
+    eids = list(eids)
+    if held is None:
+        yield
+        return
+    for eid in eids:
+        held[eid] += 1
+    try:
+        yield
+    finally:
+        for eid in eids:
+            if held.get(eid, 0) > 1:
+                held[eid] -= 1
+            else:
+                held.pop(eid, None)
+
+
+def _hold_unsaved(handler, eids):
+    """Hold ``eids`` resident while a direct write of them is in flight.
+
+    A handler that replaces an env and saves it itself never marks it dirty, so
+    until the write finishes the copy on disk is older than the one in memory.
+    The hold stops idle eviction from reverting it meanwhile. It is not a dirty
+    mark: if the write raises or is cancelled, the hold is dropped and the env
+    is marked dirty properly, so the autosave retries it and settles that mark
+    itself. A write the backend declines -- one with no ``env_path`` to write
+    to -- is not marked, because no retry could ever clear it and the autosave
+    would deep-copy the env on every tick for nothing.
+    """
+    held = getattr(handler, "held_envs", None)
+    dirty = getattr(handler, "dirty_envs", None)
+    if held is None or dirty is None:
+        return lambda future: None
+    eids = list(eids)
+    for eid in eids:
+        held[eid] += 1
+
+    def release(future):
+        failed = future.cancelled() or future.exception() is not None
+        for eid in eids:
+            if held.get(eid, 0) > 1:
+                held[eid] -= 1
+            else:
+                held.pop(eid, None)
+            if failed:
+                dirty[eid] += 1
+
+    return release
+
+
+def _covered_dirty_counts(handler, eids):
+    """Capture dirty counts alongside the snapshot, before submitting its write."""
+    dirty = getattr(handler, "dirty_envs", {})
+    return {eid: dirty[eid] for eid in eids if eid in dirty}
+
+
 def save_env_off_loop(handler, eid):
     """Persist one env off the loop, or ``None`` when there is nothing to write."""
     snapshot = snapshot_env(handler.state[eid])
     if snapshot is None:
         return None
-    return run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+    release = _hold_unsaved(handler, [eid])
+    covered = _covered_dirty_counts(handler, [eid])
+    future = run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+    future.add_done_callback(release)
+    if covered:
+        handler.track_saved_changes(future, covered)
+    return future
 
 
 def save_envs_off_loop(handler, eids):
@@ -284,16 +425,26 @@ def save_envs_off_loop(handler, eids):
     save ran inline.
     """
     eids = list(eids)
-    return run_on_storage_executor(
-        handler, handler.storage.save_envs, snapshot_envs(handler.state, eids), eids
+    snapshots = snapshot_envs(handler.state, eids)
+    release = _hold_unsaved(handler, list(snapshots))
+    covered = _covered_dirty_counts(handler, snapshots)
+    future = run_on_storage_executor(
+        handler, handler.storage.save_envs, snapshots, eids
     )
+    future.add_done_callback(release)
+    if covered:
+        handler.track_saved_changes(future, covered)
+    return future
 
 
 def save_all_off_loop(handler):
     """Persist every materialised env off the loop."""
-    return run_on_storage_executor(
-        handler, handler.storage.save_all, snapshot_state(handler.state)
-    )
+    snapshots = snapshot_state(handler.state)
+    covered = _covered_dirty_counts(handler, snapshots)
+    future = run_on_storage_executor(handler, handler.storage.save_all, snapshots)
+    if covered:
+        handler.track_saved_changes(future, covered)
+    return future
 
 
 def load_env_off_loop(handler, eid):
@@ -411,7 +562,7 @@ def delete_env_off_loop(handler, eid):
 
 
 async def ensure_env_loaded(handler, eid):
-    """Materialise a cold lazy env without blocking the loop on the read.
+    """Return the current env, warming it off-loop, or None if gone or replaced.
 
     A delete that lands while the read is on the worker takes the env out of
     ``state`` and its file off disk, so the read answers with nothing at all.
@@ -425,11 +576,13 @@ async def ensure_env_loaded(handler, eid):
     """
     env = handler.state.get(eid)
     if not isinstance(env, LazyEnvData) or env.is_loaded:
-        return
-    raw = await load_env_off_loop(handler, eid)
+        return env
+    with hold_envs(handler, [eid]):
+        raw = await load_env_off_loop(handler, eid)
     if handler.state.get(eid) is not env:
         return
     env.prime(raw)
+    return env
 
 
 async def ensure_env_present(handler, eid):

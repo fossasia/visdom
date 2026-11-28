@@ -41,6 +41,7 @@ from visdom.utils.server_utils import (
     delete_env_off_loop,
     ensure_env_loaded,
     ensure_env_present,
+    hold_envs,
     check_readonly_message,
     reject_readonly,
     extract_eid,
@@ -1065,7 +1066,8 @@ class CloseHandler(BaseHandler):
         panes = [(key, p_data) for key, p_data in closed if p_data is not None]
         if panes:
             try:
-                await push_deleted_many_off_loop(handler, eid, panes)
+                with hold_envs(handler, [eid]):
+                    await push_deleted_many_off_loop(handler, eid, panes)
             except BaseException:
                 # ``BaseException`` because a cancelled request loses the panes
                 # exactly as a failed write does: the await is where the close
@@ -1215,9 +1217,8 @@ class ForkEnvHandler(BaseHandler):
         # env it was forked from held. The copy also carries the source env's
         # experiment metadata, whose env_id still names the env it was forked
         # from; retarget it so the fork does not answer to its parent's id.
-        source = handler.state[prev_eid]
-        await ensure_env_loaded(handler, prev_eid)
-        if handler.state.get(prev_eid) is not source:
+        source = await ensure_env_loaded(handler, prev_eid)
+        if source is None:
             # the source was deleted while it was being read off the worker,
             # so answer as though it had never been there -- indexing it here
             # would raise, and forking whatever replaced it is not what was
@@ -1263,7 +1264,8 @@ class EnvHandler(BaseHandler):
             if sid in self.subs:
                 eid = escape_eid(args)
                 try:
-                    undo_count = await warm_env(self, eid)
+                    with hold_envs(self, [eid]):
+                        undo_count = await warm_env(self, eid)
                     load_env(
                         self.state,
                         eid,
@@ -1339,16 +1341,17 @@ class CompareHandler(BaseHandler):
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
                 # read costs a worker thread rather than the loop.
-                for eid in eids:
-                    await ensure_env_present(self, eid)
-                compare_envs(
-                    self.state,
-                    eids,
-                    self.subs[sid],
-                    self.storage,
-                    show_all=show_all,
-                    warmed=True,
-                )
+                with hold_envs(self, eids):
+                    for eid in eids:
+                        await ensure_env_present(self, eid)
+                    compare_envs(
+                        self.state,
+                        eids,
+                        self.subs[sid],
+                        self.storage,
+                        show_all=show_all,
+                        warmed=True,
+                    )
             except ValueError:
                 notify(
                     self,
