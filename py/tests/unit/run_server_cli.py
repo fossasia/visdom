@@ -558,3 +558,18 @@ def test_the_static_tree_is_created_when_it_is_missing(offline_downloads, tmp_pa
     _run_download(offline_downloads, target)
     for sub in ("js", "css", "fonts"):
         assert os.path.isdir(target / "static" / sub)
+
+
+def test_idle_eviction_is_off_unless_given(started):
+    assert started()["env_idle_seconds"] == 0
+
+
+def test_idle_eviction_period_is_forwarded(started):
+    assert started("-env_idle_seconds", "600")["env_idle_seconds"] == 600
+
+
+@pytest.mark.parametrize("value", ["-1", "5"])
+def test_a_negative_or_too_short_idle_period_stops_the_command(started, value):
+    with pytest.raises(SystemExit) as excinfo:
+        started("-env_idle_seconds", value)
+    assert excinfo.value.code == 2
