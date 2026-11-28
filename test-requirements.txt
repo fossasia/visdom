@@ -1,5 +1,6 @@
 pytest>=9.2.0
 pytest-cov
+pytest-split
 matplotlib
 plotly>=6.0
 numpy

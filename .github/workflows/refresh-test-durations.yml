@@ -1,0 +1,105 @@
+name: Refresh test durations
+
+# Runs the whole suite in one job every week and records fresh
+# py/tests/.test_durations for pytest-split. A pull request is opened only when
+# the refreshed file makes the slowest shard of "Python Tests" noticeably faster.
+on:
+  schedule:
+    # Mondays 03:00 UTC
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Open a PR even when the predicted gain is small
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-test-durations
+  cancel-in-progress: false
+
+env:
+  SPLITS: 3
+
+jobs:
+  measure:
+    # Forks inherit the schedule; only the main repository refreshes on it.
+    if: github.repository == 'fossasia/visdom' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      refresh: ${{ steps.compare.outputs.refresh }}
+      baseline: ${{ steps.compare.outputs.baseline }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install -r test-requirements.txt
+      - name: Measure the complete suite
+        run: >-
+          pytest -m "not server" -q
+          --store-durations --clean-durations --durations-path "$RUNNER_TEMP/durations.json"
+      - name: Compare the predicted slowest shards
+        id: compare
+        run: |
+          pytest -m "not server" --collect-only -q -p no:warnings > "$RUNNER_TEMP/collection"
+          python .github/scripts/duration_gain.py py/tests/.test_durations "$RUNNER_TEMP/durations.json" "$RUNNER_TEMP/collection" "$SPLITS" | tee "$RUNNER_TEMP/comparison"
+          cat "$RUNNER_TEMP/comparison" >> "$GITHUB_STEP_SUMMARY"
+          echo "baseline=$(git rev-parse HEAD:py/tests/.test_durations)" >> "$GITHUB_OUTPUT"
+          grep '^refresh=' "$RUNNER_TEMP/comparison" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: steps.compare.outputs.refresh == 'true' || inputs.force
+        with:
+          name: test-durations
+          path: ${{ runner.temp }}/durations.json
+
+  open-pr:
+    needs: measure
+    if: needs.measure.outputs.refresh == 'true' || inputs.force
+    runs-on: ubuntu-latest
+    # Only this job can write, and it runs no project code.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: dev
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-durations
+          path: ${{ runner.temp }}/measured
+      - name: Check dev still uses the measured baseline
+        id: current
+        env:
+          BASELINE: ${{ needs.measure.outputs.baseline }}
+        run: |
+          # If dev got a newer durations file meanwhile, the comparison no longer
+          # holds; skip and let the next run compare against it.
+          if [ "$(git rev-parse HEAD:py/tests/.test_durations)" = "$BASELINE" ]; then
+            cp "$RUNNER_TEMP/measured/durations.json" py/tests/.test_durations
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: peter-evans/create-pull-request@v8
+        if: steps.current.outputs.apply == 'true'
+        with:
+          # PRs opened with GITHUB_TOKEN do not start other workflows. Set the
+          # DURATIONS_PR_TOKEN secret to have CI run on this pull request.
+          token: ${{ secrets.DURATIONS_PR_TOKEN || github.token }}
+          base: dev
+          branch: chore/refresh-test-durations
+          add-paths: py/tests/.test_durations
+          commit-message: Refresh test durations
+          title: Refresh test durations
+          body: Updates the pytest-split shard timings using the [timing run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          delete-branch: true
