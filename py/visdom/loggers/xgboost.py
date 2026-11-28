@@ -7,6 +7,8 @@
 
 import datetime
 import functools
+import hashlib
+import json
 import warnings
 
 try:
@@ -63,6 +65,22 @@ class VisdomXGBLogger(TrainingCallback):
             callbacks=[callback],
         )
 
+    Points are plotted at the model's own boosting round, so training on
+    from xgb_model= doesn't start again at round 0. Which window a run uses
+    depends on the model it starts from:
+
+    - the model the curve ended with, or a saved copy of it: the curve is
+      continued in its window
+    - any other xgb_model=, even one with as many rounds: new windows, and
+      the earlier run's are left alone
+    - no xgb_model=: a manually reused callback replaces its curve, and
+      autolog() opens new windows
+    - inside a search or cross-validation, the fits share one window and the
+      latest replaces the one before, as above
+
+    A run that logs no evals plots nothing and changes no window. Continuing
+    the model it trained still continues the curve.
+
     Not thread-safe: active/_depth/_wins have no locking, so concurrent
     fits in the same process can race.
     """
@@ -77,6 +95,15 @@ class VisdomXGBLogger(TrainingCallback):
         )
         self._wins = {}
         self._depth = 0
+        self._next_round = 0  # round after the last one plotted
+        self._fresh = None  # whether this run starts a new curve
+        self._new_windows = False  # set by autolog for a new top-level run
+        self._run_start = None  # rounds the model had when this run began
+        self._run_pending = False  # a run began but hasn't logged a round yet
+        self._silent_end = None  # rounds after an unevaluated continuation
+        self._start_id = None  # which model a run began from
+        self._curve_id = None  # ... the curve ends with
+        self._silent_id = None  # ... an unevaluated continuation ended with
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -167,7 +194,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             callbacks = list(kwargs.get("callbacks") or [])
             if logger not in callbacks:
                 callbacks.append(logger)
@@ -196,7 +223,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             original_callbacks = self_est.callbacks
             callbacks = list(original_callbacks or [])
             if logger not in callbacks:
@@ -230,7 +257,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(self_est, *args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(self_est, *args, **kwargs)
@@ -256,7 +283,7 @@ class VisdomXGBLogger(TrainingCallback):
             if logger is None:
                 return original(*args, **kwargs)
             if logger._depth == 0:
-                logger._wins = {}
+                logger._new_windows = True
             logger._depth += 1
             try:
                 return original(*args, **kwargs)
@@ -266,7 +293,69 @@ class VisdomXGBLogger(TrainingCallback):
         patched._visdom_patched = True
         setattr(module, name, patched)
 
+    @staticmethod
+    def _rounds(model):
+        """Rounds already in ``model``, or None if it can't say."""
+        try:
+            return model.num_boosted_rounds()
+        except Exception:  # xgboost < 1.4, or a model it can't configure
+            return None
+
+    @staticmethod
+    def _model_id(model):
+        """A digest of what ``model`` predicts with, or None if it can't be read.
+
+        The same for a model and its reload, whatever params it is trained on
+        with. All its trees count, and base_score: models that are unrelated
+        can share their last trees, or every tree.
+        """
+        try:
+            learner = json.loads(bytes(model.save_raw(raw_format="json")))["learner"]
+            params = learner["learner_model_param"]
+            parts = [learner["gradient_booster"], params["base_score"]]
+            return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+        except Exception:
+            return None
+
+    def before_training(self, model):
+        # Decided on the first logged round, so a run without evals changes nothing.
+        self._run_start = start = self._rounds(model)
+        self._start_id = None
+        # Only a model ending where the curve does can continue it.
+        if start and start in (self._next_round, self._silent_end):
+            self._start_id = self._model_id(model)
+        self._run_pending = True
+        return model
+
+    def _continues(self, start):
+        # An unrelated model can have as many rounds, so it has to be the same one.
+        if not start or self._start_id is None:
+            return False
+        return (start, self._start_id) in (
+            (self._next_round, self._curve_id),
+            (self._silent_end, self._silent_id),
+        )
+
+    def _start_run(self):
+        start, self._run_pending = self._run_start, False
+        continues = self._continues(start)
+        self._silent_end = self._silent_id = None
+        self._fresh = not continues
+        # Another model's run, or one that can't say, must not overwrite the curve.
+        resumes = start != 0 and self._depth == 0
+        if not continues and (self._new_windows or resumes):
+            self._wins = {}
+        self._new_windows = False
+
     def after_iteration(self, model, epoch, evals_log):
+        if not evals_log:
+            return False
+        if self._run_pending:
+            self._start_run()
+        # xgboost restarts epoch at 0 on xgb_model=, so read the round from the model.
+        rounds = self._rounds(model)
+        step = (self._run_start or 0) + epoch if rounds is None else rounds - 1
+        fresh = self._fresh if self._fresh is not None else step == 0
         try:
             for data_name, metrics in evals_log.items():
                 for metric_name, log in metrics.items():
@@ -277,7 +366,7 @@ class VisdomXGBLogger(TrainingCallback):
                     trace_name = data_name
                     if win_name not in self._wins:
                         self._wins[win_name] = self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             env=self.env,
                             name=trace_name,
@@ -288,11 +377,11 @@ class VisdomXGBLogger(TrainingCallback):
                                 "showlegend": True,
                             },
                         )
-                    elif epoch == 0:
+                    elif fresh:
                         # New run reusing an old window (nested fit, or a
                         # manually reused callback) — replace, don't append.
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
@@ -301,7 +390,7 @@ class VisdomXGBLogger(TrainingCallback):
                         )
                     else:
                         self.viz.line(
-                            X=[epoch],
+                            X=[step],
                             Y=[value],
                             win=self._wins[win_name],
                             env=self.env,
@@ -309,10 +398,23 @@ class VisdomXGBLogger(TrainingCallback):
                             update="append",
                         )
         except Exception as e:
-            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(epoch, e))
+            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(step, e))
+        if self._fresh is not None:
+            self._fresh = False
+        self._next_round = step + 1
         return False
 
     def after_training(self, model):
+        rounds = self._rounds(model)
+        if self._run_pending:
+            # Nothing was plotted; remember where a continuation left the model.
+            self._run_pending = False
+            if self._continues(self._run_start):
+                self._silent_end = rounds
+                self._silent_id = self._model_id(model)
+        else:
+            self._curve_id = self._model_id(model)
+        self._run_start = None
         try:
             best_iteration = model.best_iteration
             best_score = model.best_score

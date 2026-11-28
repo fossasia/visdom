@@ -152,7 +152,7 @@ pytest -m integration --collect-only -q -o addopts="" | tail -1
 ```
 
 If those stop adding up, a file lost its marker. The counts assume the optional test
-dependencies are installed: `unit/keras_logger.py` and `unit/test_xgboost_logger.py` need
+dependencies are installed: `unit/keras_logger.py` and `unit/xgboost_logger.py` need
 `tensorflow` and `xgboost` (both in `test-requirements.txt`), and their tests count towards
 the `unit` total.
 

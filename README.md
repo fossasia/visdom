@@ -639,6 +639,16 @@ booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], c
 
 Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
 
+Points are plotted at the model's own boosting round, so training on from `xgb_model=` doesn't start again at round 0. Which window a run uses depends on the model it starts from:
+
+| The run starts from | Window |
+|---|---|
+| the model the curve ended with (or a saved copy of it) | the curve continues in its window |
+| any other `xgb_model=`, even one with as many rounds | new windows; the earlier run's are left alone |
+| no `xgb_model=` | `autolog()` opens new windows; a manually reused callback replaces its curve |
+
+Fits inside a search or cross-validation share one window, where the latest fit replaces the one before. A run that logs no evals plots nothing and changes no window.
+
 **Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
 
 ### TensorFlow / Keras

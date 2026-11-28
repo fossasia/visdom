@@ -1,0 +1,696 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+import unittest
+from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
+import visdom
+
+xgb = pytest.importorskip("xgboost")
+
+from visdom.loggers.xgboost import VisdomXGBLogger
+
+pytestmark = pytest.mark.unit
+
+
+def _unconnected_visdom():
+    with (
+        patch.object(visdom.Visdom, "_handle_post", return_value=True),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        client = visdom.Visdom(use_incoming_socket=False)
+    client._handle_post = Mock(
+        side_effect=AssertionError("unexpected transport call in unit test")
+    )
+    return client
+
+
+def _capture(viz, call, win_exists=True):
+    """Run call() against viz with _send captured instead of transmitted.
+
+    win_exists is patched too: line(update="append") checks it when the
+    client isn't in offline mode, and would otherwise reach for a real
+    connection.
+    """
+    sent = {}
+
+    def capture(msg, endpoint="events", **_):
+        sent["payload"] = msg
+        sent["endpoint"] = endpoint
+        return "win1"
+
+    with (
+        patch.object(viz, "_send", side_effect=capture),
+        patch.object(viz, "win_exists", return_value=win_exists),
+    ):
+        call()
+    return sent
+
+
+class TestAfterIteration(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.logger = VisdomXGBLogger(self.viz, env="xgb_test")
+
+    def test_first_round_opens_a_window(self):
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(None, 0, {"train": {"rmse": [0.5]}}),
+        )
+        self.assertEqual(sent["endpoint"], "events")
+        self.assertEqual(sent["payload"]["eid"], "xgb_test")
+        self.assertEqual(sent["payload"]["data"][0]["name"], "train")
+        self.assertEqual(self.logger._wins["rmse"], "win1")
+
+    def test_later_round_appends_to_the_existing_window(self):
+        self.logger._wins["rmse"] = "existing_win"
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(None, 1, {"train": {"rmse": [0.4]}}),
+        )
+        self.assertEqual(sent["endpoint"], "update")
+        self.assertTrue(sent["payload"]["append"])
+        self.assertEqual(sent["payload"]["win"], "existing_win")
+
+    def test_epoch_zero_reusing_a_window_replaces_instead_of_appending(self):
+        # A nested fit (or a manually reused callback) starts a new run at
+        # epoch 0 while the previous run's window is still tracked.
+        self.logger._wins["rmse"] = "existing_win"
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(None, 0, {"train": {"rmse": [0.5]}}),
+        )
+        self.assertEqual(sent["endpoint"], "update")
+        self.assertFalse(sent["payload"]["append"])
+
+    def test_continued_training_appends_at_the_models_round(self):
+        # xgb_model= restarts epoch at 0, but the model already has 5 rounds.
+        self.logger._wins["rmse"] = "existing_win"
+        model = Mock(num_boosted_rounds=Mock(return_value=6))
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(model, 0, {"train": {"rmse": [0.3]}}),
+        )
+        self.assertTrue(sent["payload"]["append"])
+        self.assertEqual(sent["payload"]["data"][0]["x"], [5])
+
+    def test_tuple_valued_metric_unwraps_to_its_first_element(self):
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(
+                None, 0, {"train": {"rmse": [(0.5, 0.01)]}}
+            ),
+        )
+        self.assertEqual(sent["payload"]["data"][0]["y"], [0.5])
+
+    def test_different_eval_sets_share_one_window_per_metric(self):
+        self.logger._wins["rmse"] = "shared_win"
+        sent = _capture(
+            self.viz,
+            lambda: self.logger.after_iteration(None, 1, {"eval": {"rmse": [0.6]}}),
+        )
+        self.assertEqual(sent["payload"]["data"][0]["name"], "eval")
+        self.assertEqual(sent["payload"]["win"], "shared_win")
+
+    def test_logging_failure_warns_instead_of_raising(self):
+        with patch.object(self.viz, "line", side_effect=RuntimeError("boom")):
+            with self.assertWarns(UserWarning):
+                self.logger.after_iteration(None, 0, {"train": {"rmse": [0.5]}})
+
+
+class TestAfterTraining(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.logger = VisdomXGBLogger(self.viz, env="xgb_test")
+
+    def test_logs_best_iteration_and_score_as_text(self):
+        model = Mock(best_iteration=7, best_score=0.123)
+        sent = _capture(self.viz, lambda: self.logger.after_training(model))
+        self.assertEqual(sent["payload"]["data"][0]["type"], "text")
+        content = sent["payload"]["data"][0]["content"]
+        self.assertIn("best_iteration: 7", content)
+        self.assertIn("best_score: 0.123", content)
+
+    def test_second_call_reuses_the_summary_window(self):
+        model = Mock(best_iteration=1, best_score=0.5)
+        _capture(self.viz, lambda: self.logger.after_training(model))
+        sent = _capture(self.viz, lambda: self.logger.after_training(model))
+        self.assertEqual(sent["payload"]["win"], "win1")
+
+    def test_missing_best_iteration_is_a_no_op(self):
+        model = Mock(spec=[])
+        with patch.object(self.viz, "text") as text_mock:
+            self.logger.after_training(model)
+        text_mock.assert_not_called()
+
+    def test_returns_the_model_unchanged(self):
+        model = Mock(best_iteration=None, best_score=None)
+        result = self.logger.after_training(model)
+        self.assertIs(result, model)
+
+
+class TestAutolog(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+
+    def _dtrain(self):
+        X = np.array([[0.0], [1.0], [2.0], [3.0]])
+        y = np.array([0.0, 1.0, 2.0, 3.0])
+        return xgb.DMatrix(X, label=y)
+
+    def test_train_is_logged_without_passing_callbacks_explicitly(self):
+        logger = VisdomXGBLogger.autolog(viz=self.viz, env="xgb_autolog")
+        dtrain = self._dtrain()
+        with (
+            patch.object(self.viz, "_send", return_value="win1") as send,
+            patch.object(self.viz, "win_exists", return_value=True),
+        ):
+            xgb.train(
+                {"objective": "reg:squarederror", "verbosity": 0},
+                dtrain,
+                num_boost_round=3,
+                evals=[(dtrain, "train")],
+                verbose_eval=False,
+            )
+        self.assertEqual(send.call_count, 3)
+        self.assertIn("rmse", logger._wins)
+
+    def test_autolog_called_twice_does_not_double_wrap_train(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_autolog")
+        first_train = xgb.train
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_autolog")
+        self.assertIs(xgb.train, first_train)
+
+    def test_switching_env_warns_and_makes_the_new_logger_active(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_env_a")
+        with self.assertWarns(UserWarning):
+            logger_b = VisdomXGBLogger.autolog(viz=self.viz, env="xgb_env_b")
+        self.assertIs(VisdomXGBLogger.active, logger_b)
+
+    def test_xgbmodel_fit_is_logged_via_autolog(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_estimator")
+        X = np.array([[0.0], [1.0], [2.0], [3.0]])
+        y = np.array([0.0, 1.0, 2.0, 3.0])
+        model = xgb.XGBRegressor(n_estimators=3, verbosity=0)
+        with (
+            patch.object(self.viz, "_send", return_value="win1") as send,
+            patch.object(self.viz, "win_exists", return_value=True),
+        ):
+            model.fit(X, y, eval_set=[(X, y)], verbose=False)
+        self.assertTrue(send.called)
+
+
+class TestAutologContinuedTraining(unittest.TestCase):
+    """autolog() keeps a continued run in its window and opens new ones otherwise."""
+
+    PARAMS = {"objective": "binary:logistic", "verbosity": 0}
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+        rng = np.random.RandomState(0)
+        self.X, self.y = rng.rand(60, 3), rng.randint(0, 2, 60)
+        self.dtrain = xgb.DMatrix(self.X, label=self.y)
+        self.created = []
+        self.calls = []
+
+        def line(**kwargs):
+            self.calls.append(kwargs)
+            if kwargs.get("win") is None:
+                self.created.append("win%d" % len(self.created))
+                return self.created[-1]
+            return kwargs["win"]
+
+        self.line = line
+
+    def _train(self, rounds, **kwargs):
+        return xgb.train(
+            self.PARAMS,
+            self.dtrain,
+            rounds,
+            evals=[(self.dtrain, "eval")],
+            verbose_eval=False,
+            **kwargs,
+        )
+
+    def test_train_with_xgb_model_continues_in_the_same_window(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            first = self._train(3)
+            self._train(2, xgb_model=first)
+        self.assertEqual(self.created, ["win0"])
+        self.assertEqual([c["X"][0] for c in self.calls], [0, 1, 2, 3, 4])
+        self.assertEqual(
+            [c.get("update") for c in self.calls[3:]], ["append", "append"]
+        )
+
+    def test_fit_with_xgb_model_continues_in_the_same_window(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            first = xgb.XGBClassifier(n_estimators=3).fit(
+                self.X, self.y, eval_set=[(self.X, self.y)], verbose=False
+            )
+            xgb.XGBClassifier(n_estimators=2).fit(
+                self.X,
+                self.y,
+                eval_set=[(self.X, self.y)],
+                verbose=False,
+                xgb_model=first.get_booster(),
+            )
+        self.assertEqual(self.created, ["win0"])
+        self.assertEqual([c["X"][0] for c in self.calls], [0, 1, 2, 3, 4])
+
+    def test_separate_runs_still_open_their_own_windows(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3)
+            self._train(2)
+        self.assertEqual(self.created, ["win0", "win1"])
+
+    def test_continuing_an_unrelated_model_opens_a_new_window(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        other = xgb.train(self.PARAMS, self.dtrain, 7)
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3)
+            self._train(2, xgb_model=other)
+        self.assertEqual(self.created, ["win0", "win1"])
+        self.assertEqual([c["X"][0] for c in self.calls[3:]], [7, 8])
+
+    def test_grid_search_fits_share_one_window(self):
+        model_selection = pytest.importorskip("sklearn.model_selection")
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        search = model_selection.GridSearchCV(
+            xgb.XGBClassifier(n_estimators=2), {"max_depth": [2, 3]}, cv=2
+        )
+        with patch.object(self.viz, "line", side_effect=self.line):
+            search.fit(self.X, self.y, eval_set=[(self.X, self.y)], verbose=False)
+        self.assertEqual(self.created, ["win0"])
+
+
+class TestRunsWithoutEvals(unittest.TestCase):
+    """A run that logs no eval data leaves the plotted curve as it was."""
+
+    PARAMS = {"objective": "binary:logistic", "verbosity": 0}
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+        rng = np.random.RandomState(0)
+        self.dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        self.calls = []
+
+    def line(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs.get("win") or "win%d" % len(self.calls)
+
+    def _train(self, rounds, evals=True, **kwargs):
+        evals = [(self.dtrain, "eval")] if evals else []
+        return xgb.train(
+            self.PARAMS, self.dtrain, rounds, evals=evals, verbose_eval=False, **kwargs
+        )
+
+    def _continue_after_a_run_without_evals(self, **callbacks):
+        with patch.object(self.viz, "line", side_effect=self.line):
+            first = self._train(3, **callbacks)
+            self._train(2, evals=False, **callbacks)
+            self._train(2, xgb_model=first, **callbacks)
+        later = self.calls[3:]
+        self.assertEqual([c["X"][0] for c in later], [3, 4])
+        self.assertEqual([c.get("update") for c in later], ["append", "append"])
+        self.assertEqual({c["win"] for c in later}, {"win1"})
+
+    def test_manual_callback_keeps_the_curve(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_after_a_run_without_evals(callbacks=[logger])
+
+    def test_autolog_keeps_the_curve(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        self._continue_after_a_run_without_evals()
+
+    def test_a_run_without_evals_plots_nothing(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3, evals=False, callbacks=[logger])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(logger._next_round, 0)
+
+    def _continue_through_runs_without_evals(self, silent_runs, **callbacks):
+        with patch.object(self.viz, "line", side_effect=self.line):
+            model = self._train(5, **callbacks)
+            for _ in range(silent_runs):
+                model = self._train(3, evals=False, xgb_model=model, **callbacks)
+            self._train(2, xgb_model=model, **callbacks)
+        later = self.calls[5:]
+        start = 5 + 3 * silent_runs
+        self.assertEqual([c["X"][0] for c in later], [start, start + 1])
+        self.assertEqual([c.get("update") for c in later], ["append", "append"])
+        self.assertEqual({c["win"] for c in later}, {"win1"})
+
+    def test_continuing_after_an_unevaluated_continuation_appends(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(1, callbacks=[logger])
+
+    def test_continuing_after_two_unevaluated_continuations_appends(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(2, callbacks=[logger])
+
+    def test_autolog_appends_after_an_unevaluated_continuation(self):
+        VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        self._continue_through_runs_without_evals(1)
+
+    def test_an_unrelated_unevaluated_model_still_starts_a_new_curve(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self._train(3, callbacks=[logger])
+            other = self._train(7, evals=False, callbacks=[logger])
+            self._train(2, xgb_model=other, callbacks=[logger])
+        later = self.calls[3:]
+        self.assertEqual([c["X"][0] for c in later], [7, 8])
+        self.assertEqual([c.get("update") for c in later], [None, "append"])
+        self.assertNotEqual(later[1]["win"], "win1")
+
+
+class TestContinuationIsMatchedByModel(unittest.TestCase):
+    """A run continues the curve only when it starts from that curve's model."""
+
+    PARAMS = {"objective": "binary:logistic", "verbosity": 0}
+
+    def setUp(self):
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+        rng = np.random.RandomState(0)
+        X = rng.rand(60, 3)
+        self.dtrain = xgb.DMatrix(X, label=rng.randint(0, 2, 60))
+        # Same size, different trees: trained on other labels.
+        self.other = xgb.DMatrix(X, label=rng.randint(0, 2, 60))
+        self.viz = _unconnected_visdom()
+
+    def _train(self, rounds, params=None, **kwargs):
+        return xgb.train(
+            params or self.PARAMS,
+            self.dtrain,
+            rounds,
+            evals=[(self.dtrain, "eval")],
+            verbose_eval=False,
+            **kwargs,
+        )
+
+    def _later_calls(self, resume, params=None, autolog=False):
+        """Train 3 rounds, then 2 more from ``resume(first)``; the calls after."""
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        if autolog:
+            VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+        callbacks = {} if autolog else {"callbacks": [logger]}
+        created = []
+
+        def line(**kwargs):
+            if kwargs.get("win") is None:
+                created.append("win%d" % len(created))
+                return created[-1]
+            return kwargs["win"]
+
+        with patch.object(self.viz, "line", side_effect=line) as calls:
+            first = self._train(3, **callbacks)
+            self._train(2, params=params, xgb_model=resume(first), **callbacks)
+        return calls.call_args_list[3:], created
+
+    def test_an_unrelated_model_of_the_same_size_starts_its_own_curve(self):
+        unrelated = xgb.train(self.PARAMS, self.other, 3)
+        later, created = self._later_calls(lambda first: unrelated)
+        self.assertEqual([c.kwargs["X"][0] for c in later], [3, 4])
+        self.assertEqual([c.kwargs.get("update") for c in later], [None, "append"])
+        self.assertEqual(created, ["win0", "win1"])
+
+    def test_autolog_opens_new_windows_for_an_unrelated_model(self):
+        unrelated = xgb.train(self.PARAMS, self.other, 3)
+        _, created = self._later_calls(lambda first: unrelated, autolog=True)
+        self.assertEqual(created, ["win0", "win1"])
+
+    def test_a_reloaded_model_still_continues(self):
+        reload = lambda first: xgb.Booster(model_file=bytearray(first.save_raw()))
+        later, created = self._later_calls(reload)
+        self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
+        self.assertEqual(created, ["win0"])
+
+    def test_new_params_on_the_same_model_still_continue(self):
+        params = dict(self.PARAMS, eta=0.05)
+        later, _ = self._later_calls(lambda first: first, params=params)
+        self.assertEqual([c.kwargs["X"][0] for c in later], [3, 4])
+        self.assertEqual([c.kwargs.get("update") for c in later], ["append"] * 2)
+
+    def test_only_a_model_ending_where_the_curve_does_is_read(self):
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", return_value="win1"):
+            first = self._train(3, callbacks=[logger])
+        longer = xgb.train(self.PARAMS, self.dtrain, 5)
+        save_raw = xgb.Booster.save_raw
+        with patch.object(
+            xgb.Booster, "save_raw", autospec=True, side_effect=save_raw
+        ) as read:
+            logger.before_training(longer)  # can't continue a 3-round curve
+            self.assertFalse(read.called)
+            logger.before_training(first)
+            self.assertTrue(read.called)
+
+
+class TestModelIdentity(unittest.TestCase):
+    """Unrelated models can share their last trees, or all of them."""
+
+    def setUp(self):
+        self.addCleanup(lambda: setattr(VisdomXGBLogger, "active", None))
+        self.X = np.random.RandomState(0).rand(60, 3)
+        self.viz = _unconnected_visdom()
+        self.calls, self.created = [], []
+
+    def line(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("win") is None:
+            self.created.append("win%d" % len(self.created))
+            return self.created[-1]
+        return kwargs["win"]
+
+    def train(self, y, params, rounds=3, **kwargs):
+        dtrain = xgb.DMatrix(self.X, label=y)
+        params = dict({"verbosity": 0, "nthread": 1}, **params)
+        kwargs.update(evals=[(dtrain, "eval")], verbose_eval=False)
+        return xgb.train(params, dtrain, rounds, **kwargs)
+
+    def assert_separate(self, y_first, y_other, params):
+        """Resuming the second model leaves the first one's curve alone."""
+        other = self.train(y_other, params)
+        for autolog in (False, True):
+            self.calls, self.created = [], []
+            if autolog:
+                VisdomXGBLogger.autolog(viz=self.viz, env="xgb_test")
+                callbacks = {}
+            else:
+                callbacks = {"callbacks": [VisdomXGBLogger(self.viz, env="xgb_test")]}
+            with patch.object(self.viz, "line", side_effect=self.line):
+                first = self.train(y_first, params, **callbacks)
+                self.assertNotEqual(
+                    VisdomXGBLogger._model_id(first), VisdomXGBLogger._model_id(other)
+                )
+                self.train(y_other, params, 2, xgb_model=other, **callbacks)
+            self.assertEqual(self.created, ["win0", "win1"])
+            self.assertEqual([c["X"][0] for c in self.calls], [0, 1, 2, 3, 4])
+            self.assertEqual(
+                [c.get("update") for c in self.calls],
+                [None, "append", "append", None, "append"],
+            )
+
+    def test_regressors_of_different_constants_have_the_same_trees(self):
+        params = {"objective": "reg:squarederror"}
+        ones, nines = np.ones(60), np.full(60, 9.0)
+        dumps = [self.train(y, params).get_dump() for y in (ones, nines)]
+        self.assertEqual(dumps[0], dumps[1])
+        self.assert_separate(ones, nines, params)
+
+    def test_converged_models_have_the_same_last_trees(self):
+        params = {
+            "objective": "reg:squarederror",
+            "base_score": 0.5,
+            "eta": 1.0,
+            "lambda": 0,
+        }
+        ys = [(self.X[:, i] > 0.5).astype(float) for i in (0, 1)]
+        last = [self.train(y, params)[2:3].get_dump() for y in ys]
+        self.assertEqual(last[0], last[1])
+        self.assert_separate(ys[0], ys[1], params)
+
+    def test_a_model_and_its_copies_are_the_same_model(self):
+        y = (self.X[:, 0] > 0.5).astype(int)
+        for params in (
+            {"objective": "binary:logistic"},
+            {"objective": "binary:logistic", "booster": "dart", "rate_drop": 0.5},
+            {"objective": "reg:squarederror", "booster": "gblinear"},
+            {"objective": "multi:softprob", "num_class": 3},
+            {"objective": "binary:logistic", "num_parallel_tree": 2},
+        ):
+            with self.subTest(params=params):
+                model = self.train(y, params)
+                model_id = VisdomXGBLogger._model_id(model)
+                self.assertIsNotNone(model_id)
+                for raw_format in ("ubj", "json"):
+                    raw = model.save_raw(raw_format=raw_format)
+                    loaded = xgb.Booster(model_file=bytearray(raw))
+                    self.assertEqual(VisdomXGBLogger._model_id(loaded), model_id)
+                model.set_attr(best_iteration="1")
+                model.set_param({"eta": 0.01, "scale_pos_weight": 3})
+                self.assertEqual(VisdomXGBLogger._model_id(model), model_id)
+
+    def test_continuing_with_another_objective_weight_still_continues(self):
+        y = (self.X[:, 0] > 0.5).astype(int)
+        params = {"objective": "binary:logistic"}
+        logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        with patch.object(self.viz, "line", side_effect=self.line):
+            first = self.train(y, params, callbacks=[logger])
+            weighted = dict(params, scale_pos_weight=3)
+            self.train(y, weighted, 2, xgb_model=first, callbacks=[logger])
+        self.assertEqual(self.created, ["win0"])
+        self.assertEqual([c.get("update") for c in self.calls[3:]], ["append"] * 2)
+
+
+class TestUnreadableModels(unittest.TestCase):
+    """A model that can't give its rounds never stops or overwrites a run."""
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+        self.logger = VisdomXGBLogger(self.viz, env="xgb_test")
+        self.calls = []
+
+    def line(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs.get("win") or "win%d" % len(self.calls)
+
+    @staticmethod
+    def model(rounds):
+        """A model with ``rounds`` rounds, or one that raises if that's None."""
+        error = xgb.core.XGBoostError("Check failed")
+        answer = {"side_effect": error} if rounds is None else {"return_value": rounds}
+        return Mock(
+            num_boosted_rounds=Mock(**answer),
+            save_raw=Mock(side_effect=error),
+            best_iteration=None,
+            best_score=None,
+        )
+
+    def test_an_unconfigured_booster_raises_on_its_rounds(self):
+        with self.assertRaises(xgb.core.XGBoostError):
+            xgb.Booster().num_boosted_rounds()
+        self.assertIsNone(VisdomXGBLogger._rounds(xgb.Booster()))
+        self.assertIsNone(VisdomXGBLogger._model_id(xgb.Booster()))
+
+    def run_epochs(self, models, start):
+        with patch.object(self.viz, "line", side_effect=self.line):
+            self.logger.before_training(start)
+            for epoch, model in enumerate(models):
+                self.logger.after_iteration(model, epoch, {"eval": {"rmse": [0.5]}})
+            self.logger.after_training(models[-1])
+
+    def test_a_run_that_cant_give_its_rounds_is_plotted_by_epoch(self):
+        self.run_epochs([self.model(None)] * 3, self.model(None))
+        self.assertEqual([c["X"][0] for c in self.calls], [0, 1, 2])
+
+    def test_it_leaves_the_earlier_runs_window_alone(self):
+        self.run_epochs([self.model(1), self.model(2)], self.model(0))
+        self.run_epochs([self.model(None)] * 2, self.model(None))
+        self.assertEqual(
+            [c.get("update") for c in self.calls], [None, "append", None, "append"]
+        )
+        self.assertEqual(self.calls[1]["win"], "win1")
+        self.assertEqual(self.calls[3]["win"], "win3")
+
+    def test_a_round_that_fails_midway_keeps_its_place(self):
+        """Counted on from where the run began, not from epoch 0."""
+        self.run_epochs([self.model(n) for n in (6, None, None)], self.model(5))
+        self.assertEqual([c["X"][0] for c in self.calls], [5, 6, 7])
+
+
+class TestContinuedTraining(unittest.TestCase):
+    """Training on from xgb_model extends the curve instead of wiping it."""
+
+    def _rounds(self, line, name):
+        return [
+            (c.kwargs["X"][0], c.kwargs.get("update"))
+            for c in line.call_args_list
+            if c.kwargs["name"] == name
+        ]
+
+    def test_curve_continues_across_xgb_model(self):
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            first = xgb.train(
+                params, dtrain, 3, evals=[(dtrain, "eval")], callbacks=[logger]
+            )
+            xgb.train(
+                params,
+                dtrain,
+                3,
+                evals=[(dtrain, "eval")],
+                callbacks=[logger],
+                xgb_model=first,
+            )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual([x for x, _ in rounds], [0, 1, 2, 3, 4, 5])
+        self.assertNotIn("replace", [u for _, u in rounds])
+
+    def test_a_separate_pretrained_model_starts_a_new_curve(self):
+        """xgb_model= from another training is not a continuation of this curve."""
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        other = xgb.train(params, dtrain, 7)
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            xgb.train(params, dtrain, 3, evals=[(dtrain, "eval")], callbacks=[logger])
+            xgb.train(
+                params,
+                dtrain,
+                2,
+                evals=[(dtrain, "eval")],
+                callbacks=[logger],
+                xgb_model=other,
+            )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual(rounds[3:], [(7, None), (8, "append")])
+
+    def test_a_failure_warns_with_the_plotted_round(self):
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        model = Mock(num_boosted_rounds=Mock(return_value=6))
+        with patch.object(viz, "line", side_effect=RuntimeError("boom")):
+            with self.assertWarnsRegex(UserWarning, "round 5"):
+                logger.after_iteration(model, 0, {"train": {"rmse": [0.5]}})
+
+    def test_a_fresh_model_still_replaces_the_old_run(self):
+        rng = np.random.RandomState(0)
+        dtrain = xgb.DMatrix(rng.rand(60, 3), label=rng.randint(0, 2, 60))
+        params = {"objective": "binary:logistic", "verbosity": 0}
+        viz = _unconnected_visdom()
+        logger = VisdomXGBLogger(viz, env="xgb_test")
+        with patch.object(viz, "line", return_value="win1") as line:
+            for _ in range(2):
+                xgb.train(
+                    params, dtrain, 2, evals=[(dtrain, "eval")], callbacks=[logger]
+                )
+        rounds = self._rounds(line, "eval")
+        self.assertEqual(
+            rounds, [(0, None), (1, "append"), (0, "replace"), (1, "append")]
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
