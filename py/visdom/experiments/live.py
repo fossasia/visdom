@@ -81,7 +81,8 @@ def resolve_targets(state, changed):
             continue
         if not getattr(env, "is_loaded", True):
             continue
-        for win_id, win in list((env.get("jsons") or {}).items()):
+        resident = getattr(env, "resident_data", env)
+        for win_id, win in (resident.get("jsons") or {}).items():
             if not isinstance(win, dict) or win.get("type") != "hparams":
                 continue
             spec = win.get("hparams")

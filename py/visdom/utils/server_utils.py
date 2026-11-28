@@ -234,6 +234,11 @@ class LazyEnvData(Mapping):
         """Whether this environment has been materialized in memory."""
         return self._raw_dict is not None
 
+    @property
+    def resident_data(self):
+        """Peek at materialized data for maintenance without recording a user read."""
+        return self._raw_dict
+
     def unload(self):
         """Drop the in-memory copy; the next access reads it from disk again.
 
@@ -413,10 +418,14 @@ def save_envs_off_loop(handler, eids):
     eids = list(eids)
     snapshots = snapshot_envs(handler.state, eids)
     release = _hold_unsaved(handler, list(snapshots))
+    dirty = getattr(handler, "dirty_envs", {})
+    covered = {eid: dirty[eid] for eid in snapshots if eid in dirty}
     future = run_on_storage_executor(
         handler, handler.storage.save_envs, snapshots, eids
     )
     future.add_done_callback(release)
+    if covered:
+        handler.track_saved_changes(future, covered)
     return future
 
 

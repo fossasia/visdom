@@ -496,3 +496,89 @@ def test_save_as_pins_a_cold_source_until_the_copy_is_ready(
         asyncio.run(ForkEnvHandler.wrap_func(writer, args))
     assert app.storage.load_env("copy")["jsons"] == {"w": {"v": 1}}
     assert not app.server_state.held_envs
+
+
+def test_unrelated_metric_scan_does_not_keep_loaded_lazy_env_resident(env_path):
+    from visdom.experiments.live import resolve_targets
+
+    _write_env(env_path, "idle", 1)
+    app = _make_app(env_path)
+    app.state["idle"]["jsons"]
+    _age(app, "idle")
+    assert resolve_targets(app.state, {"other-run"}) == []
+    assert _sweep(app.server_state) == ["idle"]
+
+
+@pytest.mark.parametrize("edit_during_write", [False, True])
+def test_explicit_save_clears_only_snapshotted_edits(env_path, edit_during_write):
+    from visdom.server.handlers.web_handlers import SaveHandler
+
+    app = _make_app(env_path, save_interval=0, save_threshold=0)
+    handler = experiments_handler.LivePaneWriter(app.server_state)
+    replies = []
+    handler.write = replies.append
+    app.state["a"] = {"jsons": {"w": 1}, "reload": {}}
+    app.mark_dirty("a")
+
+    async def run():
+        request = asyncio.create_task(
+            SaveHandler.wrap_func(handler, {"data": ["a", "a"]})
+        )
+        await asyncio.sleep(0)  # the request has submitted its snapshot
+        if edit_during_write:
+            app.state["a"]["jsons"]["w"] = 2
+            app.mark_dirty("a")
+        await request
+
+    asyncio.run(run())
+    assert "a" in json.loads(replies[0])
+    assert app.storage.load_env("a")["jsons"]["w"] == 1
+    assert app.server_state.dirty_envs["a"] == int(edit_during_write)
+    _age(app, "a")
+    assert _sweep(app.server_state) == ([] if edit_during_write else ["a"])
+
+
+@pytest.mark.parametrize("automatic_first", [True, False])
+def test_overlapping_saves_do_not_clear_the_same_edit_twice(env_path, automatic_first):
+    app = _make_app(env_path, save_interval=0, save_threshold=0)
+    writer = experiments_handler.LivePaneWriter(app.server_state)
+    app.state["a"] = {"jsons": {"w": 1}, "reload": {}}
+    app.mark_dirty("a")
+
+    def manual():
+        return server_utils.save_envs_off_loop(writer, ["a"])
+
+    async def run():
+        first, second = (
+            (app.flush_dirty, manual) if automatic_first else (manual, app.flush_dirty)
+        )
+        earlier = first()
+        app.state["a"]["jsons"]["w"] = 2
+        app.mark_dirty("a")
+        later = second()
+        app.state["a"]["jsons"]["w"] = 3
+        app.mark_dirty("a")
+        await asyncio.gather(earlier, later)
+
+    asyncio.run(run())
+    assert app.storage.load_env("a")["jsons"]["w"] == 2
+    assert app.server_state.dirty_envs["a"] == 1
+
+
+def test_explicit_save_only_acknowledges_ids_returned_by_storage(env_path, monkeypatch):
+    app = _make_app(env_path, save_interval=0, save_threshold=0)
+    writer = experiments_handler.LivePaneWriter(app.server_state)
+    for eid in ("written", "declined"):
+        app.state[eid] = {"jsons": {}, "reload": {}}
+        app.mark_dirty(eid)
+
+    save = app.storage.save_envs
+    monkeypatch.setattr(
+        app.storage, "save_envs", lambda state, eids: save(state, ["written"])
+    )
+
+    async def run():
+        return await server_utils.save_envs_off_loop(writer, ["declined", "written"])
+
+    assert asyncio.run(run()) == ["written"]
+    assert app.server_state.dirty_envs == {"declined": 1}
