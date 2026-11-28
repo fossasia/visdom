@@ -39,6 +39,7 @@ GRAPH_METHODS = frozenset(
         "sankey",
         "roc_curve",
         "pr_curve",
+        "calibration_curve",
         "confusion_matrix",
         "learning_curve",
         "graph",
