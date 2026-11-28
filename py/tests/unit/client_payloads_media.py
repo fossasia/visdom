@@ -35,6 +35,7 @@ asserted here.
 import base64
 import io
 import os
+import re
 import sys
 from unittest.mock import patch
 
@@ -281,6 +282,152 @@ def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
 def test_image_rejects_unsupported_shapes(offline_client, img, message):
     with pytest.raises(ValueError, match=message):
         offline_client.image(img)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(224, 224, 3), (64, 64, 4), (28, 28, 1), (5, 5, 3)],
+    ids=["rgb", "rgba", "gray", "smallest"],
+)
+def test_image_points_a_channels_last_array_to_transpose(offline_client, shape):
+    """PIL, OpenCV and matplotlib give HxWxC; say so instead of '224 channels'."""
+    with pytest.raises(ValueError) as error:
+        offline_client.image(np.zeros(shape, dtype=np.uint8))
+    message = str(error.value)
+    assert message.startswith("Shape {} looks like HxWxC".format(shape))
+    assert "use np.transpose(img, (2, 0, 1))" in message
+    assert "number of image channels" not in message
+
+
+def _follow_hint(draw, pattern, **names):
+    """Call ``draw`` on a channels-last input, then run the fix its error gives."""
+    (value,) = names.values()
+    with pytest.raises(ValueError) as error:
+        draw(value)
+    code = re.search(pattern, str(error.value)).group(0)
+    return eval(code, {"np": np, **names})
+
+
+_NP_FIX = r"np\.transpose\(\w+, \([\d, ]+\)\)"
+_TORCH_FIX = r"\w+\.permute\([\d, ]+\)"
+
+
+@pytest.mark.parametrize(
+    "convert", [np.asarray, np.ndarray.tolist], ids=["array", "nested_list"]
+)
+def test_image_hint_runs_on_an_array_and_a_nested_list(
+    offline_client, capture_send, convert
+):
+    """A nested list has no transpose, so the fix can't be a method call."""
+    img = np.random.RandomState(0).rand(32, 40, 3)
+    fixed = _follow_hint(offline_client.image, _NP_FIX, img=convert(img))
+    shown = decode(capture_send(lambda v: v.image(fixed)))[1]
+    np.testing.assert_array_equal(shown, np.uint8(img * 255.0))
+
+
+@pytest.mark.parametrize(
+    "convert",
+    [np.asarray, list, np.ndarray.tolist],
+    ids=["array", "list", "nested_list"],
+)
+def test_images_hint_runs_on_an_array_and_a_list(offline_client, capture_send, convert):
+    batch = np.random.RandomState(0).rand(2, 8, 9, 3)
+    fixed = _follow_hint(offline_client.images, _NP_FIX, batch=convert(batch))
+    shown = decode(capture_send(lambda v: v.images(fixed, padding=0)))[1]
+    np.testing.assert_array_equal(shown, np.uint8(np.hstack(batch) * 255.0))
+
+
+def test_hints_run_on_torch_tensors(offline_client, capture_send):
+    """permute keeps working where numpy can't read the tensor, as with grad."""
+    torch = pytest.importorskip("torch")
+    img = torch.rand(8, 9, 3, requires_grad=True)
+    fixed = _follow_hint(offline_client.image, _TORCH_FIX, img=img)
+    assert decode(capture_send(lambda v: v.image(fixed)))[1].shape == (8, 9, 3)
+    batch = torch.rand(2, 8, 9, 3, requires_grad=True)
+    fixed = _follow_hint(offline_client.images, _TORCH_FIX, batch=batch)
+    shown = decode(capture_send(lambda v: v.images(fixed, padding=0)))[1]
+    assert shown.shape == (8, 18, 3)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (5, 8, 8),
+        (2, 8, 3),
+        (2, 8, 4),
+        (2, 8, 1),
+        (0, 8, 3),
+        (32, 0, 3),
+        (8, 3, 3),
+        (16, 4, 1),
+        (6, 1, 3),
+        (64, 4, 4),
+    ],
+    ids=[
+        "no_channel_side",
+        "2ch_width3",
+        "2ch_width4",
+        "2ch_width1",
+        "empty",
+        "no_pixels",
+        "8ch_3_rows",
+        "16ch_4_rows",
+        "6ch_1_row",
+        "64ch_4_rows",
+    ],
+)
+def test_image_gives_no_channels_last_hint_when_it_does_not_fit(offline_client, shape):
+    """A CxHxW image with 2 channels and a width of 3 isn't channels last."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.image(np.zeros(shape, dtype=np.uint8))
+    assert "HxWxC" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "batch",
+    [np.zeros((8, 32, 32, 3)), [np.zeros((32, 32, 3))] * 2, np.zeros((2, 5, 5, 1))],
+    ids=["array", "list", "smallest"],
+)
+def test_images_points_a_channels_last_batch_to_transpose(offline_client, batch):
+    """One hint for both an array and a list, since a list has no transpose."""
+    with pytest.raises(ValueError) as error:
+        offline_client.images(batch)
+    message = str(error.value)
+    assert message.startswith("Shape {} looks like NxHxWxC".format(np.shape(batch)))
+    assert "number of image channels" not in message
+    assert "use np.transpose(batch, (0, 3, 1, 2))" in message
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(4, 2, 16, 3), (4, 2, 16, 4), (4, 2, 16, 1), (4, 16, 3, 3), (2, 8, 1, 4)],
+    ids=["w3", "w4", "w1", "16ch_3_rows", "8ch_1_row"],
+)
+def test_images_gives_no_channels_last_hint_for_a_2_channel_batch(
+    offline_client, shape
+):
+    """NxCxHxW with 2 channels, or many channels and a few rows, isn't NxHxWxC."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.images(np.zeros(shape))
+    assert "NxHxWxC" not in str(e.value) and "HxWxC" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "shape, padding",
+    [((1, 6, 8, 2), 1), ((1, 5, 8, 0), 2), ((1, 32, 4, 2), 1)],
+    ids=["6ch_width2", "no_pixels", "32ch_width2"],
+)
+def test_images_never_hints_about_its_own_grid(offline_client, shape, padding):
+    """The grid is images()'s own; a hint naming its shape would mislead."""
+    with pytest.raises(ValueError, match="Unsupported number of image channels") as e:
+        offline_client.images(np.zeros(shape), padding=padding)
+    assert "HxWxC" not in str(e.value)
+
+
+def test_images_still_tiles_a_chw_batch_whose_width_is_three(capture_send):
+    """(N, 3, H, 3) is a valid CHW batch, not channels last."""
+    sent = capture_send(lambda v: v.images(np.zeros((2, 3, 4, 3)), padding=0))
+    assert sent["payload"]["data"][0]["type"] == "image"
 
 
 # ---------------------------------------------------------------- images ----
