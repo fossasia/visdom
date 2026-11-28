@@ -36,6 +36,7 @@ import logging
 import warnings
 import time
 import errno
+import fractions
 from collections import OrderedDict
 from collections.abc import Mapping
 from io import BytesIO, StringIO
@@ -233,6 +234,21 @@ def isstr(s):
 
 def isnum(n):
     return isinstance(n, numbers.Number) and not isinstance(n, bool)
+
+
+def _video_fps(fps):
+    """Validate and normalize a video frame rate for PyAV."""
+    if isinstance(fps, bool) or not isinstance(fps, numbers.Real):
+        raise AssertionError("fps should be a number")
+    if not math.isfinite(fps) or fps <= 0:
+        raise AssertionError("fps must be greater than 0")
+
+    # PyAV accepts rational frame rates. Constructing the fraction from the
+    # displayed value preserves common capture rates such as 29.97 instead of
+    # exposing the binary representation of a float to the encoder.
+    if isinstance(fps, numbers.Integral):
+        return fractions.Fraction(int(fps))
+    return fractions.Fraction(str(fps))
 
 
 def _audio_sample_rate(rate, channels):
@@ -647,20 +663,7 @@ def _assert_opts(opts):
         ), "opacity should be a number between 0 and 1"
 
     if opts.get("fps") is not None:
-        fps_val = opts.get("fps")
-        if not isinstance(fps_val, (int, float, np.number)):
-            raise AssertionError("fps should be a number")
-        if isinstance(fps_val, bool):
-            raise AssertionError("fps should be a number")
-        # Check for NaN/inf before rounding (round() fails on these)
-        # Covers both Python float and NumPy floating types
-        if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
-            raise AssertionError("fps must be greater than 0")
-        if isinstance(fps_val, np.floating) and (np.isnan(fps_val) or np.isinf(fps_val)):
-            raise AssertionError("fps must be greater than 0")
-        fps_int = int(round(fps_val))
-        if fps_int <= 0:
-            raise AssertionError("fps must be greater than 0")
+        _video_fps(opts.get("fps"))
 
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
@@ -3348,29 +3351,15 @@ class Visdom(object):
         The function does not support any plot-specific `opts`. The following
         video `opts` are supported:
 
-        - `opts.fps`: FPS for the video (`number` > 0; default = 25). Float values
-          (e.g., OpenCV's 29.97) are rounded to the nearest integer.
+        - `opts.fps`: FPS for the video (`number` > 0; default = 25). Fractional
+          values (e.g., OpenCV's 29.97) are preserved during encoding.
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         - `opts.caption`: caption to display below the player (`string`; optional)
         """
-        opts = {} if opts is None else dict(opts)   # copy to avoid mutating caller's dict
-        # Ensure fps is a positive integer for PyAV (it only accepts int)
-        fps_val = opts.get("fps", 25)
-        if not isinstance(fps_val, (int, float, np.number)):
-            raise AssertionError("fps should be a number")
-        if isinstance(fps_val, bool):
-            raise AssertionError("fps should be a number")
-        # Check for NaN/inf before rounding (round() fails on these)
-        # Covers both Python float and NumPy floating types
-        if isinstance(fps_val, float) and (math.isnan(fps_val) or math.isinf(fps_val)):
-            raise AssertionError("fps must be greater than 0")
-        if isinstance(fps_val, np.floating) and (np.isnan(fps_val) or np.isinf(fps_val)):
-            raise AssertionError("fps must be greater than 0")
-        fps_int = int(round(fps_val))
-        if fps_int <= 0:
-            raise AssertionError("fps must be greater than 0")
-        opts["fps"] = fps_int
+        opts = {} if opts is None else dict(opts)
+        fps = _video_fps(opts.get("fps", 25))
+        opts["fps"] = int(fps) if fps.denominator == 1 else float(fps)
         opts["loop"] = opts.get("loop", False)
         opts["autoplay"] = opts.get("autoplay", False)
         _title2str(opts)
@@ -3397,7 +3386,7 @@ class Visdom(object):
                 raise ValueError(
                     "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
                 )
-            bytestr, mimetype = self._encode(tensor, opts["fps"])
+            bytestr, mimetype = self._encode(tensor, fps)
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
 
