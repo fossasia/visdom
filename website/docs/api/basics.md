@@ -14,7 +14,7 @@ description: Basic visualization functions — image, text, audio, video, SVG, a
 vis.image(img, win=None, env=None, opts=None)
 ```
 
-This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image. Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format. Passing images in that format will raise errors or lead to incorrect rendering.
+This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image, or a PIL image (e.g. `Image.open("photo.png")`). Most other Python image libraries (e.g. OpenCV, matplotlib) return arrays in `HxWxC` format. Passing arrays in that format will raise errors or lead to incorrect rendering. A 16-bit PIL image is shown at its full scale (65535 is white), and a 32-bit integer one (mode `I`) is scaled to fit if it has values outside `[0, 255]`.
 
 ```python
 import numpy as np
@@ -45,7 +45,7 @@ You can use alt on an image pane to view the x/y coordinates of the cursor. You 
 vis.images(tensor, nrow=8, padding=2, win=None, env=None, opts=None)
 ```
 
-This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
+This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` (arrays or PIL images) all of the same size. It makes a grid of images of size (B / nrow, nrow). If a list with PIL images mixes dtypes or channel counts, each image is converted on its own, as `vis.image` would show it; otherwise they share one scale.
 
 ```python
 # Display a grid of 16 random images
